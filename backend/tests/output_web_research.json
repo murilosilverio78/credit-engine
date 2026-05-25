@@ -1,0 +1,18 @@
+{
+  "score_reputacao": 75,
+  "nivel_risco": "baixo",
+  "noticias_negativas": false,
+  "processos_relevantes": false,
+  "reclamacoes_graves": false,
+  "problemas_governo": false,
+  "resumo": "Empresa ativa desde 1999 com contratos recentes e significativos com órgãos federais como INCRA e DPU. Possui situação cadastral regular sem identificação de sanções, penalidades ou problemas reputacionais nos últimos 2 anos.",
+  "alertas": [],
+  "fontes_consultadas": [
+    "Portal da Transparência",
+    "Econodata",
+    "Serasa Experian",
+    "Diário Oficial da União",
+    "Senado Federal",
+    "Reclame Aqui"
+  ]
+}

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api.v1.endpoints import operations, components, uploads, admin
+from app.api.v1.endpoints import operations, components, uploads, admin, overrides
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -23,6 +23,7 @@ app.include_router(operations.router, prefix="/api/v1/operations", tags=["operat
 app.include_router(components.router, prefix="/api/v1/components", tags=["components"])
 app.include_router(uploads.router,    prefix="/api/v1/uploads",    tags=["uploads"])
 app.include_router(admin.router,      prefix="/api/v1/admin",      tags=["admin"])
+app.include_router(overrides.router,  prefix="/api/v1/overrides",  tags=["overrides"])
 
 
 @app.get("/health")

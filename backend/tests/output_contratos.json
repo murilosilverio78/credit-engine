@@ -5,12 +5,12 @@
   "valor_total_ativo": 15415847.57,
   "valor_total_historico": 17800331.62,
   "orgaos_contratantes": [
-    "Ministério das Comunicações",
-    "Ministério do Desenvolvimento Agrário e Agricultura Familiar",
-    "Ministério da Saúde",
     "Ministério da Cultura",
+    "Ministério da Educação",
+    "Ministério das Comunicações",
     "Ministério do Meio Ambiente e Mudança do Clima",
-    "Ministério da Educação"
+    "Ministério do Desenvolvimento Agrário e Agricultura Familiar",
+    "Ministério da Saúde"
   ],
   "contratos_detalhe": [
     {
