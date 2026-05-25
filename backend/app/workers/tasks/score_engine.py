@@ -6,6 +6,7 @@ Consolida todos os snapshots anteriores e produz a decisão de crédito.
 Tipo: LLM | Fila: llm | Cache: nunca (sempre recalcula)
 """
 import json
+import re
 import anthropic
 from app.workers.celery_app import celery_app
 from app.workers.base import BaseComponentTask
@@ -60,24 +61,37 @@ Retorne APENAS um JSON válido:
 }"""
 
 
-def _fetch(cnpj: str, token: str = None) -> dict:
+def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
     from app.core.config import settings
-    from app.services.snapshot_service import SnapshotService
-    from app.services.operation_service import OperationService
-    import asyncio
+    from app.core.database import supabase
 
-    # Coleta todos os snapshots completados
-    snap_svc = SnapshotService()
-
-    # Busca operation_id pelo cnpj — será passado corretamente pelo orquestrador
-    # Por ora usa cnpj como proxy
+    # Busca todos os snapshots completados da operação
     snapshots = {}
+    if operation_id:
+        try:
+            result = supabase.table("component_snapshots")\
+                .select("component, parsed_result, status")\
+                .eq("operation_id", operation_id)\
+                .in_("status", ["completed"])\
+                .execute()
+
+            for snap in result.data:
+                if snap.get("parsed_result"):
+                    snapshots[snap["component"]] = snap["parsed_result"]
+
+            logger.info(
+                "score_engine.snapshots_loaded",
+                operation_id=operation_id,
+                components=list(snapshots.keys()),
+            )
+        except Exception as e:
+            logger.error("score_engine.snapshots_error", error=str(e))
 
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
     prompt = f"""Analise o perfil de crédito da empresa com CNPJ {cnpj}.
 
-DADOS COLETADOS:
+DADOS COLETADOS DOS COMPONENTES:
 {json.dumps(snapshots, ensure_ascii=False, indent=2)}
 
 Produza a análise completa conforme o scorecard 5D e retorne o JSON estruturado."""
@@ -91,7 +105,6 @@ Produza a análise completa conforme o scorecard 5D e retorne o JSON estruturado
 
     result_text = response.content[0].text
 
-    import re
     try:
         clean = re.sub(r"```json|```", "", result_text).strip()
         return json.loads(clean)

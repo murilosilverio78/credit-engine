@@ -63,7 +63,12 @@ class BaseComponentTask(Task):
 
         start = time.time()
         try:
-            result = handler(cnpj)
+            import inspect
+            sig = inspect.signature(handler)
+            if "operation_id" in sig.parameters:
+                result = handler(cnpj, operation_id=operation_id)
+            else:
+                result = handler(cnpj)
             duration_ms = int((time.time() - start) * 1000)
 
             snap_svc.save_result(

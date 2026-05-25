@@ -1,11 +1,13 @@
 """
 Componente: web_research
 Pesquisa de reputação da empresa via Claude Sonnet + WebSearch.
-Busca: notícias negativas, processos, reclamações, reputação no mercado.
+Busca razão social no snapshot brasil_api para contextualizar a pesquisa.
 
 Tipo: LLM | Fila: llm | Cache: 48h
 """
 import anthropic
+import json
+import re
 from app.workers.celery_app import celery_app
 from app.workers.base import BaseComponentTask
 import structlog
@@ -36,28 +38,45 @@ Retorne APENAS um JSON válido com esta estrutura:
 }"""
 
 
-def _fetch(cnpj: str, token: str = None) -> dict:
+def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
     from app.core.config import settings
+    from app.core.database import supabase
 
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-
-    # Busca dados da empresa para contextualizar a pesquisa
-    from app.services.snapshot_service import SnapshotService
-    # Tenta pegar razão social do snapshot brasil_api se disponível
+    # Busca razão social do snapshot brasil_api
     razao_social = ""
+    nome_fantasia = ""
     try:
-        snap_svc = SnapshotService()
-        # Será preenchido pelo orquestrador no futuro
+        if operation_id:
+            result = supabase.table("component_snapshots")\
+                .select("parsed_result")\
+                .eq("operation_id", operation_id)\
+                .eq("component", "brasil_api")\
+                .single()\
+                .execute()
+            if result.data and result.data.get("parsed_result"):
+                razao_social = result.data["parsed_result"].get("razao_social", "")
+                nome_fantasia = result.data["parsed_result"].get("nome_fantasia", "")
     except Exception:
         pass
 
-    prompt = f"""Pesquise a reputação da empresa com CNPJ {cnpj}{f' ({razao_social})' if razao_social else ''} no mercado brasileiro.
+    empresa_info = f"CNPJ {cnpj}"
+    if razao_social:
+        empresa_info += f" — {razao_social}"
+        if nome_fantasia and nome_fantasia != razao_social:
+            empresa_info += f" (nome fantasia: {nome_fantasia})"
+
+    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+
+    prompt = f"""Pesquise a reputação da empresa {empresa_info} no mercado brasileiro.
 
 Foque especialmente em:
-- Fornecimento de serviços para o governo federal
-- Histórico de problemas contratuais com órgãos públicos
-- Notícias dos últimos 2 anos
+- Histórico de fornecimento de serviços para o governo federal
+- Problemas contratuais com órgãos públicos nos últimos 2 anos
 - Processos no TCU, CGU ou Ministério Público
+- Notícias negativas recentes
+- Reclamações no Reclame Aqui
+
+IMPORTANTE: Pesquise especificamente esta empresa pelo nome e CNPJ. Não confunda com outras empresas de nomes similares.
 
 Retorne apenas o JSON estruturado conforme instruído."""
 
@@ -69,17 +88,13 @@ Retorne apenas o JSON estruturado conforme instruído."""
         messages=[{"role": "user", "content": prompt}],
     )
 
-    # Extrai o texto final da resposta
     result_text = ""
     for block in response.content:
         if block.type == "text":
             result_text = block.text
             break
 
-    # Parse do JSON retornado
-    import json, re
     try:
-        # Remove possíveis backticks
         clean = re.sub(r"```json|```", "", result_text).strip()
         return json.loads(clean)
     except Exception:
