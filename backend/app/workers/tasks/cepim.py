@@ -22,7 +22,8 @@ def _fetch(cnpj: str, token: str = None) -> dict:
     headers = {"chave-api-dados": api_token}
     registros = []
 
-    for pagina in range(1, 6):
+    pagina = 1
+    while True:
         with httpx.Client(timeout=20, verify=False) as client:
             resp = client.get(
                 f"{BASE_URL}/cepim",
@@ -37,6 +38,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         registros.extend(data)
         if len(data) < 10:
             break
+        pagina += 1
 
     return {
         "possui_sancao": len(registros) > 0,

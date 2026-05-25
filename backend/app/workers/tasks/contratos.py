@@ -54,8 +54,8 @@ def _fetch(cnpj: str, token: str = None) -> dict:
     headers = {"chave-api-dados": api_token}
     contratos = []
 
-    # Consulta até 5 páginas (50 contratos/página = 250 max), igual ao F1
-    for pagina in range(1, 6):
+    pagina = 1
+    while True:
         with httpx.Client(timeout=20, verify=False) as client:
             resp = client.get(
                 f"{BASE_URL}/contratos/cpf-cnpj",
@@ -70,6 +70,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         contratos.extend(data)
         if len(data) < 50:
             break
+        pagina += 1
 
     parsed    = [_parse_contrato(c) for c in contratos]
     ativos    = [c for c in parsed if c["ativo"]]

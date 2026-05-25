@@ -28,11 +28,12 @@ def _fetch(cnpj: str, token: str = None) -> dict:
 
     hoje = date.today()
     mes_fim    = _mes_ano(hoje)
-    mes_inicio = _mes_ano(hoje.replace(year=hoje.year - 2))
+    mes_inicio = _mes_ano(hoje.replace(year=hoje.year - 1))
 
     recursos = []
 
-    for pagina in range(1, 6):
+    pagina = 1
+    while True:
         # URL montada como string para evitar encoding do "/" pelo httpx
         url = (
             f"{BASE_URL}/despesas/recursos-recebidos"
@@ -51,13 +52,14 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         recursos.extend(data)
         if len(data) < 10:
             break
+        pagina += 1
 
     valor_total = sum(float(r.get("valor") or 0) for r in recursos)
     orgaos = list({r.get("nomeOrgao", "") for r in recursos if r.get("nomeOrgao")})
 
     por_ano = {}
     for r in recursos:
-        ano = (r.get("mes") or "")[-4:]
+        ano = str(r.get("anoMes") or 0)[:4]
         if ano:
             por_ano[ano] = por_ano.get(ano, 0) + float(r.get("valor") or 0)
 
@@ -70,7 +72,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         "valor_por_ano": por_ano,
         "recursos_detalhe": [
             {
-                "mes": r.get("mes"),
+                "mes": r.get("anoMes"),
                 "valor": r.get("valor"),
                 "orgao": r.get("nomeOrgao"),
                 "acao": r.get("nomeAcao"),

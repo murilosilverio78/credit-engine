@@ -23,7 +23,8 @@ def _fetch(cnpj: str, token: str = None) -> dict:
     headers = {"chave-api-dados": api_token}
     acordos = []
 
-    for pagina in range(1, 6):
+    pagina = 1
+    while True:
         with httpx.Client(timeout=15, verify=False) as client:
             resp = client.get(
                 f"{BASE_URL}/acordos-leniencia",
@@ -38,6 +39,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         acordos.extend(data)
         if len(data) < 10:
             break
+        pagina += 1
 
     return {
         "possui_acordo": len(acordos) > 0,

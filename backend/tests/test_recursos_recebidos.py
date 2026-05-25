@@ -33,7 +33,7 @@ def fetch(cnpj, token):
     headers = {"chave-api-dados": token}
     hoje = date.today()
     mes_fim    = _mes_ano(hoje)
-    mes_inicio = _mes_ano(hoje.replace(year=hoje.year - 2))
+    mes_inicio = _mes_ano(hoje.replace(year=hoje.year - 1))
 
     recursos = []
     for pagina in range(1, 6):
@@ -61,7 +61,7 @@ def fetch(cnpj, token):
 
     por_ano = {}
     for r in recursos:
-        ano = (r.get("mes") or "")[-4:]
+        ano = str(r.get("anoMes") or 0)[:4]
         if ano:
             por_ano[ano] = por_ano.get(ano, 0) + float(r.get("valor") or 0)
 
@@ -74,7 +74,7 @@ def fetch(cnpj, token):
         "valor_por_ano": por_ano,
         "recursos_detalhe": [
             {
-                "mes": r.get("mes"),
+                "mes": r.get("anoMes"),
                 "valor": r.get("valor"),
                 "orgao": r.get("nomeOrgao"),
                 "acao": r.get("nomeAcao"),
@@ -105,7 +105,7 @@ try:
     if r['recursos_detalhe']:
         print(f"\n📄 Últimos recebimentos (top 5):")
         for rec in r['recursos_detalhe'][:5]:
-            print(f"   • {rec['mes']} | R$ {float(rec['valor'] or 0):,.2f} | {rec['orgao']}")
+            print(f"   • {rec['mes'] or ''} | R$ {float(rec['valor'] or 0):,.2f} | {rec['orgao']}")
             print(f"     {(rec['acao'] or '')[:80]}")
 
     if r['raw_primeiro']:
