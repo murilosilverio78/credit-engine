@@ -1,0 +1,17 @@
+{
+  "cnpj": "03012610000101",
+  "razao_social": "MASF SERVICOS E FACILITIES LTDA",
+  "nome_fantasia": "MASF SERVICOS E FACILITIES",
+  "sancionado_ceis": false,
+  "sancionado_cnep": false,
+  "sancionado_cepim": false,
+  "sancionado_ceaf": false,
+  "possui_contratacao": true,
+  "favorecido_despesas": true,
+  "favorecido_transferencias": false,
+  "convenios": false,
+  "participa_licitacao": false,
+  "emitiu_nfe": false,
+  "beneficiado_renuncia_fiscal": false,
+  "possui_sancao": false
+}
