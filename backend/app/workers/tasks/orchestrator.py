@@ -16,35 +16,41 @@ def start_analysis(self, operation_id: str):
     """
     Inicia o pipeline completo para uma operação.
 
-    Fase 1 (paralela): dados estruturados
-    Fase 2 (sequencial, condicional): certidões
+    Fase 1 (paralela): Brasil API e pessoa jurídica
+    Fase 2 (paralela): contratos, recursos e sanções
     Fase 3: reputação web
     Fase 4: score e relatório final
     """
     from app.workers.tasks.brasil_api import run_brasil_api
-    from app.workers.tasks.portal_transparencia import run_portal_transparencia
-    from app.workers.tasks.cndt_tst import run_cndt_tst
-    from app.workers.tasks.cnd_federal import run_cnd_federal
-    from app.workers.tasks.fgts import run_fgts
+    from app.workers.tasks.pessoa_juridica import run_pessoa_juridica
+    from app.workers.tasks.contratos import run_contratos
+    from app.workers.tasks.recursos_recebidos import run_recursos_recebidos
+    from app.workers.tasks.acordos_leniencia import run_acordos_leniencia
+    from app.workers.tasks.ceis import run_ceis
+    from app.workers.tasks.cnep import run_cnep
+    from app.workers.tasks.cepim import run_cepim
     from app.workers.tasks.web_research import run_web_research
     from app.workers.tasks.score_engine import run_score_engine
 
     logger.info("pipeline.started", operation_id=operation_id)
 
-    # Fase 1: paralela (dados rápidos)
+    # Fase 1: paralela
     phase1 = group(
         run_brasil_api.si(operation_id),
-        run_portal_transparencia.si(operation_id),
+        run_pessoa_juridica.si(operation_id),
     )
 
-    # Fase 2: certidões (CNDT automática + manuais aguardam upload)
+    # Fase 2: paralela
     phase2 = group(
-        run_cndt_tst.si(operation_id),
-        run_cnd_federal.si(operation_id),   # vai para waiting_upload se não tiver doc
-        run_fgts.si(operation_id),          # idem
+        run_contratos.si(operation_id),
+        run_recursos_recebidos.si(operation_id),
+        run_acordos_leniencia.si(operation_id),
+        run_ceis.si(operation_id),
+        run_cnep.si(operation_id),
+        run_cepim.si(operation_id),
     )
 
-    # Fase 3 e 4: sequenciais após certidões
+    # Fase 3 e 4: sequenciais
     phase3_4 = chain(
         run_web_research.si(operation_id),
         run_score_engine.si(operation_id),
