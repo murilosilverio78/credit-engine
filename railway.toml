@@ -1,7 +1,6 @@
 [build]
 builder = "dockerfile"
-dockerfilePath = "infra/docker/Dockerfile.backend"
-buildContext = "backend"
+dockerfilePath = "backend/Dockerfile"
 
 [deploy]
 startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
