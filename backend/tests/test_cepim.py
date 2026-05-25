@@ -11,7 +11,7 @@ CNPJ  = os.getenv("TEST_CNPJ", "03012610000101")
 if not TOKEN:
     print("PORTAL_TRANSPARENCIA_TOKEN nao encontrado"); sys.exit(1)
 
-print(f"Consultando CEPIM - CNPJ: {CNPJ}")
+print("Consultando CEPIM - CNPJ: " + CNPJ)
 print("-" * 60)
 
 def fetch(cnpj, token):
@@ -20,30 +20,31 @@ def fetch(cnpj, token):
     for pagina in range(1, 6):
         with httpx.Client(timeout=20, verify=False) as client:
             resp = client.get(
-                f"https://api.portaldatransparencia.gov.br/api-de-dados/cepim",
+                "https://api.portaldatransparencia.gov.br/api-de-dados/cepim",
                 headers=headers,
                 params={"cnpjSancionado": cnpj, "pagina": pagina},
             )
             resp.raise_for_status()
             data = resp.json()
-        if not data: break
+        if not data:
+            break
         registros.extend(data)
-        if len(data) < 10: break
+        if len(data) < 10:
+            break
     return {"possui_sancao": len(registros) > 0, "total_registros": len(registros), "registros": registros}
 
 try:
     r = fetch(CNPJ, TOKEN)
-    print(f"Consulta concluida
-")
+    print("Consulta concluida")
     if r["possui_sancao"]:
-        print(f"ALERTA: {r['total_registros']} registro(s) CEPIM")
+        print("ALERTA: " + str(r["total_registros"]) + " registro(s) CEPIM")
         print(json.dumps(r["registros"][0], ensure_ascii=False, indent=2))
     else:
-        print(f"OK: Nenhuma sancao CEPIM encontrada")
+        print("OK: Nenhuma sancao CEPIM encontrada")
 
     out = Path(__file__).parent / "output_cepim.json"
     out.write_text(json.dumps(r, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"Resultado salvo em: {out}")
+    print("Resultado salvo em: " + str(out))
 except Exception as e:
-    print(f"Erro: {e}")
+    print("Erro: " + str(e))
     import traceback; traceback.print_exc(); sys.exit(1)
