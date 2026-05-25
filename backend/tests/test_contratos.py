@@ -1,10 +1,9 @@
 """
-Teste standalone do componente Portal da Transparência.
-Roda direto no terminal sem Celery, config ou banco.
+Teste standalone do componente contratos.
 
 Uso:
     cd backend
-    python tests/test_portal_transparencia.py
+    python tests/test_contratos.py
 """
 import sys, os, json
 from pathlib import Path
@@ -28,9 +27,8 @@ print("-" * 60)
 BASE_URL = "https://api.portaldatransparencia.gov.br/api-de-dados"
 
 def _is_ativo(c):
-    fim = c.get("dataFimVigencia") or ""
     try:
-        return date.fromisoformat(fim) >= date.today()
+        return date.fromisoformat(c.get("dataFimVigencia") or "") >= date.today()
     except Exception:
         return False
 
@@ -56,9 +54,8 @@ def _parse(c):
 def fetch(cnpj, token):
     headers = {"chave-api-dados": token}
     contratos = []
-    pagina = 1
-    with httpx.Client(timeout=20) as client:
-        while True:
+    for pagina in range(1, 6):
+        with httpx.Client(timeout=20, verify=False) as client:
             resp = client.get(
                 f"{BASE_URL}/contratos/cpf-cnpj",
                 headers=headers,
@@ -66,12 +63,11 @@ def fetch(cnpj, token):
             )
             resp.raise_for_status()
             data = resp.json()
-            if not data:
-                break
-            contratos.extend(data)
-            if len(data) < 50:
-                break
-            pagina += 1
+        if not data:
+            break
+        contratos.extend(data)
+        if len(data) < 50:
+            break
 
     parsed    = [_parse(c) for c in contratos]
     ativos    = [c for c in parsed if c["ativo"]]
@@ -84,7 +80,7 @@ def fetch(cnpj, token):
         "valor_total_ativo": sum(float(c["valor_inicial"] or 0) for c in ativos),
         "valor_total_historico": sum(float(c["valor_inicial"] or 0) for c in parsed),
         "orgaos_contratantes": list({c["orgao"] for c in parsed if c["orgao"]})[:10],
-        "contratos_detalhe": parsed[:20],
+        "contratos_detalhe": parsed,
     }
 
 try:
@@ -101,15 +97,14 @@ try:
     for o in r["orgaos_contratantes"]:
         print(f"   • {o}")
 
-    print(f"\n📄 Contratos (top 5):")
-    for c in r["contratos_detalhe"][:5]:
-        status = "✅ ATIVO" if c["ativo"] else "❌ ENCERRADO"
-        print(f"   {status} | {c['numero']} | R$ {c['valor_inicial']:,.2f}" if c["valor_inicial"] else f"   {status} | {c['numero']}")
-        print(f"   📅 {c['data_inicio']} → {c['data_fim']} | {c['orgao']}")
-        print(f"   {c['objeto'][:100]}")
+    print(f"\n📄 Contratos ativos:")
+    for c in [x for x in r["contratos_detalhe"] if x["ativo"]]:
+        print(f"   ✅ {c['numero']} | R$ {c['valor_inicial']:,.2f} | {c['data_inicio']} → {c['data_fim']}")
+        print(f"      {c['orgao']}")
+        print(f"      {c['objeto'][:100]}")
         print()
 
-    out = Path(__file__).parent / "output_portal_transparencia.json"
+    out = Path(__file__).parent / "output_contratos.json"
     out.write_text(json.dumps(r, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"💾 Resultado salvo em: {out}")
 

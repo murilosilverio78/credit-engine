@@ -1,9 +1,12 @@
 """
-Componente: Portal da Transparência
-Consulta contratos administrativos do fornecedor (cedente).
+Componente: contratos
+Consulta contratos administrativos do fornecedor no Portal da Transparência.
+Executado apenas se pessoa_juridica.possui_contratacao = True.
+
 Tipo: automatizado | Fila: fast | Cache: 12h
 """
 import httpx
+from datetime import date
 from app.workers.celery_app import celery_app
 from app.workers.base import BaseComponentTask
 import structlog
@@ -13,15 +16,12 @@ logger = structlog.get_logger()
 BASE_URL = "https://api.portaldatransparencia.gov.br/api-de-dados"
 
 
-def _is_ativo(contrato: dict) -> bool:
-    situacao = (contrato.get("situacaoContrato") or "").lower()
-    fim = contrato.get("dataFimVigencia") or ""
-    from datetime import date
+def _is_ativo(c: dict) -> bool:
+    fim = c.get("dataFimVigencia") or ""
     try:
-        data_fim = date.fromisoformat(fim)
-        return data_fim >= date.today()
+        return date.fromisoformat(fim) >= date.today()
     except Exception:
-        return "ativo" in situacao or "vigente" in situacao or situacao == "não se aplica"
+        return False
 
 
 def _get_orgao(c: dict) -> str:
@@ -53,10 +53,10 @@ def _fetch(cnpj: str, token: str = None) -> dict:
 
     headers = {"chave-api-dados": api_token}
     contratos = []
-    pagina = 1
 
-    with httpx.Client(timeout=20) as client:
-        while True:
+    # Consulta até 5 páginas (50 contratos/página = 250 max), igual ao F1
+    for pagina in range(1, 6):
+        with httpx.Client(timeout=20, verify=False) as client:
             resp = client.get(
                 f"{BASE_URL}/contratos/cpf-cnpj",
                 headers=headers,
@@ -64,30 +64,25 @@ def _fetch(cnpj: str, token: str = None) -> dict:
             )
             resp.raise_for_status()
             data = resp.json()
-            if not data:
-                break
-            contratos.extend(data)
-            if len(data) < 50:
-                break
-            pagina += 1
 
-    parsed = [_parse_contrato(c) for c in contratos]
-    ativos = [c for c in parsed if c["ativo"]]
+        if not data:
+            break
+        contratos.extend(data)
+        if len(data) < 50:
+            break
+
+    parsed    = [_parse_contrato(c) for c in contratos]
+    ativos    = [c for c in parsed if c["ativo"]]
     encerrados = [c for c in parsed if not c["ativo"]]
-
-    valor_ativo = sum(float(c["valor_inicial"] or 0) for c in ativos)
-    valor_historico = sum(float(c["valor_inicial"] or 0) for c in parsed)
-
-    orgaos = list({c["orgao"] for c in parsed if c["orgao"]})
 
     return {
         "total_contratos": len(parsed),
         "contratos_ativos": len(ativos),
         "contratos_encerrados": len(encerrados),
-        "valor_total_ativo": valor_ativo,
-        "valor_total_historico": valor_historico,
-        "orgaos_contratantes": orgaos[:10],
-        "contratos_detalhe": parsed[:20],
+        "valor_total_ativo": sum(float(c["valor_inicial"] or 0) for c in ativos),
+        "valor_total_historico": sum(float(c["valor_inicial"] or 0) for c in parsed),
+        "orgaos_contratantes": list({c["orgao"] for c in parsed if c["orgao"]})[:10],
+        "contratos_detalhe": parsed,
     }
 
 
@@ -95,9 +90,9 @@ def _fetch(cnpj: str, token: str = None) -> dict:
     bind=True,
     base=BaseComponentTask,
     queue="fast",
-    name="portal_transparencia.run",
+    name="contratos.run",
     max_retries=3,
     default_retry_delay=10,
 )
-def run_portal_transparencia(self, operation_id: str):
-    return self.execute(operation_id, component="portal_transparencia", handler=_fetch)
+def run_contratos(self, operation_id: str):
+    return self.execute(operation_id, component="contratos", handler=_fetch)
