@@ -1,0 +1,51 @@
+{
+  "cnpj": "03012610000101",
+  "razao_social": "MASF SERVICOS E FACILITIES LTDA",
+  "nome_fantasia": "MASF SERVICOS E FACILITIES",
+  "situacao_cadastral": "ATIVA",
+  "data_situacao": "2005-11-03",
+  "data_abertura": "1999-03-04",
+  "natureza_juridica": "Sociedade Empresária Limitada",
+  "porte": "EMPRESA DE PEQUENO PORTE",
+  "capital_social": 500000,
+  "atividade_principal": "Atividades de teleatendimento",
+  "regime_tributario": [
+    {
+      "ano": 2022,
+      "forma": "LUCRO PRESUMIDO"
+    },
+    {
+      "ano": 2023,
+      "forma": "LUCRO PRESUMIDO"
+    },
+    {
+      "ano": 2024,
+      "forma": "LUCRO PRESUMIDO"
+    }
+  ],
+  "atividades_secundarias": [
+    "Comércio varejista especializado de equipamentos e suprimentos de informática",
+    "Comércio varejista especializado de eletrodomésticos e equipamentos de áudio e vídeo",
+    "Desenvolvimento de programas de computador sob encomenda",
+    "Consultoria em tecnologia da informação",
+    "Suporte técnico, manutenção e outros serviços em tecnologia da informação",
+    "Locação de mão-de-obra temporária",
+    "Atividades de monitoramento de sistemas de segurança eletrônico",
+    "Limpeza em prédios e em domicílios",
+    "Imunização e controle de pragas urbanas",
+    "Serviços combinados de escritório e apoio administrativo"
+  ],
+  "qsa": [
+    {
+      "nome": "PAULO HENRIQUE TRINDADE MORAES",
+      "qualificacao": "Sócio-Administrador",
+      "data_entrada": "2023-10-06"
+    }
+  ],
+  "municipio": "BRASILIA",
+  "uf": "DF",
+  "email": null,
+  "telefone": "6199566740",
+  "opcao_simples": false,
+  "opcao_mei": false
+}

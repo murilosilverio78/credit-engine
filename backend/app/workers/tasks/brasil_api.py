@@ -1,9 +1,13 @@
 """
 Componente: BrasilAPI
-Consulta dados cadastrais da empresa (CNPJ, QSA, atividade, situação).
+Consulta dados cadastrais da empresa (CNPJ, QSA, atividade, situação, regime tributário).
 Tipo: automatizado | Fila: fast | Cache: 24h
+
+Nota: verify=False necessário por limitação de certificados SSL em alguns ambientes Windows.
+      Em produção (Railway/Linux) funciona normalmente com verify=True.
 """
 import httpx
+import os
 from app.workers.celery_app import celery_app
 from app.workers.base import BaseComponentTask
 import structlog
@@ -11,6 +15,7 @@ import structlog
 logger = structlog.get_logger()
 
 BRASIL_API_URL = "https://brasilapi.com.br/api/cnpj/v1/{cnpj}"
+SSL_VERIFY = os.getenv("SSL_VERIFY", "true").lower() != "false"
 
 
 @celery_app.task(
@@ -19,7 +24,7 @@ BRASIL_API_URL = "https://brasilapi.com.br/api/cnpj/v1/{cnpj}"
     queue="fast",
     name="brasil_api.run",
     max_retries=3,
-    default_retry_delay=5,
+    default_retry_delay=10,
 )
 def run_brasil_api(self, operation_id: str):
     """Consulta dados cadastrais via BrasilAPI."""
@@ -28,35 +33,41 @@ def run_brasil_api(self, operation_id: str):
 
 def _fetch(cnpj: str) -> dict:
     url = BRASIL_API_URL.format(cnpj=cnpj)
-    with httpx.Client(timeout=15) as client:
+    with httpx.Client(timeout=15, verify=SSL_VERIFY) as client:
         response = client.get(url)
         response.raise_for_status()
-        data = response.json()
+        d = response.json()
 
     return {
-        "cnpj": data.get("cnpj"),
-        "razao_social": data.get("razao_social"),
-        "nome_fantasia": data.get("nome_fantasia"),
-        "situacao_cadastral": data.get("descricao_situacao_cadastral"),
-        "data_situacao": data.get("data_situacao_cadastral"),
-        "data_abertura": data.get("data_inicio_atividade"),
-        "natureza_juridica": data.get("natureza_juridica"),
-        "porte": data.get("porte"),
-        "capital_social": data.get("capital_social"),
-        "atividade_principal": data.get("cnae_fiscal_descricao"),
+        "cnpj": d.get("cnpj"),
+        "razao_social": d.get("razao_social"),
+        "nome_fantasia": d.get("nome_fantasia"),
+        "situacao_cadastral": d.get("descricao_situacao_cadastral"),
+        "data_situacao": d.get("data_situacao_cadastral"),
+        "data_abertura": d.get("data_inicio_atividade"),
+        "natureza_juridica": d.get("natureza_juridica"),
+        "porte": d.get("porte"),
+        "capital_social": d.get("capital_social"),
+        "atividade_principal": d.get("cnae_fiscal_descricao"),
+        "regime_tributario": [
+            {"ano": r.get("ano"), "forma": r.get("forma_de_tributacao")}
+            for r in (d.get("regime_tributario") or [])
+        ],
         "atividades_secundarias": [
-            a.get("descricao") for a in (data.get("cnaes_secundarios") or [])
+            a.get("descricao") for a in (d.get("cnaes_secundarios") or [])
         ],
         "qsa": [
             {
                 "nome": s.get("nome_socio"),
                 "qualificacao": s.get("qualificacao_socio"),
-                "cpf_representante": s.get("cpf_representante_legal"),
+                "data_entrada": s.get("data_entrada_sociedade"),
             }
-            for s in (data.get("qsa") or [])
+            for s in (d.get("qsa") or [])
         ],
-        "municipio": data.get("municipio"),
-        "uf": data.get("uf"),
-        "email": data.get("email"),
-        "telefone": data.get("ddd_telefone_1"),
+        "municipio": d.get("municipio"),
+        "uf": d.get("uf"),
+        "email": d.get("email"),
+        "telefone": d.get("ddd_telefone_1"),
+        "opcao_simples": d.get("opcao_pelo_simples"),
+        "opcao_mei": d.get("opcao_pelo_mei"),
     }
