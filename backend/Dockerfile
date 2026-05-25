@@ -2,24 +2,18 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Dependências do sistema (Playwright precisa de libs)
 RUN apt-get update && apt-get install -y \
     gcc \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Dependências Python
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Playwright browsers
 RUN playwright install chromium --with-deps
 
-# Código
-COPY . .
+COPY backend/ .
 
-# Porta padrão Railway
 EXPOSE 8000
 
-# Start command (Railway usa $PORT)
 CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
