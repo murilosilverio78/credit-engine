@@ -12,7 +12,7 @@ class OverrideInput(BaseModel):
     previous_value: Any
     new_value: Any
     justificativa: str = Field(min_length=1)
-    requested_by: str = Field(min_length=1)
+    requested_by: Optional[str] = None
 
 
 class OverrideReviewInput(BaseModel):

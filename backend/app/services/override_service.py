@@ -93,7 +93,7 @@ class OverrideService:
         previous_value: Any,
         new_value: Any,
         justificativa: str,
-        requested_by: str,
+        requested_by: Optional[str] = None,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
     ) -> dict:
@@ -118,7 +118,6 @@ class OverrideService:
             "previous_value": normalized_previous_value,
             "new_value": normalized_value,
             "justificativa": justificativa,
-            "requested_by": requested_by,
             "alcada_required": alcada,
             "status": status,
             "score_no_momento": operation.get("score"),
@@ -126,6 +125,8 @@ class OverrideService:
             "ip_address": ip_address,
             "user_agent": user_agent,
         }
+        if requested_by:
+            data["requested_by"] = requested_by
         if alcada == "analyst":
             data["reviewed_at"] = now
             data["review_comment"] = "Auto-aprovado por alçada analyst."
