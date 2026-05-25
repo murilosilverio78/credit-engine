@@ -9,6 +9,7 @@ router = APIRouter()
 
 class OverrideInput(BaseModel):
     override_type: Literal["rating", "score", "taxa", "limite", "status_operacao"]
+    previous_value: Any
     new_value: Any
     justificativa: str = Field(min_length=1)
     requested_by: str = Field(min_length=1)
@@ -30,6 +31,7 @@ async def create_override(operation_id: str, payload: OverrideInput, request: Re
         return await svc.create(
             operation_id=operation_id,
             override_type=payload.override_type,
+            previous_value=payload.previous_value,
             new_value=payload.new_value,
             justificativa=payload.justificativa,
             requested_by=payload.requested_by,

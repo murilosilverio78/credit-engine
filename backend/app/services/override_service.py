@@ -90,6 +90,7 @@ class OverrideService:
         self,
         operation_id: str,
         override_type: str,
+        previous_value: Any,
         new_value: Any,
         justificativa: str,
         requested_by: str,
@@ -100,9 +101,9 @@ class OverrideService:
         if not operation:
             raise LookupError("Operação não encontrada")
 
+        normalized_previous_value = self._normalize_value(override_type, previous_value)
         normalized_value = self._normalize_value(override_type, new_value)
-        previous_value = operation.get(self.FIELD_MAP[override_type])
-        alcada = self._required_alcada(override_type, previous_value, normalized_value)
+        alcada = self._required_alcada(override_type, normalized_previous_value, normalized_value)
         status = "approved" if alcada == "analyst" else "pending"
         now = datetime.now(timezone.utc).isoformat()
 
@@ -114,7 +115,7 @@ class OverrideService:
         data = {
             "operation_id": operation_id,
             "override_type": override_type,
-            "previous_value": previous_value,
+            "previous_value": normalized_previous_value,
             "new_value": normalized_value,
             "justificativa": justificativa,
             "requested_by": requested_by,
@@ -139,7 +140,7 @@ class OverrideService:
             actor_type="analyst",
             ip_address=ip_address,
             override_reason=justificativa,
-            previous_value={override_type: previous_value},
+            previous_value={override_type: normalized_previous_value},
             new_value={override_type: normalized_value},
             payload={
                 "event": "override_requested",
