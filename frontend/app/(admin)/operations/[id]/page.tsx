@@ -186,7 +186,8 @@ function Topbar({
 }: {
   operation: OperationDetails;
 }) {
-  const processing = operation.status === "processing";
+  const processing =
+    operation.status === "pending" || operation.status === "processing";
 
   return (
     <header className="flex items-center gap-2 border-b-[0.5px] border-border bg-background px-5 py-3">
@@ -660,8 +661,15 @@ export default function OperationDetailPage() {
   const operationQuery = useQuery({
     queryFn: () => getOperation(operationId),
     queryKey: ["operations", operationId],
-    refetchInterval: (query) =>
-      query.state.data?.status === "processing" ? 5_000 : false,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+
+      if (status === "completed" || status === "failed") {
+        return false;
+      }
+
+      return 5_000;
+    },
     refetchIntervalInBackground: true,
     retry: (failureCount, error) =>
       !(error instanceof ApiError && error.status === 404) && failureCount < 2,
@@ -681,7 +689,10 @@ export default function OperationDetailPage() {
   );
 
   useEffect(() => {
-    if (operation?.status !== "processing") {
+    if (
+      operation?.status !== "pending" &&
+      operation?.status !== "processing"
+    ) {
       return;
     }
 
@@ -720,7 +731,8 @@ export default function OperationDetailPage() {
     );
   }
 
-  const processing = operation.status === "processing";
+  const processing =
+    operation.status === "pending" || operation.status === "processing";
   const canOverride =
     operation.status === "completed" || operation.status === "failed";
 
