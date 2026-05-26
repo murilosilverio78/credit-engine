@@ -3,12 +3,49 @@ Orchestrator: controla o pipeline completo de análise de crédito.
 Cada componente é uma task Celery independente.
 O orquestrador sequencia, detecta pausas (uploads pendentes) e retoma.
 """
+from datetime import datetime, timezone
+
 from celery import chain, group, chord
 from app.workers.celery_app import celery_app
-from app.core.config import settings
 import structlog
 
 logger = structlog.get_logger()
+
+
+@celery_app.task(queue="orchestrator", name="orchestrator.complete_analysis")
+def complete_analysis(_results: list[dict], operation_id: str):
+    """Finaliza a operação com a saída já persistida pelo score engine."""
+    from app.core.database import supabase
+
+    result = supabase.table("component_snapshots")\
+        .select("parsed_result")\
+        .eq("operation_id", operation_id)\
+        .eq("component", "score_engine")\
+        .single()\
+        .execute()
+
+    score_result = (result.data or {}).get("parsed_result") or {}
+    data = {
+        "status": "completed",
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "score": score_result.get("score"),
+        "rating": score_result.get("rating"),
+        "taxa_sugerida": score_result.get("taxa_sugerida_am"),
+    }
+
+    supabase.table("operations")\
+        .update(data)\
+        .eq("id", operation_id)\
+        .execute()
+
+    logger.info(
+        "pipeline.completed",
+        operation_id=operation_id,
+        score=data["score"],
+        rating=data["rating"],
+    )
+
+    return {"operation_id": operation_id, "status": "completed"}
 
 
 @celery_app.task(bind=True, queue="orchestrator", name="orchestrator.start_analysis")
@@ -50,10 +87,13 @@ def start_analysis(self, operation_id: str):
         run_cepim.si(operation_id),
     )
 
-    # Fase 3 e 4: sequenciais
+    # Fase 3 e 4: pesquisa sequencial, seguida do score e callback terminal.
     phase3_4 = chain(
         run_web_research.si(operation_id),
-        run_score_engine.si(operation_id),
+        chord(
+            group(run_score_engine.si(operation_id)),
+            complete_analysis.s(operation_id),
+        ),
     )
 
     # Pipeline completo
@@ -78,7 +118,10 @@ def resume_after_upload(self, operation_id: str):
     # (a verificação real acontece dentro do run_score_engine)
     pipeline = chain(
         run_web_research.si(operation_id),
-        run_score_engine.si(operation_id),
+        chord(
+            group(run_score_engine.si(operation_id)),
+            complete_analysis.s(operation_id),
+        ),
     )
     pipeline.apply_async()
 
