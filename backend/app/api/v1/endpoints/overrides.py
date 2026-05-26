@@ -16,7 +16,7 @@ class OverrideInput(BaseModel):
 
 
 class OverrideReviewInput(BaseModel):
-    status: Literal["approved", "rejected"]
+    decision: Literal["approved", "rejected"]
     reviewed_by: str = Field(min_length=1)
     review_comment: Optional[str] = None
 
@@ -59,7 +59,7 @@ async def review_override(
         return await svc.review(
             operation_id=operation_id,
             override_id=override_id,
-            status=payload.status,
+            decision=payload.decision,
             reviewed_by=payload.reviewed_by,
             review_comment=payload.review_comment,
             ip_address=request.client.host if request.client else None,

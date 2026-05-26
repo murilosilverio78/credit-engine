@@ -161,13 +161,13 @@ class OverrideService:
         self,
         operation_id: str,
         override_id: str,
-        status: str,
+        decision: str,
         reviewed_by: str,
         review_comment: Optional[str] = None,
         ip_address: Optional[str] = None,
     ) -> dict:
-        if status not in {"approved", "rejected"}:
-            raise ValueError("Status da revisão deve ser approved ou rejected")
+        if decision not in {"approved", "rejected"}:
+            raise ValueError("Decisão da revisão deve ser approved ou rejected")
 
         try:
             result = supabase.table("credit_overrides")\
@@ -188,7 +188,7 @@ class OverrideService:
             raise ValueError("O revisor deve ser diferente do solicitante")
 
         updated = {
-            "status": status,
+            "status": decision,
             "reviewed_by": reviewed_by,
             "reviewed_at": datetime.now(timezone.utc).isoformat(),
             "review_comment": review_comment,
@@ -199,7 +199,7 @@ class OverrideService:
             .eq("operation_id", operation_id)\
             .execute()
 
-        if status == "approved":
+        if decision == "approved":
             self._apply_override(
                 operation_id,
                 override["override_type"],
@@ -218,7 +218,7 @@ class OverrideService:
             payload={
                 "event": "override_reviewed",
                 "override_id": override_id,
-                "status": status,
+                "status": decision,
                 "review_comment": review_comment,
             },
         )
