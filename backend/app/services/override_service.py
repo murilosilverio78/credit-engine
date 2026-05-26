@@ -9,6 +9,7 @@ from app.services.audit_service import AuditService
 
 
 audit = AuditService()
+SYSTEM_ACTOR_ID = "00000000-0000-0000-0000-000000000001"
 
 
 class OverrideService:
@@ -101,6 +102,7 @@ class OverrideService:
         if not operation:
             raise LookupError("Operação não encontrada")
 
+        requested_by = requested_by or SYSTEM_ACTOR_ID
         normalized_previous_value = self._normalize_value(override_type, previous_value)
         normalized_value = self._normalize_value(override_type, new_value)
         alcada = self._required_alcada(override_type, normalized_previous_value, normalized_value)
@@ -125,8 +127,7 @@ class OverrideService:
             "ip_address": ip_address,
             "user_agent": user_agent,
         }
-        if requested_by:
-            data["requested_by"] = requested_by
+        data["requested_by"] = requested_by
         if alcada == "analyst":
             data["reviewed_at"] = now
             data["review_comment"] = "Auto-aprovado por alçada analyst."
