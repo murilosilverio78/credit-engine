@@ -78,6 +78,12 @@ export function getPendingOverrides() {
   return request<Override[]>("/api/v1/overrides/pending");
 }
 
+export function getOperationOverrides(operationId: string) {
+  return request<Override[]>(
+    `/api/v1/overrides/operations/${operationId}/overrides`,
+  );
+}
+
 export function createOverride(operationId: string, payload: OverrideInput) {
   return request<Override>(
     `/api/v1/overrides/operations/${operationId}/override`,

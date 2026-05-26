@@ -14,7 +14,7 @@ export type OverrideType =
   | "limite"
   | "status_operacao";
 
-export type Alcada = "analyst" | "committee";
+export type Alcada = "analyst" | "manager" | "committee";
 
 export interface Operation {
   id: string;
@@ -26,6 +26,7 @@ export interface Operation {
   taxa_sugerida: number | null;
   source: string;
   created_at: string;
+  limite_aprovado?: number | null;
 }
 
 export interface Component {
@@ -75,7 +76,7 @@ export interface OverrideInput {
 export interface OverrideReviewInput {
   decision: "approved" | "rejected";
   reviewed_by: string;
-  review_comment?: string;
+  review_comment?: string | null;
 }
 
 export interface PaginatedOperations {
@@ -93,7 +94,17 @@ export interface OperationCreated {
 }
 
 export interface OperationDetails extends Operation {
-  components?: unknown[];
+  components?: ComponentSnapshot[];
+}
+
+export interface ComponentSnapshot {
+  component: string;
+  status: string;
+  score_contrib: number | null;
+  duration_ms: number | null;
+  error_message: string | null;
+  completed_at: string | null;
+  parsed_result: unknown;
 }
 
 export interface ComponentToggleResult {
