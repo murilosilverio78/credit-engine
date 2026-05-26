@@ -1,0 +1,162 @@
+
+<h2 class="sr-only">Tela 1 — histórico de operações: layout com sidebar de navegação e tabela paginada de operações de crédito.</h2>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.shell{display:flex;min-height:600px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;background:var(--color-background-secondary)}
+.sidebar{width:200px;min-width:200px;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column;padding:0}
+.sb-logo{padding:16px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.sb-logo-title{font-size:13px;font-weight:500;color:var(--color-text-primary)}
+.sb-logo-sub{font-size:10px;color:var(--color-text-secondary);margin-top:2px;font-family:var(--font-mono)}
+.sb-nav{padding:8px 0;flex:1}
+.sb-item{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:13px;color:var(--color-text-secondary);cursor:pointer;border-radius:0}
+.sb-item.active{background:var(--color-background-secondary);color:var(--color-text-primary);font-weight:500}
+.sb-item i{font-size:16px}
+.sb-badge{margin-left:auto;font-size:10px;background:var(--color-background-warning);color:var(--color-text-warning);padding:1px 6px;border-radius:8px;font-weight:500}
+.sb-footer{padding:12px 14px;border-top:0.5px solid var(--color-border-tertiary)}
+.sb-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-secondary)}
+.dot-ok{width:6px;height:6px;border-radius:50%;background:var(--color-background-success)}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.topbar{padding:14px 20px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;justify-content:space-between;background:var(--color-background-primary)}
+.page-title{font-size:15px;font-weight:500;color:var(--color-text-primary)}
+.page-sub{font-size:12px;color:var(--color-text-secondary);margin-top:1px}
+.btn-new{font-size:12px;display:flex;align-items:center;gap:6px;padding:7px 14px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-primary);color:var(--color-text-primary);cursor:pointer;font-family:var(--font-sans)}
+.content{padding:16px 20px;flex:1}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.mc{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px 12px}
+.mc-label{font-size:10px;color:var(--color-text-secondary);letter-spacing:.05em;margin-bottom:5px}
+.mc-val{font-size:20px;font-weight:500;color:var(--color-text-primary);font-family:var(--font-mono)}
+.mc-sub{font-size:10px;color:var(--color-text-secondary);margin-top:2px}
+.filters{display:flex;gap:8px;margin-bottom:12px}
+.filters input{font-size:12px;padding:6px 10px;height:32px;width:180px}
+.filters select{font-size:12px;height:32px}
+.tbl-wrap{border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+thead tr{background:var(--color-background-secondary)}
+th{padding:8px 10px;text-align:left;font-weight:500;font-size:11px;color:var(--color-text-secondary);border-bottom:0.5px solid var(--color-border-tertiary)}
+td{padding:8px 10px;border-bottom:0.5px solid var(--color-border-tertiary);color:var(--color-text-primary);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--color-background-secondary)}
+.mono{font-family:var(--font-mono);font-size:11px}
+.badge{display:inline-block;font-size:10px;font-weight:500;padding:2px 8px;border-radius:4px}
+.r-a{background:#EAF3DE;color:#27500A}
+.r-b{background:#E6F1FB;color:#0C447C}
+.r-c{background:#FAEEDA;color:#633806}
+.r-d{background:#FAECE7;color:#712B13}
+.r-e{background:#FCEBEB;color:#791F1F}
+.s-pending{background:var(--color-background-secondary);color:var(--color-text-secondary)}
+.s-processing{background:var(--color-background-info);color:var(--color-text-info)}
+.s-completed{background:var(--color-background-success);color:var(--color-text-success)}
+.s-failed{background:var(--color-background-danger);color:var(--color-text-danger)}
+.s-manual{background:var(--color-background-warning);color:var(--color-text-warning)}
+.pagination{display:flex;align-items:center;justify-content:space-between;margin-top:12px;font-size:12px;color:var(--color-text-secondary)}
+.pg-btns{display:flex;gap:6px}
+.pg-btn{padding:5px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-primary);font-size:11px;cursor:pointer;color:var(--color-text-primary);font-family:var(--font-sans)}
+</style>
+<div class="shell">
+  <div class="sidebar">
+    <div class="sb-logo">
+      <div class="sb-logo-title">Credit Engine</div>
+      <div class="sb-logo-sub">AntecipaGov</div>
+    </div>
+    <nav class="sb-nav">
+      <div class="sb-item active"><i class="ti ti-file-search" aria-hidden="true"></i>Operações</div>
+      <div class="sb-item"><i class="ti ti-plus" aria-hidden="true"></i>Nova análise</div>
+      <div class="sb-item"><i class="ti ti-alert-triangle" aria-hidden="true"></i>Overrides<span class="sb-badge">1</span></div>
+      <div class="sb-item"><i class="ti ti-adjustments-horizontal" aria-hidden="true"></i>Componentes</div>
+    </nav>
+    <div class="sb-footer">
+      <div class="sb-status"><span class="dot-ok"></span>API online</div>
+    </div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title">Operações</div>
+        <div class="page-sub">Histórico de análises de crédito</div>
+      </div>
+      <button class="btn-new"><i class="ti ti-plus" style="font-size:14px" aria-hidden="true"></i>Nova análise</button>
+    </div>
+    <div class="content">
+      <div class="metrics">
+        <div class="mc"><div class="mc-label">Total</div><div class="mc-val">10</div><div class="mc-sub">operações</div></div>
+        <div class="mc"><div class="mc-label">Concluídas</div><div class="mc-val">7</div><div class="mc-sub">com score</div></div>
+        <div class="mc"><div class="mc-label">Em análise</div><div class="mc-val">2</div><div class="mc-sub">processando</div></div>
+        <div class="mc"><div class="mc-label">Overrides</div><div class="mc-val">1</div><div class="mc-sub">pendente</div></div>
+      </div>
+      <div class="filters">
+        <input placeholder="Buscar por CNPJ..." />
+        <select><option>Todos os status</option><option>pending</option><option>processing</option><option>completed</option><option>failed</option></select>
+        <select><option>Todos os ratings</option><option>A</option><option>B</option><option>C</option><option>D</option><option>E</option></select>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:130px">CNPJ</th>
+              <th style="width:160px">Razão social</th>
+              <th style="width:55px">Rating</th>
+              <th style="width:55px">Score</th>
+              <th style="width:75px">Taxa sugerida</th>
+              <th style="width:90px">Status</th>
+              <th style="width:85px">Data</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="mono">03.012.610/0001-01</td>
+              <td style="font-size:11px">MASF Serviços e Facilities</td>
+              <td><span class="badge r-b">B</span></td>
+              <td class="mono">68</td>
+              <td class="mono">2,4% a.m.</td>
+              <td><span class="badge s-completed">completed</span></td>
+              <td class="mono" style="color:var(--color-text-secondary)">26/05 17:59</td>
+            </tr>
+            <tr>
+              <td class="mono">03.012.610/0001-01</td>
+              <td style="font-size:11px">MASF Serviços e Facilities</td>
+              <td><span class="badge r-e">E</span></td>
+              <td class="mono">—</td>
+              <td class="mono">—</td>
+              <td><span class="badge s-pending">pending</span></td>
+              <td class="mono" style="color:var(--color-text-secondary)">26/05 17:57</td>
+            </tr>
+            <tr>
+              <td class="mono">03.012.610/0001-01</td>
+              <td style="font-size:11px">MASF Serviços e Facilities</td>
+              <td><span class="badge r-c">C</span></td>
+              <td class="mono">61</td>
+              <td class="mono">3,1% a.m.</td>
+              <td><span class="badge s-completed">completed</span></td>
+              <td class="mono" style="color:var(--color-text-secondary)">25/05 14:20</td>
+            </tr>
+            <tr>
+              <td class="mono">03.012.610/0001-01</td>
+              <td style="font-size:11px">MASF Serviços e Facilities</td>
+              <td>—</td>
+              <td class="mono">—</td>
+              <td class="mono">—</td>
+              <td><span class="badge s-processing">processing</span></td>
+              <td class="mono" style="color:var(--color-text-secondary)">25/05 13:50</td>
+            </tr>
+            <tr>
+              <td class="mono">03.012.610/0001-01</td>
+              <td style="font-size:11px">MASF Serviços e Facilities</td>
+              <td><span class="badge r-b">B</span></td>
+              <td class="mono">69</td>
+              <td class="mono">2,3% a.m.</td>
+              <td><span class="badge s-completed">completed</span></td>
+              <td class="mono" style="color:var(--color-text-secondary)">24/05 10:05</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination">
+        <span>Mostrando 1–5 de 10 operações</span>
+        <div class="pg-btns">
+          <button class="pg-btn">← anterior</button>
+          <button class="pg-btn">próxima →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

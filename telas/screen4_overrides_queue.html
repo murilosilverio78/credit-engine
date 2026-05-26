@@ -1,0 +1,95 @@
+
+<h2 class="sr-only">Tela 4 — fila de overrides pendentes: cards com detalhes do override, alçada e ações de aprovar/rejeitar.</h2>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.shell{display:flex;min-height:560px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;background:var(--color-background-secondary)}
+.sidebar{width:200px;min-width:200px;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column}
+.sb-logo{padding:16px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.sb-logo-title{font-size:13px;font-weight:500;color:var(--color-text-primary)}
+.sb-logo-sub{font-size:10px;color:var(--color-text-secondary);margin-top:2px;font-family:var(--font-mono)}
+.sb-nav{padding:8px 0;flex:1}
+.sb-item{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:13px;color:var(--color-text-secondary)}
+.sb-item.active{background:var(--color-background-secondary);color:var(--color-text-primary);font-weight:500}
+.sb-item i{font-size:16px}
+.sb-badge{margin-left:auto;font-size:10px;background:var(--color-background-warning);color:var(--color-text-warning);padding:1px 6px;border-radius:8px;font-weight:500}
+.sb-footer{padding:12px 14px;border-top:0.5px solid var(--color-border-tertiary)}
+.sb-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-secondary)}
+.dot-ok{width:6px;height:6px;border-radius:50%;background:var(--color-background-success)}
+.main{flex:1;display:flex;flex-direction:column}
+.topbar{padding:14px 20px;border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary)}
+.page-title{font-size:15px;font-weight:500}
+.page-sub{font-size:12px;color:var(--color-text-secondary);margin-top:1px}
+.content{padding:16px 20px;flex:1}
+.ov-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 16px;margin-bottom:10px}
+.ov-card.committee{border-left:2px solid var(--color-border-warning);border-radius:0 var(--border-radius-lg) var(--border-radius-lg) 0}
+.ov-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
+.ov-cnpj{font-size:10px;color:var(--color-text-secondary);font-family:var(--font-mono);margin-bottom:2px}
+.ov-name{font-size:13px;font-weight:500;color:var(--color-text-primary)}
+.badge{display:inline-block;font-size:10px;font-weight:500;padding:2px 8px;border-radius:4px}
+.badge-committee{background:var(--color-background-warning);color:var(--color-text-warning)}
+.badge-type{background:var(--color-background-secondary);color:var(--color-text-secondary)}
+.ov-values{display:flex;align-items:center;gap:8px;background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:8px 12px;margin-bottom:10px;font-family:var(--font-mono);font-size:13px}
+.ov-prev{color:var(--color-text-secondary);text-decoration:line-through}
+.ov-arrow{color:var(--color-text-secondary);font-size:11px}
+.ov-new{color:var(--color-text-primary);font-weight:500}
+.ov-just{font-size:12px;color:var(--color-text-secondary);margin-bottom:12px;line-height:1.5}
+.ov-foot{display:flex;align-items:center;justify-content:space-between}
+.ov-meta{font-size:11px;color:var(--color-text-secondary)}
+.ov-actions{display:flex;align-items:center;gap:8px}
+.reviewer-input{font-size:12px;padding:5px 10px;height:30px;width:130px}
+.btn-approve{padding:5px 12px;border:0.5px solid var(--color-border-success);border-radius:var(--border-radius-md);font-size:11px;font-weight:500;cursor:pointer;background:var(--color-background-success);color:var(--color-text-success);font-family:var(--font-sans)}
+.btn-reject{padding:5px 12px;border:0.5px solid var(--color-border-danger);border-radius:var(--border-radius-md);font-size:11px;font-weight:500;cursor:pointer;background:var(--color-background-danger);color:var(--color-text-danger);font-family:var(--font-sans)}
+.link-op{font-size:11px;color:var(--color-text-info);display:flex;align-items:center;gap:3px}
+</style>
+<div class="shell">
+  <div class="sidebar">
+    <div class="sb-logo"><div class="sb-logo-title">Credit Engine</div><div class="sb-logo-sub">AntecipaGov</div></div>
+    <nav class="sb-nav">
+      <div class="sb-item"><i class="ti ti-file-search" aria-hidden="true"></i>Operações</div>
+      <div class="sb-item"><i class="ti ti-plus" aria-hidden="true"></i>Nova análise</div>
+      <div class="sb-item active"><i class="ti ti-alert-triangle" aria-hidden="true"></i>Overrides<span class="sb-badge">1</span></div>
+      <div class="sb-item"><i class="ti ti-adjustments-horizontal" aria-hidden="true"></i>Componentes</div>
+    </nav>
+    <div class="sb-footer"><div class="sb-status"><span class="dot-ok"></span>API online</div></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div class="page-title">Overrides pendentes</div>
+      <div class="page-sub">1 override aguardando revisão</div>
+    </div>
+    <div class="content">
+      <div class="ov-card committee">
+        <div class="ov-head">
+          <div>
+            <div class="ov-cnpj">03.012.610/0001-01 — operação 43e443cc</div>
+            <div class="ov-name">MASF Serviços e Facilities Ltda</div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span class="badge badge-type">rating</span>
+            <span class="badge badge-committee"><i class="ti ti-users" style="font-size:10px;vertical-align:-1px;margin-right:3px" aria-hidden="true"></i>comitê</span>
+          </div>
+        </div>
+        <div class="ov-values">
+          <span class="ov-prev">C</span>
+          <span class="ov-arrow">→</span>
+          <span class="ov-new">D</span>
+          <span style="font-size:10px;color:var(--color-text-secondary);margin-left:8px;font-family:var(--font-sans)">downgrade de rating</span>
+        </div>
+        <div class="ov-just">
+          <span style="font-weight:500;color:var(--color-text-primary)">Justificativa: </span>teste segregacao de funcoes
+        </div>
+        <div class="ov-foot">
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <div class="ov-meta">Solicitado em 26/05/2026 às 17:57</div>
+            <a class="link-op" href="#"><i class="ti ti-external-link" style="font-size:11px" aria-hidden="true"></i>ver operação</a>
+          </div>
+          <div class="ov-actions">
+            <input class="reviewer-input" placeholder="Seu nome..." />
+            <button class="btn-reject"><i class="ti ti-x" style="font-size:11px;vertical-align:-1px;margin-right:3px" aria-hidden="true"></i>Rejeitar</button>
+            <button class="btn-approve"><i class="ti ti-check" style="font-size:11px;vertical-align:-1px;margin-right:3px" aria-hidden="true"></i>Aprovar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

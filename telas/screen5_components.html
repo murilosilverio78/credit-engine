@@ -1,0 +1,99 @@
+
+<h2 class="sr-only">Tela 5 — componentes da esteira: tabela agrupada com toggle on/off, tipo e configurações de cada componente.</h2>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.shell{display:flex;min-height:660px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;background:var(--color-background-secondary)}
+.sidebar{width:200px;min-width:200px;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column}
+.sb-logo{padding:16px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.sb-logo-title{font-size:13px;font-weight:500;color:var(--color-text-primary)}
+.sb-logo-sub{font-size:10px;color:var(--color-text-secondary);margin-top:2px;font-family:var(--font-mono)}
+.sb-nav{padding:8px 0;flex:1}
+.sb-item{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:13px;color:var(--color-text-secondary)}
+.sb-item.active{background:var(--color-background-secondary);color:var(--color-text-primary);font-weight:500}
+.sb-item i{font-size:16px}
+.sb-badge{margin-left:auto;font-size:10px;background:var(--color-background-warning);color:var(--color-text-warning);padding:1px 6px;border-radius:8px;font-weight:500}
+.sb-footer{padding:12px 14px;border-top:0.5px solid var(--color-border-tertiary)}
+.sb-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-secondary)}
+.dot-ok{width:6px;height:6px;border-radius:50%;background:var(--color-background-success)}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.topbar{padding:14px 20px;border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary)}
+.page-title{font-size:15px;font-weight:500}
+.page-sub{font-size:12px;color:var(--color-text-secondary);margin-top:1px}
+.content{padding:16px 20px;flex:1}
+.group-header{font-size:10px;font-weight:500;letter-spacing:.07em;color:var(--color-text-secondary);padding:8px 0 6px;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:6px}
+.tbl-wrap{border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);overflow:hidden;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th{padding:7px 10px;font-size:10px;font-weight:500;color:var(--color-text-secondary);background:var(--color-background-secondary);text-align:left;border-bottom:0.5px solid var(--color-border-tertiary)}
+td{padding:7px 10px;font-size:12px;border-bottom:0.5px solid var(--color-border-tertiary);color:var(--color-text-primary);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.mono{font-family:var(--font-mono);font-size:11px}
+.desc{font-size:11px;color:var(--color-text-secondary)}
+.badge{display:inline-block;font-size:10px;font-weight:500;padding:2px 7px;border-radius:4px}
+.badge-auto{background:var(--color-background-success);color:var(--color-text-success)}
+.badge-manual{background:var(--color-background-warning);color:var(--color-text-warning)}
+.badge-roadmap{background:var(--color-background-secondary);color:var(--color-text-secondary)}
+.toggle{position:relative;display:inline-block;width:32px;height:18px}
+.toggle input{opacity:0;width:0;height:0}
+.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:var(--color-border-secondary);border-radius:18px;transition:.2s}
+.slider:before{position:absolute;content:"";height:12px;width:12px;left:3px;bottom:3px;background:white;border-radius:50%;transition:.2s}
+input:checked+.slider{background:var(--color-background-success)}
+input:checked+.slider:before{transform:translateX(14px)}
+.dim{opacity:.4}
+</style>
+<div class="shell">
+  <div class="sidebar">
+    <div class="sb-logo"><div class="sb-logo-title">Credit Engine</div><div class="sb-logo-sub">AntecipaGov</div></div>
+    <nav class="sb-nav">
+      <div class="sb-item"><i class="ti ti-file-search" aria-hidden="true"></i>Operações</div>
+      <div class="sb-item"><i class="ti ti-plus" aria-hidden="true"></i>Nova análise</div>
+      <div class="sb-item"><i class="ti ti-alert-triangle" aria-hidden="true"></i>Overrides<span class="sb-badge">1</span></div>
+      <div class="sb-item active"><i class="ti ti-adjustments-horizontal" aria-hidden="true"></i>Componentes</div>
+    </nav>
+    <div class="sb-footer"><div class="sb-status"><span class="dot-ok"></span>API online</div></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div class="page-title">Componentes da esteira</div>
+      <div class="page-sub">Habilite, desabilite e configure cada módulo</div>
+    </div>
+    <div class="content">
+      <div class="group-header">Dados cadastrais &amp; sanções</div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th style="width:130px">Componente</th><th>Descrição</th><th style="width:60px">Tipo</th><th style="width:55px">Timeout</th><th style="width:50px">Retry</th><th style="width:45px">Ativo</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">brasil_api</td><td class="desc">Dados cadastrais via BrasilAPI</td><td><span class="badge badge-auto">auto</span></td><td class="mono">15s</td><td class="mono">3</td><td><label class="toggle"><input type="checkbox" checked><span class="slider"></span></label></td></tr>
+            <tr><td class="mono">pessoa_juridica</td><td class="desc">Flags de sanção — Portal da Transparência</td><td><span class="badge badge-auto">auto</span></td><td class="mono">15s</td><td class="mono">3</td><td><label class="toggle"><input type="checkbox" checked><span class="slider"></span></label></td></tr>
+            <tr><td class="mono">ceis</td><td class="desc">Empresas inidôneas e suspensas</td><td><span class="badge badge-auto">auto</span></td><td class="mono">20s</td><td class="mono">3</td><td><label class="toggle"><input type="checkbox" checked><span class="slider"></span></label></td></tr>
+            <tr><td class="mono">cnep</td><td class="desc">Cadastro de empresas punidas</td><td><span class="badge badge-auto">auto</span></td><td class="mono">20s</td><td class="mono">3</td><td><label class="toggle"><input type="checkbox" checked><span class="slider"></span></label></td></tr>
+            <tr><td class="mono">contratos</td><td class="desc">Contratos administrativos ativos</td><td><span class="badge badge-auto">auto</span></td><td class="mono">20s</td><td class="mono">3</td><td><label class="toggle"><input type="checkbox" checked><span class="slider"></span></label></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="group-header">Certidões</div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th style="width:130px">Componente</th><th>Descrição</th><th style="width:60px">Tipo</th><th style="width:55px">Timeout</th><th style="width:50px">Retry</th><th style="width:45px">Ativo</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">cndt_tst</td><td class="desc">CNDT (TST) via 2captcha</td><td><span class="badge badge-auto">auto</span></td><td class="mono">60s</td><td class="mono">2</td><td><label class="toggle"><input type="checkbox" checked><span class="slider"></span></label></td></tr>
+            <tr><td class="mono">cnd_federal</td><td class="desc">CND Federal — hCaptcha bloqueado</td><td><span class="badge badge-manual">manual</span></td><td class="mono">—</td><td class="mono">—</td><td><label class="toggle"><input type="checkbox" checked><span class="slider"></span></label></td></tr>
+            <tr><td class="mono">fgts</td><td class="desc">FGTS — ShieldSquare bloqueado</td><td><span class="badge badge-manual">manual</span></td><td class="mono">—</td><td class="mono">—</td><td><label class="toggle"><input type="checkbox" checked><span class="slider"></span></label></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="group-header">Enriquecimento &amp; score</div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th style="width:130px">Componente</th><th>Descrição</th><th style="width:60px">Tipo</th><th style="width:55px">Timeout</th><th style="width:50px">Retry</th><th style="width:45px">Ativo</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">web_research</td><td class="desc">Reputação via Claude Sonnet + WebSearch</td><td><span class="badge badge-auto">auto</span></td><td class="mono">120s</td><td class="mono">1</td><td><label class="toggle"><input type="checkbox" checked><span class="slider"></span></label></td></tr>
+            <tr><td class="mono">score_engine</td><td class="desc">Score e relatório via Claude Opus</td><td><span class="badge badge-auto">auto</span></td><td class="mono">180s</td><td class="mono">1</td><td><label class="toggle"><input type="checkbox" checked><span class="slider"></span></label></td></tr>
+            <tr class="dim"><td class="mono">serasa_pj</td><td class="desc">Relatório Avançado PJ Serasa Experian</td><td><span class="badge badge-roadmap">roadmap</span></td><td class="mono">10s</td><td class="mono">3</td><td><label class="toggle"><input type="checkbox" disabled><span class="slider"></span></label></td></tr>
+            <tr class="dim"><td class="mono">boa_vista</td><td class="desc">Consulta Boa Vista SCPC</td><td><span class="badge badge-roadmap">roadmap</span></td><td class="mono">10s</td><td class="mono">3</td><td><label class="toggle"><input type="checkbox" disabled><span class="slider"></span></label></td></tr>
+            <tr class="dim"><td class="mono">serpro</td><td class="desc">SERPRO / Receita Federal</td><td><span class="badge badge-roadmap">roadmap</span></td><td class="mono">10s</td><td class="mono">3</td><td><label class="toggle"><input type="checkbox" disabled><span class="slider"></span></label></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

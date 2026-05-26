@@ -1,0 +1,115 @@
+
+<h2 class="sr-only">Tela 2 — nova análise: formulário para disparar análise de crédito por CNPJ com campos opcionais de valor, prazo e contrato.</h2>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.shell{display:flex;min-height:560px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;background:var(--color-background-secondary)}
+.sidebar{width:200px;min-width:200px;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column}
+.sb-logo{padding:16px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.sb-logo-title{font-size:13px;font-weight:500;color:var(--color-text-primary)}
+.sb-logo-sub{font-size:10px;color:var(--color-text-secondary);margin-top:2px;font-family:var(--font-mono)}
+.sb-nav{padding:8px 0;flex:1}
+.sb-item{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:13px;color:var(--color-text-secondary)}
+.sb-item.active{background:var(--color-background-secondary);color:var(--color-text-primary);font-weight:500}
+.sb-item i{font-size:16px}
+.sb-badge{margin-left:auto;font-size:10px;background:var(--color-background-warning);color:var(--color-text-warning);padding:1px 6px;border-radius:8px;font-weight:500}
+.sb-footer{padding:12px 14px;border-top:0.5px solid var(--color-border-tertiary)}
+.sb-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-secondary)}
+.dot-ok{width:6px;height:6px;border-radius:50%;background:var(--color-background-success)}
+.main{flex:1;display:flex;flex-direction:column}
+.topbar{padding:14px 20px;border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary)}
+.page-title{font-size:15px;font-weight:500;color:var(--color-text-primary)}
+.page-sub{font-size:12px;color:var(--color-text-secondary);margin-top:1px}
+.content{padding:20px;flex:1;display:flex;gap:20px}
+.form-col{flex:1}
+.info-col{width:220px}
+.card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:16px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;font-weight:500;color:var(--color-text-secondary);margin-bottom:5px}
+.field input{width:100%;font-size:13px}
+.field-hint{font-size:11px;color:var(--color-text-secondary);margin-top:4px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.divider{height:0.5px;background:var(--color-border-tertiary);margin:16px 0}
+.opt-label{font-size:10px;letter-spacing:.06em;color:var(--color-text-secondary);margin-bottom:12px}
+.btn-submit{width:100%;padding:10px;background:var(--color-background-primary);border:0.5px solid var(--color-border-primary);border-radius:var(--border-radius-md);font-size:13px;font-weight:500;cursor:pointer;color:var(--color-text-primary);font-family:var(--font-sans)}
+.info-section{margin-bottom:14px}
+.info-title{font-size:11px;font-weight:500;color:var(--color-text-secondary);margin-bottom:8px;letter-spacing:.05em}
+.comp-item{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-secondary);padding:4px 0;border-bottom:0.5px solid var(--color-border-tertiary)}
+.comp-item:last-child{border-bottom:none}
+.comp-dot{width:5px;height:5px;border-radius:50%}
+.dot-auto{background:var(--color-background-success)}
+.dot-manual{background:var(--color-background-warning)}
+.dot-roadmap{background:var(--color-border-secondary)}
+.leg-item{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-secondary);margin-bottom:4px}
+</style>
+<div class="shell">
+  <div class="sidebar">
+    <div class="sb-logo">
+      <div class="sb-logo-title">Credit Engine</div>
+      <div class="sb-logo-sub">AntecipaGov</div>
+    </div>
+    <nav class="sb-nav">
+      <div class="sb-item"><i class="ti ti-file-search" aria-hidden="true"></i>Operações</div>
+      <div class="sb-item active"><i class="ti ti-plus" aria-hidden="true"></i>Nova análise</div>
+      <div class="sb-item"><i class="ti ti-alert-triangle" aria-hidden="true"></i>Overrides<span class="sb-badge">1</span></div>
+      <div class="sb-item"><i class="ti ti-adjustments-horizontal" aria-hidden="true"></i>Componentes</div>
+    </nav>
+    <div class="sb-footer"><div class="sb-status"><span class="dot-ok"></span>API online</div></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div class="page-title">Nova análise</div>
+      <div class="page-sub">Dispare uma análise de crédito por CNPJ</div>
+    </div>
+    <div class="content">
+      <div class="form-col">
+        <div class="card">
+          <div class="field">
+            <label>CNPJ <span style="color:var(--color-text-danger)">*</span></label>
+            <input value="03.012.610/0001-01" style="font-family:var(--font-mono);font-size:14px" />
+            <div class="field-hint">MASF Serviços e Facilities Ltda — CNPJ validado</div>
+          </div>
+          <div class="divider"></div>
+          <div class="opt-label">Campos opcionais — operação específica</div>
+          <div class="row2">
+            <div class="field">
+              <label>Valor solicitado</label>
+              <input placeholder="R$ 0,00" />
+            </div>
+            <div class="field">
+              <label>Prazo (dias)</label>
+              <input placeholder="30" style="font-family:var(--font-mono)" />
+            </div>
+          </div>
+          <div class="field">
+            <label>Contrato ID</label>
+            <input placeholder="Ex: 00123/2024" style="font-family:var(--font-mono)" />
+            <div class="field-hint">ID do contrato administrativo no Portal da Transparência</div>
+          </div>
+          <div class="divider"></div>
+          <button class="btn-submit"><i class="ti ti-player-play" style="font-size:13px;vertical-align:-1px;margin-right:6px" aria-hidden="true"></i>Iniciar análise</button>
+        </div>
+      </div>
+      <div class="info-col">
+        <div class="card">
+          <div class="info-section">
+            <div class="info-title">Componentes ativos</div>
+            <div class="comp-item"><span class="comp-dot dot-auto"></span>BrasilAPI — cadastral</div>
+            <div class="comp-item"><span class="comp-dot dot-auto"></span>Portal Transparência</div>
+            <div class="comp-item"><span class="comp-dot dot-auto"></span>CEIS / CNEP / CEPIM</div>
+            <div class="comp-item"><span class="comp-dot dot-auto"></span>CNDT — TST</div>
+            <div class="comp-item"><span class="comp-dot dot-manual"></span>CND Federal — manual</div>
+            <div class="comp-item"><span class="comp-dot dot-manual"></span>FGTS — manual</div>
+            <div class="comp-item"><span class="comp-dot dot-auto"></span>Web research</div>
+            <div class="comp-item"><span class="comp-dot dot-auto"></span>Score engine</div>
+            <div class="comp-item"><span class="comp-dot dot-roadmap"></span>Serasa PJ — roadmap</div>
+          </div>
+          <div class="divider" style="margin:10px 0"></div>
+          <div class="info-title">Legenda</div>
+          <div class="leg-item"><span class="comp-dot dot-auto"></span>Automático</div>
+          <div class="leg-item"><span class="comp-dot dot-manual"></span>Upload manual</div>
+          <div class="leg-item"><span class="comp-dot dot-roadmap"></span>Roadmap</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

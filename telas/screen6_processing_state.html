@@ -1,0 +1,96 @@
+
+<h2 class="sr-only">Tela 6 — operação em processamento: detalhe de operação com pipeline de componentes em tempo real mostrando progresso e status de cada módulo.</h2>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.shell{display:flex;min-height:560px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;background:var(--color-background-secondary)}
+.sidebar{width:200px;min-width:200px;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column}
+.sb-logo{padding:16px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.sb-logo-title{font-size:13px;font-weight:500;color:var(--color-text-primary)}
+.sb-logo-sub{font-size:10px;color:var(--color-text-secondary);margin-top:2px;font-family:var(--font-mono)}
+.sb-nav{padding:8px 0;flex:1}
+.sb-item{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:13px;color:var(--color-text-secondary)}
+.sb-item.active{background:var(--color-background-secondary);color:var(--color-text-primary);font-weight:500}
+.sb-item i{font-size:16px}
+.sb-badge{margin-left:auto;font-size:10px;background:var(--color-background-warning);color:var(--color-text-warning);padding:1px 6px;border-radius:8px}
+.sb-footer{padding:12px 14px;border-top:0.5px solid var(--color-border-tertiary)}
+.sb-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-secondary)}
+.dot-ok{width:6px;height:6px;border-radius:50%;background:var(--color-background-success)}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.topbar{padding:12px 20px;border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);display:flex;align-items:center;gap:8px}
+.back-btn{font-size:12px;color:var(--color-text-secondary);display:flex;align-items:center;gap:4px;padding:4px 8px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);background:transparent;font-family:var(--font-sans)}
+.badge{display:inline-block;font-size:10px;font-weight:500;padding:2px 8px;border-radius:4px}
+.s-processing{background:var(--color-background-info);color:var(--color-text-info)}
+.content{padding:16px 20px;flex:1}
+.op-header{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
+.op-left{}
+.op-cnpj{font-size:10px;color:var(--color-text-secondary);font-family:var(--font-mono);margin-bottom:2px}
+.op-name{font-size:14px;font-weight:500;color:var(--color-text-primary)}
+.op-right{text-align:right}
+.processing-label{font-size:11px;color:var(--color-text-info);margin-bottom:4px}
+.elapsed{font-size:20px;font-weight:500;font-family:var(--font-mono);color:var(--color-text-primary)}
+.section-title{font-size:11px;font-weight:500;color:var(--color-text-secondary);letter-spacing:.06em;margin-bottom:8px}
+.pipeline-list{display:flex;flex-direction:column;gap:4px}
+.pc-row{display:flex;align-items:center;gap:10px;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:8px 12px}
+.pc-row.done{border-left:2px solid var(--color-border-success);border-radius:0 var(--border-radius-md) var(--border-radius-md) 0}
+.pc-row.running{border-left:2px solid var(--color-border-info);border-radius:0 var(--border-radius-md) var(--border-radius-md) 0}
+.pc-row.waiting{opacity:.5}
+.pc-name{font-size:12px;font-weight:500;color:var(--color-text-primary);width:150px;font-family:var(--font-mono)}
+.pc-desc{font-size:11px;color:var(--color-text-secondary);flex:1}
+.pc-time{font-size:11px;font-family:var(--font-mono);color:var(--color-text-secondary);width:50px;text-align:right}
+.pc-status{font-size:11px;width:80px;text-align:right}
+.ok{color:var(--color-text-success)}
+.running-txt{color:var(--color-text-info)}
+.waiting-txt{color:var(--color-text-secondary)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.pulse{animation:pulse 1.2s ease-in-out infinite}
+</style>
+<div class="shell">
+  <div class="sidebar">
+    <div class="sb-logo"><div class="sb-logo-title">Credit Engine</div><div class="sb-logo-sub">AntecipaGov</div></div>
+    <nav class="sb-nav">
+      <div class="sb-item active"><i class="ti ti-file-search" aria-hidden="true"></i>Operações</div>
+      <div class="sb-item"><i class="ti ti-plus" aria-hidden="true"></i>Nova análise</div>
+      <div class="sb-item"><i class="ti ti-alert-triangle" aria-hidden="true"></i>Overrides<span class="sb-badge">1</span></div>
+      <div class="sb-item"><i class="ti ti-adjustments-horizontal" aria-hidden="true"></i>Componentes</div>
+    </nav>
+    <div class="sb-footer"><div class="sb-status"><span class="dot-ok"></span>API online</div></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <button class="back-btn"><i class="ti ti-arrow-left" style="font-size:12px" aria-hidden="true"></i>voltar</button>
+      <span style="font-size:14px;font-weight:500;font-family:var(--font-mono);color:var(--color-text-primary)">a7f29c01-d31e…</span>
+      <span class="badge s-processing pulse">processing</span>
+    </div>
+    <div class="content">
+      <div class="op-header">
+        <div class="op-left">
+          <div class="op-cnpj">03.012.610/0001-01</div>
+          <div class="op-name">MASF Serviços e Facilities Ltda</div>
+          <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px">Score e rating disponíveis ao concluir</div>
+        </div>
+        <div class="op-right">
+          <div class="processing-label pulse">em análise</div>
+          <div class="elapsed" id="elapsed">00:24</div>
+          <div style="font-size:10px;color:var(--color-text-secondary);margin-top:2px">atualiza em <span id="countdown">5</span>s</div>
+        </div>
+      </div>
+      <div class="section-title">Pipeline — progresso em tempo real</div>
+      <div class="pipeline-list">
+        <div class="pc-row done"><span class="pc-name">brasil_api</span><span class="pc-desc">Dados cadastrais</span><span class="pc-time">0,8s</span><span class="pc-status ok"><i class="ti ti-check" style="font-size:11px" aria-hidden="true"></i> ok</span></div>
+        <div class="pc-row done"><span class="pc-name">pessoa_juridica</span><span class="pc-desc">Sanções e flags</span><span class="pc-time">1,2s</span><span class="pc-status ok"><i class="ti ti-check" style="font-size:11px" aria-hidden="true"></i> ok</span></div>
+        <div class="pc-row done"><span class="pc-name">ceis / cnep / cepim</span><span class="pc-desc">Registros de penalidade</span><span class="pc-time">1,8s</span><span class="pc-status ok"><i class="ti ti-check" style="font-size:11px" aria-hidden="true"></i> ok</span></div>
+        <div class="pc-row done"><span class="pc-name">contratos</span><span class="pc-desc">Contratos ativos</span><span class="pc-time">1,4s</span><span class="pc-status ok"><i class="ti ti-check" style="font-size:11px" aria-hidden="true"></i> ok</span></div>
+        <div class="pc-row done"><span class="pc-name">cndt_tst</span><span class="pc-desc">Certidão trabalhista</span><span class="pc-time">4,2s</span><span class="pc-status ok"><i class="ti ti-check" style="font-size:11px" aria-hidden="true"></i> ok</span></div>
+        <div class="pc-row running"><span class="pc-name">web_research</span><span class="pc-desc">Reputação via Claude Sonnet</span><span class="pc-time pulse">14s…</span><span class="pc-status running-txt pulse"><i class="ti ti-loader" style="font-size:11px" aria-hidden="true"></i> rodando</span></div>
+        <div class="pc-row waiting"><span class="pc-name">score_engine</span><span class="pc-desc">Score via Claude Opus</span><span class="pc-time">—</span><span class="pc-status waiting-txt">aguarda</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+let s=24;let c=5;
+const el=document.getElementById('elapsed');
+const cd=document.getElementById('countdown');
+setInterval(()=>{s++;const m=String(Math.floor(s/60)).padStart(2,'0');const sec=String(s%60).padStart(2,'0');if(el)el.textContent=m+':'+sec},1000);
+setInterval(()=>{c--;if(c<0)c=5;if(cd)cd.textContent=c},1000);
+</script>

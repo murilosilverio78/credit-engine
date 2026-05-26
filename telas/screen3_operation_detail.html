@@ -1,0 +1,117 @@
+
+<h2 class="sr-only">Tela 3 — detalhe da operação: header com rating e score, pipeline de componentes por status, e painel de override.</h2>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.shell{display:flex;min-height:700px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;background:var(--color-background-secondary)}
+.sidebar{width:200px;min-width:200px;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column}
+.sb-logo{padding:16px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.sb-logo-title{font-size:13px;font-weight:500;color:var(--color-text-primary)}
+.sb-logo-sub{font-size:10px;color:var(--color-text-secondary);margin-top:2px;font-family:var(--font-mono)}
+.sb-nav{padding:8px 0;flex:1}
+.sb-item{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:13px;color:var(--color-text-secondary)}
+.sb-item.active{background:var(--color-background-secondary);color:var(--color-text-primary);font-weight:500}
+.sb-item i{font-size:16px}
+.sb-badge{margin-left:auto;font-size:10px;background:var(--color-background-warning);color:var(--color-text-warning);padding:1px 6px;border-radius:8px;font-weight:500}
+.sb-footer{padding:12px 14px;border-top:0.5px solid var(--color-border-tertiary)}
+.sb-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-secondary)}
+.dot-ok{width:6px;height:6px;border-radius:50%;background:var(--color-background-success)}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.topbar{padding:12px 20px;border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);display:flex;align-items:center;gap:8px}
+.back-btn{font-size:12px;color:var(--color-text-secondary);display:flex;align-items:center;gap:4px;padding:4px 8px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);cursor:pointer;background:transparent;font-family:var(--font-sans)}
+.page-title{font-size:14px;font-weight:500;color:var(--color-text-primary);font-family:var(--font-mono)}
+.content{padding:16px 20px;flex:1}
+.op-header{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 16px;margin-bottom:14px}
+.op-header-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px}
+.op-cnpj{font-size:11px;color:var(--color-text-secondary);font-family:var(--font-mono);margin-bottom:2px}
+.op-name{font-size:14px;font-weight:500;color:var(--color-text-primary)}
+.badge{display:inline-block;font-size:11px;font-weight:500;padding:3px 10px;border-radius:4px}
+.r-b{background:#E6F1FB;color:#0C447C}
+.s-completed{background:var(--color-background-success);color:var(--color-text-success)}
+.op-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.om{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:8px 10px}
+.om-label{font-size:10px;color:var(--color-text-secondary);margin-bottom:4px}
+.om-val{font-size:18px;font-weight:500;font-family:var(--font-mono)}
+.section-title{font-size:11px;font-weight:500;color:var(--color-text-secondary);letter-spacing:.06em;margin-bottom:8px}
+.pipeline-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.pc{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:10px}
+.pc.ok{border-left:2px solid var(--color-border-success);border-radius:0 var(--border-radius-md) var(--border-radius-md) 0}
+.pc.fail{border-left:2px solid var(--color-border-danger);border-radius:0 var(--border-radius-md) var(--border-radius-md) 0}
+.pc.manual{border-left:2px solid var(--color-border-warning);border-radius:0 var(--border-radius-md) var(--border-radius-md) 0}
+.pc.roadmap{opacity:.5}
+.pc-name{font-size:11px;font-weight:500;color:var(--color-text-primary);margin-bottom:3px}
+.pc-status{font-size:10px;color:var(--color-text-secondary)}
+.pc-status.ok{color:var(--color-text-success)}
+.pc-status.fail{color:var(--color-text-danger)}
+.pc-status.manual{color:var(--color-text-warning)}
+.override-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 16px}
+.ov-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.field label{display:block;font-size:11px;font-weight:500;color:var(--color-text-secondary);margin-bottom:4px}
+.field input,.field select,.field textarea{width:100%;font-size:12px}
+.field textarea{height:56px;font-family:var(--font-sans);font-size:12px;resize:none}
+.ov-actions{display:flex;gap:8px;margin-top:12px}
+.btn-ov{padding:7px 14px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);font-size:12px;cursor:pointer;background:var(--color-background-primary);color:var(--color-text-primary);font-family:var(--font-sans)}
+</style>
+<div class="shell">
+  <div class="sidebar">
+    <div class="sb-logo"><div class="sb-logo-title">Credit Engine</div><div class="sb-logo-sub">AntecipaGov</div></div>
+    <nav class="sb-nav">
+      <div class="sb-item active"><i class="ti ti-file-search" aria-hidden="true"></i>Operações</div>
+      <div class="sb-item"><i class="ti ti-plus" aria-hidden="true"></i>Nova análise</div>
+      <div class="sb-item"><i class="ti ti-alert-triangle" aria-hidden="true"></i>Overrides<span class="sb-badge">1</span></div>
+      <div class="sb-item"><i class="ti ti-adjustments-horizontal" aria-hidden="true"></i>Componentes</div>
+    </nav>
+    <div class="sb-footer"><div class="sb-status"><span class="dot-ok"></span>API online</div></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <button class="back-btn"><i class="ti ti-arrow-left" style="font-size:12px" aria-hidden="true"></i>voltar</button>
+      <span class="page-title">683cec46-388d…</span>
+      <span class="badge s-completed" style="font-size:10px">completed</span>
+    </div>
+    <div class="content">
+      <div class="op-header">
+        <div class="op-header-top">
+          <div>
+            <div class="op-cnpj">03.012.610/0001-01</div>
+            <div class="op-name">MASF Serviços e Facilities Ltda</div>
+          </div>
+          <span class="badge r-b" style="font-size:13px;padding:5px 14px">B</span>
+        </div>
+        <div class="op-metrics">
+          <div class="om"><div class="om-label">Score</div><div class="om-val">68<span style="font-size:12px;font-weight:400;color:var(--color-text-secondary)">/100</span></div></div>
+          <div class="om"><div class="om-label">Taxa sugerida</div><div class="om-val" style="font-size:15px">2,4%<span style="font-size:11px;font-weight:400;color:var(--color-text-secondary)"> a.m.</span></div></div>
+          <div class="om"><div class="om-label">Fonte</div><div class="om-val" style="font-size:11px;font-weight:400;color:var(--color-text-secondary);font-family:var(--font-mono)">admin_ui</div></div>
+          <div class="om"><div class="om-label">Criada em</div><div class="om-val" style="font-size:12px;font-weight:400;color:var(--color-text-secondary)">26/05 17:59</div></div>
+        </div>
+      </div>
+      <div class="section-title">Pipeline de componentes</div>
+      <div class="pipeline-grid">
+        <div class="pc ok"><div class="pc-name">brasil_api</div><div class="pc-status ok"><i class="ti ti-check" style="font-size:11px" aria-hidden="true"></i> ok — 0,8s</div></div>
+        <div class="pc ok"><div class="pc-name">pessoa_juridica</div><div class="pc-status ok"><i class="ti ti-check" style="font-size:11px" aria-hidden="true"></i> ok — 1,2s</div></div>
+        <div class="pc ok"><div class="pc-name">ceis</div><div class="pc-status ok"><i class="ti ti-check" style="font-size:11px" aria-hidden="true"></i> ok — 0,5s</div></div>
+        <div class="pc ok"><div class="pc-name">cnep</div><div class="pc-status ok"><i class="ti ti-check" style="font-size:11px" aria-hidden="true"></i> ok — 0,6s</div></div>
+        <div class="pc ok"><div class="pc-name">contratos</div><div class="pc-status ok"><i class="ti ti-check" style="font-size:11px" aria-hidden="true"></i> ok — 1,4s</div></div>
+        <div class="pc ok"><div class="pc-name">cndt_tst</div><div class="pc-status ok"><i class="ti ti-check" style="font-size:11px" aria-hidden="true"></i> ok — 4,2s</div></div>
+        <div class="pc manual"><div class="pc-name">cnd_federal</div><div class="pc-status manual">upload manual</div></div>
+        <div class="pc manual"><div class="pc-name">fgts</div><div class="pc-status manual">upload manual</div></div>
+        <div class="pc ok"><div class="pc-name">web_research</div><div class="pc-status ok"><i class="ti ti-check" style="font-size:11px" aria-hidden="true"></i> ok — 18s</div></div>
+        <div class="pc ok"><div class="pc-name">score_engine</div><div class="pc-status ok"><i class="ti ti-check" style="font-size:11px" aria-hidden="true"></i> ok — 32s</div></div>
+        <div class="pc roadmap"><div class="pc-name">serasa_pj</div><div class="pc-status">roadmap</div></div>
+        <div class="pc roadmap"><div class="pc-name">boa_vista</div><div class="pc-status">roadmap</div></div>
+      </div>
+      <div class="section-title">Solicitar override</div>
+      <div class="override-card">
+        <div class="ov-row">
+          <div class="field"><label>Tipo</label><select><option>rating</option><option>score</option><option>taxa</option><option>limite</option><option>status_operacao</option></select></div>
+          <div class="field"><label>Valor anterior</label><input value="B" style="font-family:var(--font-mono)" /></div>
+        </div>
+        <div class="ov-row">
+          <div class="field"><label>Novo valor</label><input placeholder="Ex: A" style="font-family:var(--font-mono)" /></div>
+          <div class="field"><label>Solicitante</label><input placeholder="Nome do analista" /></div>
+        </div>
+        <div class="field"><label>Justificativa</label><textarea placeholder="Descreva o motivo do override (mínimo 10 caracteres)..."></textarea></div>
+        <div class="ov-actions"><button class="btn-ov"><i class="ti ti-alert-triangle" style="font-size:12px;vertical-align:-1px;margin-right:4px" aria-hidden="true"></i>Solicitar override</button></div>
+      </div>
+    </div>
+  </div>
+</div>
