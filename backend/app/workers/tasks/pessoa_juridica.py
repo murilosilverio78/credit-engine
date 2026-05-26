@@ -21,6 +21,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
 
     cnpj_limpo = cnpj.replace(".", "").replace("/", "").replace("-", "")
     headers = {"chave-api-dados": api_token}
+    sem_registro = False
 
     with httpx.Client(timeout=15, verify=False) as client:
         resp = client.get(
@@ -29,7 +30,11 @@ def _fetch(cnpj: str, token: str = None) -> dict:
             params={"cnpj": cnpj_limpo},
         )
         resp.raise_for_status()
-        d = resp.json()
+        if not resp.content or not resp.text.strip():
+            d = {}
+            sem_registro = True
+        else:
+            d = resp.json()
 
     flags = {
         "sancionado_ceis":            d.get("sancionadoCEIS", False),
@@ -45,7 +50,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         "beneficiado_renuncia_fiscal":d.get("beneficiadoRenunciaFiscal", False),
     }
 
-    return {
+    result = {
         "cnpj": cnpj_limpo,
         "razao_social": d.get("razaoSocial"),
         "nome_fantasia": d.get("nomeFantasia"),
@@ -57,6 +62,9 @@ def _fetch(cnpj: str, token: str = None) -> dict:
             flags["sancionado_ceaf"],
         ]),
     }
+    if sem_registro:
+        result["erro"] = "sem_registro"
+    return result
 
 
 @celery_app.task(

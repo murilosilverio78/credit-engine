@@ -63,7 +63,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
                 params={"cpfCnpj": cnpj, "pagina": pagina, "tamanhoPagina": 50},
             )
             resp.raise_for_status()
-            data = resp.json()
+            data = [] if not resp.content or not resp.text.strip() else resp.json()
 
         if not data:
             break

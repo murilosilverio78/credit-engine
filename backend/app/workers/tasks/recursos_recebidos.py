@@ -45,7 +45,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         with httpx.Client(timeout=20, verify=False) as client:
             resp = client.get(url, headers=headers)
             resp.raise_for_status()
-            data = resp.json()
+            data = [] if not resp.content or not resp.text.strip() else resp.json()
 
         if not data:
             break
