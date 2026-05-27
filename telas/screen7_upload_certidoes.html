@@ -1,0 +1,124 @@
+
+<h2 class="sr-only">Tela 7 — upload de certidões: painel de upload manual integrado à página de detalhe da operação em estado manual_review.</h2>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.shell{display:flex;min-height:580px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;background:var(--color-background-secondary)}
+.sidebar{width:200px;min-width:200px;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column}
+.sb-logo{padding:16px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.sb-logo-title{font-size:13px;font-weight:500;color:var(--color-text-primary)}
+.sb-logo-sub{font-size:10px;color:var(--color-text-secondary);margin-top:2px;font-family:var(--font-mono)}
+.sb-nav{padding:8px 0;flex:1}
+.sb-item{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:13px;color:var(--color-text-secondary)}
+.sb-item.active{background:var(--color-background-secondary);color:var(--color-text-primary);font-weight:500}
+.sb-item i{font-size:16px}
+.sb-footer{padding:12px 14px;border-top:0.5px solid var(--color-border-tertiary)}
+.sb-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-secondary)}
+.dot-ok{width:6px;height:6px;border-radius:50%;background:var(--color-background-success)}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.topbar{padding:12px 20px;border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);display:flex;align-items:center;gap:8px}
+.back-btn{font-size:12px;color:var(--color-text-secondary);display:flex;align-items:center;gap:4px;padding:4px 8px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);background:transparent;font-family:var(--font-sans)}
+.badge{display:inline-block;font-size:10px;font-weight:500;padding:2px 8px;border-radius:4px}
+.s-manual{background:var(--color-background-warning);color:var(--color-text-warning)}
+.content{padding:16px 20px;flex:1}
+.op-header{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
+.op-cnpj{font-size:10px;color:var(--color-text-secondary);font-family:var(--font-mono);margin-bottom:2px}
+.op-name{font-size:14px;font-weight:500;color:var(--color-text-primary)}
+.op-hint{font-size:11px;color:var(--color-text-warning);margin-top:4px;display:flex;align-items:center;gap:4px}
+.section-title{font-size:11px;font-weight:500;color:var(--color-text-secondary);letter-spacing:.06em;margin-bottom:10px}
+.upload-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 16px;margin-bottom:14px}
+.upload-items{display:flex;flex-direction:column;gap:10px}
+.upload-item{display:flex;align-items:center;gap:12px;padding:10px 12px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);background:var(--color-background-secondary)}
+.upload-item.done{border-left:2px solid var(--color-border-success);border-radius:0 var(--border-radius-md) var(--border-radius-md) 0;background:var(--color-background-primary)}
+.upload-item.pending{border-left:2px solid var(--color-border-warning);border-radius:0 var(--border-radius-md) var(--border-radius-md) 0}
+.ui-icon{width:32px;height:32px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--color-text-secondary);flex-shrink:0}
+.ui-icon.ok{background:var(--color-background-success);color:var(--color-text-success)}
+.ui-info{flex:1}
+.ui-name{font-size:13px;font-weight:500;color:var(--color-text-primary)}
+.ui-desc{font-size:11px;color:var(--color-text-secondary);margin-top:1px}
+.ui-file{font-size:10px;color:var(--color-text-success);margin-top:2px;font-family:var(--font-mono)}
+.ui-action{display:flex;align-items:center;gap:8px}
+.btn-upload{padding:5px 12px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);font-size:11px;cursor:pointer;background:var(--color-background-primary);color:var(--color-text-primary);font-family:var(--font-sans);display:flex;align-items:center;gap:4px}
+.btn-upload.done{border-color:var(--color-border-success);color:var(--color-text-success)}
+.progress-bar{height:3px;background:var(--color-background-secondary);border-radius:2px;margin-top:10px;overflow:hidden}
+.progress-fill{height:100%;background:var(--color-background-success);border-radius:2px;transition:width .3s}
+.resume-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 16px}
+.resume-hint{font-size:12px;color:var(--color-text-secondary);margin-bottom:10px;line-height:1.5}
+.btn-resume{padding:8px 16px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);font-size:12px;font-weight:500;cursor:pointer;background:var(--color-background-primary);color:var(--color-text-primary);font-family:var(--font-sans);display:flex;align-items:center;gap:6px;opacity:.4}
+.btn-resume.active{opacity:1;border-color:var(--color-border-success);color:var(--color-text-success)}
+</style>
+<div class="shell">
+  <div class="sidebar">
+    <div class="sb-logo"><div class="sb-logo-title">Credit Engine</div><div class="sb-logo-sub">AntecipaGov</div></div>
+    <nav class="sb-nav">
+      <div class="sb-item active"><i class="ti ti-file-search" aria-hidden="true"></i>Operações</div>
+      <div class="sb-item"><i class="ti ti-plus" aria-hidden="true"></i>Nova análise</div>
+      <div class="sb-item"><i class="ti ti-alert-triangle" aria-hidden="true"></i>Overrides</div>
+      <div class="sb-item"><i class="ti ti-adjustments-horizontal" aria-hidden="true"></i>Componentes</div>
+    </nav>
+    <div class="sb-footer"><div class="sb-status"><span class="dot-ok"></span>API online</div></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <button class="back-btn"><i class="ti ti-arrow-left" style="font-size:12px" aria-hidden="true"></i>voltar</button>
+      <span style="font-size:14px;font-weight:500;font-family:var(--font-mono);color:var(--color-text-primary)">a1b2c3d4-e5f6…</span>
+      <span class="badge s-manual">aguardando certidões</span>
+    </div>
+    <div class="content">
+      <div class="op-header">
+        <div>
+          <div class="op-cnpj">03.012.610/0001-01</div>
+          <div class="op-name">MASF Serviços e Facilities Ltda</div>
+          <div class="op-hint"><i class="ti ti-alert-triangle" style="font-size:11px" aria-hidden="true"></i>Pipeline pausado — faça upload das certidões para continuar</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:10px;color:var(--color-text-secondary);margin-bottom:4px">progresso</div>
+          <div style="font-size:18px;font-weight:500;font-family:var(--font-mono)">1<span style="font-size:12px;font-weight:400;color:var(--color-text-secondary)">/3</span></div>
+        </div>
+      </div>
+      <div class="progress-bar" style="margin-bottom:14px"><div class="progress-fill" style="width:33%"></div></div>
+      <div class="section-title">Certidões obrigatórias</div>
+      <div class="upload-card">
+        <div class="upload-items">
+          <div class="upload-item done">
+            <div class="ui-icon ok"><i class="ti ti-check" aria-hidden="true"></i></div>
+            <div class="ui-info">
+              <div class="ui-name">CNDT — Certidão Negativa de Débitos Trabalhistas</div>
+              <div class="ui-desc">Tribunal Superior do Trabalho</div>
+              <div class="ui-file">cndt_tst_03012610000101.pdf</div>
+            </div>
+            <div class="ui-action">
+              <button class="btn-upload done"><i class="ti ti-check" style="font-size:11px" aria-hidden="true"></i>enviado</button>
+            </div>
+          </div>
+          <div class="upload-item pending">
+            <div class="ui-icon"><i class="ti ti-file-upload" aria-hidden="true"></i></div>
+            <div class="ui-info">
+              <div class="ui-name">CND Federal — Certidão Negativa de Débitos</div>
+              <div class="ui-desc">Receita Federal + PGFN</div>
+              <div style="font-size:10px;color:var(--color-text-warning);margin-top:2px">aguardando upload</div>
+            </div>
+            <div class="ui-action">
+              <button class="btn-upload"><i class="ti ti-upload" style="font-size:11px" aria-hidden="true"></i>selecionar PDF</button>
+            </div>
+          </div>
+          <div class="upload-item pending">
+            <div class="ui-icon"><i class="ti ti-file-upload" aria-hidden="true"></i></div>
+            <div class="ui-info">
+              <div class="ui-name">CRF — Certificado de Regularidade do FGTS</div>
+              <div class="ui-desc">Caixa Econômica Federal</div>
+              <div style="font-size:10px;color:var(--color-text-warning);margin-top:2px">aguardando upload</div>
+            </div>
+            <div class="ui-action">
+              <button class="btn-upload"><i class="ti ti-upload" style="font-size:11px" aria-hidden="true"></i>selecionar PDF</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="section-title">Retomar pipeline</div>
+      <div class="resume-card">
+        <div class="resume-hint">Após enviar as 3 certidões, o pipeline retoma automaticamente com <span style="font-weight:500;color:var(--color-text-primary)">web_research → score_engine</span>. O resultado estará disponível em aproximadamente 2–3 minutos.</div>
+        <button class="btn-resume"><i class="ti ti-player-play" style="font-size:12px" aria-hidden="true"></i>Retomar análise</button>
+      </div>
+    </div>
+  </div>
+</div>
