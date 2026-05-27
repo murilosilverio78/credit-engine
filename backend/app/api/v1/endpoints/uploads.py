@@ -15,8 +15,45 @@ async def list_pending_uploads(operation_id: Optional[str] = None):
     """List pending tasks or all upload progress for one operation."""
     from app.services.upload_service import UploadService
 
-    svc = UploadService()
-    return await svc.list_pending(operation_id=operation_id)
+    return await UploadService().list_pending(operation_id=operation_id)
+
+
+@router.post("/operations/{operation_id}/resume")
+async def resume_operation(operation_id: str):
+    """Resume the pipeline only after every manual certificate is uploaded."""
+    from app.services.upload_service import UploadService
+    from app.workers.tasks.orchestrator import resume_after_upload
+
+    upload_svc = UploadService()
+    tasks = await upload_svc.list_pending(operation_id=operation_id)
+    if not tasks:
+        raise HTTPException(status_code=400, detail="Nenhuma certidão configurada")
+
+    pending = await upload_svc.incomplete_document_types(operation_id)
+    if pending:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Certidões pendentes: {pending}",
+        )
+
+    resume_after_upload.delay(operation_id)
+    return {"operation_id": operation_id, "status": "resume_requested"}
+
+
+@router.delete("/{token}")
+async def remove_upload(token: str):
+    """Reset one uploaded task so the certificate can be replaced."""
+    from app.services.upload_service import UploadService
+
+    upload_svc = UploadService()
+    task = await upload_svc.get_by_token(token)
+    if not task:
+        raise HTTPException(status_code=404, detail="Token invalido ou expirado")
+    if task["status"] != "completed":
+        raise HTTPException(status_code=409, detail="Upload ainda nao concluido")
+
+    await upload_svc.reset(task)
+    return {"operation_id": task["operation_id"], "status": "pending"}
 
 
 @router.post("/{token}")
@@ -25,26 +62,22 @@ async def receive_upload(
     file: UploadFile = File(...),
     document_type: str = Form(...),
 ):
-    """Receive one certificate and resume automatically after the last upload."""
+    """Receive one certificate and hold it until explicit pipeline resume."""
     from app.services.storage_service import StorageService
     from app.services.upload_service import UploadService
-    from app.workers.tasks.orchestrator import resume_after_upload
 
     upload_svc = UploadService()
     task = await upload_svc.get_by_token(token)
 
     if not task:
         raise HTTPException(status_code=404, detail="Token invalido ou expirado")
-
     if task["status"] != "pending":
         raise HTTPException(status_code=409, detail="Upload ja realizado")
-
     if document_type != task["document_type"]:
         raise HTTPException(
             status_code=400,
             detail="Tipo de documento nao corresponde ao token",
         )
-
     if file.content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
             status_code=400,
@@ -59,9 +92,8 @@ async def receive_upload(
         )
 
     storage_backend = "r2"
-    storage_svc = StorageService()
     try:
-        storage_key = await storage_svc.upload_document(
+        storage_key = await StorageService().upload_document(
             operation_id=task["operation_id"],
             document_type=task["document_type"],
             content=content,
@@ -89,13 +121,10 @@ async def receive_upload(
     )
 
     still_pending = await upload_svc.count_pending(task["operation_id"])
-    if still_pending == 0:
-        resume_after_upload.delay(task["operation_id"])
-
     return {
         "status": "uploaded",
         "operation_id": task["operation_id"],
-        "pipeline_resumed": still_pending == 0,
+        "pipeline_resumed": False,
         "uploads_remaining": still_pending,
         "storage_backend": storage_backend,
     }

@@ -141,3 +141,13 @@ export interface UploadResult {
   pipeline_resumed: boolean;
   uploads_remaining: number;
 }
+
+export interface UploadResetResult {
+  operation_id: string;
+  status: "pending";
+}
+
+export interface UploadResumeResult {
+  operation_id: string;
+  status: "resume_requested";
+}

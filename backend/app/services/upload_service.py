@@ -122,6 +122,35 @@ class UploadService:
         }).eq("id", task_id).execute()
         logger.info("upload_task.inline_content_stored", task_id=task_id)
 
+    async def reset(self, task: dict):
+        """Return an uploaded certificate to pending state for replacement."""
+        supabase.table("upload_tasks").update({
+            "status": "pending",
+            "completed_at": None,
+            "file_content": None,
+        }).eq("id", task["id"]).execute()
+        supabase.table("component_snapshots").update({
+            "status": "waiting_upload",
+            "completed_at": None,
+            "parsed_result": None,
+        }).eq("operation_id", task["operation_id"])\
+          .eq("component", task["document_type"])\
+          .execute()
+        logger.info(
+            "upload_task.reset",
+            operation_id=task["operation_id"],
+            task_id=task["id"],
+        )
+
+    async def incomplete_document_types(self, operation_id: str) -> list[str]:
+        """List document types that still block explicit pipeline resume."""
+        result = supabase.table("upload_tasks")\
+            .select("document_type,status")\
+            .eq("operation_id", operation_id)\
+            .neq("status", "completed")\
+            .execute()
+        return [task["document_type"] for task in result.data]
+
     async def count_pending(self, operation_id: str) -> int:
         """Count incomplete uploads required by an operation."""
         result = supabase.table("upload_tasks")\

@@ -11,6 +11,8 @@ import type {
   PaginatedOperations,
   PropostaInput,
   UploadDocumentType,
+  UploadResetResult,
+  UploadResumeResult,
   UploadResult,
   UploadTask,
 } from "@/lib/types";
@@ -135,6 +137,20 @@ export function uploadCertificate(
     method: "POST",
     body: formData,
   });
+}
+
+export function removeCertificateUpload(token: string) {
+  return request<UploadResetResult>(
+    `/api/v1/uploads/${encodeURIComponent(token)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function resumeAfterUploads(operationId: string) {
+  return request<UploadResumeResult>(
+    `/api/v1/uploads/operations/${encodeURIComponent(operationId)}/resume`,
+    { method: "POST" },
+  );
 }
 
 export async function getCompanyByCnpj(cnpj: string) {

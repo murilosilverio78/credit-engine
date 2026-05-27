@@ -10,6 +10,7 @@ import {
   FileUp,
   LoaderCircle,
   Play,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -24,6 +25,8 @@ import {
   getOperation,
   getOperationOverrides,
   getOperationUploads,
+  removeCertificateUpload,
+  resumeAfterUploads,
   uploadCertificate,
 } from "@/lib/api";
 import type {
@@ -361,6 +364,7 @@ function ManualReviewView({
 }) {
   const queryClient = useQueryClient();
   const [filenames, setFilenames] = useState<Record<string, string>>({});
+  const [resumeRequested, setResumeRequested] = useState(false);
   const uploadsQuery = useQuery({
     queryFn: () => getOperationUploads(operationId),
     queryKey: ["operations", operationId, "uploads"],
@@ -374,14 +378,31 @@ function ManualReviewView({
       file: File;
       task: UploadTask;
     }) => uploadCertificate(task.token, task.document_type, file),
-    onSuccess: async (result, { file, task }) => {
+    onSuccess: async (_, { file, task }) => {
       setFilenames((current) => ({ ...current, [task.id]: file.name }));
       await queryClient.invalidateQueries({
         queryKey: ["operations", operationId, "uploads"],
       });
-      if (result.pipeline_resumed) {
-        await onRefresh();
-      }
+    },
+  });
+  const removeMutation = useMutation({
+    mutationFn: (task: UploadTask) => removeCertificateUpload(task.token),
+    onSuccess: async (_, task) => {
+      setFilenames((current) => {
+        const next = { ...current };
+        delete next[task.id];
+        return next;
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["operations", operationId, "uploads"],
+      });
+    },
+  });
+  const resumeMutation = useMutation({
+    mutationFn: () => resumeAfterUploads(operationId),
+    onSuccess: async () => {
+      setResumeRequested(true);
+      await onRefresh();
     },
   });
   const uploads = uploadsQuery.data ?? [];
@@ -436,6 +457,9 @@ function ManualReviewView({
               const uploading =
                 uploadMutation.isPending &&
                 uploadMutation.variables?.task.id === task.id;
+              const removing =
+                removeMutation.isPending &&
+                removeMutation.variables?.id === task.id;
 
               return (
                 <div
@@ -489,10 +513,21 @@ function ManualReviewView({
                     </p>
                   </div>
                   {completed ? (
-                    <span className="flex h-7 items-center gap-1 rounded-md border border-emerald-200 px-3 text-[11px] text-emerald-700">
-                      <Check className="h-3 w-3" />
-                      enviado
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-7 items-center gap-1 rounded-md border border-emerald-200 px-3 text-[11px] text-emerald-700">
+                        <Check className="h-3 w-3" />
+                        enviado
+                      </span>
+                      <button
+                        className="flex h-7 items-center gap-1 rounded-md border border-red-200 px-3 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50"
+                        disabled={removing || resumeRequested}
+                        onClick={() => removeMutation.mutate(task)}
+                        type="button"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        {removing ? "removendo..." : "remover"}
+                      </button>
+                    </div>
                   ) : (
                     <label
                       className={cn(
@@ -531,6 +566,11 @@ function ManualReviewView({
             Nao foi possivel enviar o PDF. Verifique o arquivo e tente novamente.
           </p>
         ) : null}
+        {removeMutation.isError ? (
+          <p className="mt-3 text-xs text-red-700" role="alert">
+            Não foi possível remover o PDF. Tente novamente.
+          </p>
+        ) : null}
       </div>
 
       <h2 className="mb-2 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
@@ -538,7 +578,7 @@ function ManualReviewView({
       </h2>
       <div className="rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
         <p className="mb-3 text-xs leading-5 text-muted-foreground">
-          Após enviar todas as certidões, o pipeline retoma automaticamente com{" "}
+          Após conferir todas as certidões, clique em Retomar análise para continuar com{" "}
           <span className="font-medium text-foreground">
             web_research -&gt; score_engine
           </span>
@@ -548,15 +588,25 @@ function ManualReviewView({
           className={cn(
             "flex h-8 items-center gap-1.5 rounded-md border px-4 text-xs font-medium opacity-40",
             allCompleted &&
+              !resumeRequested &&
               "border-emerald-200 text-emerald-700 opacity-100 hover:bg-emerald-50",
           )}
-          disabled={!allCompleted}
-          onClick={() => void onRefresh()}
+          disabled={!allCompleted || resumeRequested || resumeMutation.isPending}
+          onClick={() => resumeMutation.mutate()}
           type="button"
         >
           <Play className="h-3 w-3" />
-          Retomar análise
+          {resumeMutation.isPending
+            ? "Retomando..."
+            : resumeRequested
+              ? "Análise retomada"
+              : "Retomar análise"}
         </button>
+        {resumeMutation.isError ? (
+          <p className="mt-3 text-xs text-red-700" role="alert">
+            Não foi possível retomar a análise. Verifique as certidões enviadas.
+          </p>
+        ) : null}
       </div>
     </section>
   );
