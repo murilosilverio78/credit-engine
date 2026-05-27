@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Check,
+  ExternalLink,
   FileUp,
   LoaderCircle,
   Play,
@@ -54,18 +55,21 @@ const overrideTypes: OverrideType[] = [
 
 const certificateDetails: Record<
   UploadDocumentType,
-  { description: string; label: string }
+  { description: string; href: string; label: string }
 > = {
   cndt_tst: {
     description: "Tribunal Superior do Trabalho",
+    href: "https://certidao.tst.jus.br/certidao/",
     label: "CNDT - Certidão Negativa de Débitos Trabalhistas",
   },
   cnd_federal: {
     description: "Receita Federal + PGFN",
+    href: "https://solucoes.receita.fazenda.gov.br/Servicos/certidaointernet/PJ/Emitir",
     label: "CND Federal - Certidão Negativa de Débitos",
   },
   fgts: {
     description: "Caixa Econômica Federal",
+    href: "https://consulta-crf.caixa.gov.br/consultacrf/pages/consultaEmpregador.jsf",
     label: "CRF FGTS - Certificado de Regularidade",
   },
 };
@@ -462,6 +466,15 @@ function ManualReviewView({
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
                       {details.description}
                     </p>
+                    <a
+                      className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-blue-700 no-underline hover:text-blue-800 focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      href={details.href}
+                      rel="noopener noreferrer"
+                      target="_blank"
+                    >
+                      emitir certidão
+                      <ExternalLink aria-hidden="true" className="h-3 w-3" />
+                    </a>
                     <p
                       className={cn(
                         "mt-0.5 text-[10px]",
