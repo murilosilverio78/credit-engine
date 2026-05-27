@@ -11,8 +11,32 @@ import structlog
 logger = structlog.get_logger()
 
 
+class R2UnavailableError(RuntimeError):
+    """Raised when R2 is not configured for document storage."""
+
+
+def _is_placeholder(value: str) -> bool:
+    normalized = value.lower()
+    return not value or any(marker in normalized for marker in ("seu-", "your-", "xxxx"))
+
+
+def is_r2_configured() -> bool:
+    return all(
+        not _is_placeholder(value)
+        for value in (
+            settings.R2_ACCOUNT_ID,
+            settings.R2_ACCESS_KEY_ID,
+            settings.R2_SECRET_ACCESS_KEY,
+            settings.R2_BUCKET_NAME,
+        )
+    )
+
+
 @lru_cache()
 def get_r2_client():
+    if not is_r2_configured():
+        raise R2UnavailableError("Cloudflare R2 is not configured")
+
     return boto3.client(
         "s3",
         endpoint_url=f"https://{settings.R2_ACCOUNT_ID}.r2.cloudflarestorage.com",

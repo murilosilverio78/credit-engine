@@ -1,8 +1,10 @@
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+import structlog
 
 router = APIRouter()
+logger = structlog.get_logger()
 
 ALLOWED_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png"}
 MAX_FILE_SIZE_MB = 10
@@ -56,14 +58,26 @@ async def receive_upload(
             detail=f"Arquivo excede {MAX_FILE_SIZE_MB}MB",
         )
 
+    storage_backend = "r2"
     storage_svc = StorageService()
-    storage_key = await storage_svc.upload_document(
-        operation_id=task["operation_id"],
-        document_type=task["document_type"],
-        content=content,
-        filename=file.filename,
-        mime_type=file.content_type,
-    )
+    try:
+        storage_key = await storage_svc.upload_document(
+            operation_id=task["operation_id"],
+            document_type=task["document_type"],
+            content=content,
+            filename=file.filename,
+            mime_type=file.content_type,
+        )
+    except Exception as exc:
+        storage_backend = "supabase_inline"
+        storage_key = f"upload_tasks/{task['id']}/file_content"
+        await upload_svc.store_inline_content(task["id"], content)
+        logger.warning(
+            "storage.inline_fallback",
+            operation_id=task["operation_id"],
+            task_id=task["id"],
+            error=str(exc),
+        )
 
     await upload_svc.complete(
         task_id=task["id"],
@@ -83,4 +97,5 @@ async def receive_upload(
         "operation_id": task["operation_id"],
         "pipeline_resumed": still_pending == 0,
         "uploads_remaining": still_pending,
+        "storage_backend": storage_backend,
     }

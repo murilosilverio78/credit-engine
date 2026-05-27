@@ -1,4 +1,5 @@
 """UploadService: manages human-in-the-loop upload tasks."""
+import base64
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -15,7 +16,10 @@ class UploadService:
     async def list_pending(self, operation_id: Optional[str] = None) -> list[dict]:
         """List the pending queue or full upload progress for one operation."""
         query = supabase.table("upload_tasks")\
-            .select("*, operations(cnpj, razao_social)")
+            .select(
+                "id,operation_id,document_type,token,status,notified_at,"
+                "completed_at,expires_at,created_at,operations(cnpj, razao_social)"
+            )
         if operation_id:
             query = query.eq("operation_id", operation_id)
         else:
@@ -109,6 +113,14 @@ class UploadService:
             payload={"document_type": document_type, "filename": filename},
         )
         logger.info("upload_task.completed", operation_id=operation_id, task_id=task_id)
+
+    async def store_inline_content(self, task_id: str, content: bytes):
+        """Persist a certificate in Supabase when object storage is unavailable."""
+        encoded = base64.b64encode(content).decode("ascii")
+        supabase.table("upload_tasks").update({
+            "file_content": encoded,
+        }).eq("id", task_id).execute()
+        logger.info("upload_task.inline_content_stored", task_id=task_id)
 
     async def count_pending(self, operation_id: str) -> int:
         """Count incomplete uploads required by an operation."""

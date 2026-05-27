@@ -20,11 +20,11 @@ class Settings(BaseSettings):
     REDIS_URL: str                     # rediss://...
 
     # Cloudflare R2
-    R2_ACCOUNT_ID: str
-    R2_ACCESS_KEY_ID: str
-    R2_SECRET_ACCESS_KEY: str
-    R2_BUCKET_NAME: str
-    R2_PUBLIC_URL: str
+    R2_ACCOUNT_ID: str = ""
+    R2_ACCESS_KEY_ID: str = ""
+    R2_SECRET_ACCESS_KEY: str = ""
+    R2_BUCKET_NAME: str = ""
+    R2_PUBLIC_URL: str = ""
 
     # Claude API
     ANTHROPIC_API_KEY: str
