@@ -2,7 +2,14 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, Check, LoaderCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Check,
+  FileUp,
+  LoaderCircle,
+  Play,
+} from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
@@ -15,6 +22,8 @@ import {
   getComponents,
   getOperation,
   getOperationOverrides,
+  getOperationUploads,
+  uploadCertificate,
 } from "@/lib/api";
 import type {
   Component,
@@ -22,6 +31,8 @@ import type {
   OperationDetails,
   OverrideType,
   Rating,
+  UploadDocumentType,
+  UploadTask,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +51,24 @@ const overrideTypes: OverrideType[] = [
   "limite",
   "status_operacao",
 ];
+
+const certificateDetails: Record<
+  UploadDocumentType,
+  { description: string; label: string }
+> = {
+  cndt_tst: {
+    description: "Tribunal Superior do Trabalho",
+    label: "CNDT - Certidão Negativa de Débitos Trabalhistas",
+  },
+  cnd_federal: {
+    description: "Receita Federal + PGFN",
+    label: "CND Federal - Certidão Negativa de Débitos",
+  },
+  fgts: {
+    description: "Caixa Econômica Federal",
+    label: "CRF FGTS - Certificado de Regularidade",
+  },
+};
 
 const overrideSchema = z.object({
   override_type: z.enum(["rating", "score", "taxa", "limite", "status_operacao"]),
@@ -188,6 +217,7 @@ function Topbar({
 }) {
   const processing =
     operation.status === "pending" || operation.status === "processing";
+  const manualReview = operation.status === "manual_review";
 
   return (
     <header className="flex items-center gap-2 border-b-[0.5px] border-border bg-background px-5 py-3">
@@ -206,12 +236,14 @@ function Topbar({
           "rounded px-2 py-0.5 text-[10px] font-medium",
           processing
             ? "animate-pulse bg-blue-100 text-blue-800"
+            : manualReview
+              ? "bg-amber-100 text-amber-800"
             : operation.status === "failed"
               ? "bg-red-100 text-red-800"
               : "bg-emerald-100 text-emerald-800",
         )}
       >
-        {operation.status}
+        {manualReview ? "aguardando certidões" : operation.status}
       </span>
     </header>
   );
@@ -309,6 +341,209 @@ function ProcessingView({
             </div>
           );
         })}
+      </div>
+    </section>
+  );
+}
+
+function ManualReviewView({
+  operation,
+  operationId,
+  onRefresh,
+}: {
+  operation: OperationDetails;
+  operationId: string;
+  onRefresh: () => Promise<unknown>;
+}) {
+  const queryClient = useQueryClient();
+  const [filenames, setFilenames] = useState<Record<string, string>>({});
+  const uploadsQuery = useQuery({
+    queryFn: () => getOperationUploads(operationId),
+    queryKey: ["operations", operationId, "uploads"],
+    refetchInterval: 5_000,
+  });
+  const uploadMutation = useMutation({
+    mutationFn: ({
+      file,
+      task,
+    }: {
+      file: File;
+      task: UploadTask;
+    }) => uploadCertificate(task.token, task.document_type, file),
+    onSuccess: async (result, { file, task }) => {
+      setFilenames((current) => ({ ...current, [task.id]: file.name }));
+      await queryClient.invalidateQueries({
+        queryKey: ["operations", operationId, "uploads"],
+      });
+      if (result.pipeline_resumed) {
+        await onRefresh();
+      }
+    },
+  });
+  const uploads = uploadsQuery.data ?? [];
+  const completeCount = uploads.filter((upload) => upload.status === "completed").length;
+  const allCompleted = uploads.length > 0 && completeCount === uploads.length;
+  const progress = uploads.length ? (completeCount / uploads.length) * 100 : 0;
+
+  return (
+    <section className="flex-1 px-5 py-4">
+      <div className="mb-3.5 flex items-center justify-between rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
+        <div>
+          <p className="mb-0.5 font-mono text-[10px] text-muted-foreground">
+            {formatCnpj(operation.cnpj)}
+          </p>
+          <p className="text-sm font-medium text-foreground">
+            {operation.razao_social || formatCnpj(operation.cnpj)}
+          </p>
+          <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-700">
+            <AlertTriangle aria-hidden="true" className="h-3 w-3" />
+            Pipeline pausado - faça upload das certidões para continuar
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="mb-1 text-[10px] text-muted-foreground">progresso</p>
+          <p className="font-mono text-lg font-medium text-foreground">
+            {completeCount}
+            <span className="text-xs font-normal text-muted-foreground">
+              /{uploads.length || 3}
+            </span>
+          </p>
+        </div>
+      </div>
+
+      <div className="mb-3.5 h-[3px] overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-emerald-500 transition-[width]"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+
+      <h2 className="mb-2 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+        Certidões obrigatórias
+      </h2>
+      <div className="mb-3.5 rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
+        {uploadsQuery.isLoading ? (
+          <p className="text-xs text-muted-foreground">Carregando certidões...</p>
+        ) : uploads.length ? (
+          <div className="flex flex-col gap-2.5">
+            {uploads.map((task) => {
+              const completed = task.status === "completed";
+              const details = certificateDetails[task.document_type];
+              const uploading =
+                uploadMutation.isPending &&
+                uploadMutation.variables?.task.id === task.id;
+
+              return (
+                <div
+                  className={cn(
+                    "flex items-center gap-3 rounded-md border-[0.5px] border-border bg-muted/40 px-3 py-2.5",
+                    completed
+                      ? "rounded-l-none border-l-2 border-l-emerald-500 bg-background"
+                      : "rounded-l-none border-l-2 border-l-amber-500",
+                  )}
+                  key={task.id}
+                >
+                  <div
+                    className={cn(
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground",
+                      completed && "bg-emerald-100 text-emerald-700",
+                    )}
+                  >
+                    {completed ? (
+                      <Check className="h-4 w-4" />
+                    ) : (
+                      <FileUp className="h-4 w-4" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium text-foreground">
+                      {details.label}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      {details.description}
+                    </p>
+                    <p
+                      className={cn(
+                        "mt-0.5 text-[10px]",
+                        completed
+                          ? "font-mono text-emerald-700"
+                          : "text-amber-700",
+                      )}
+                    >
+                      {completed
+                        ? filenames[task.id] || "PDF enviado"
+                        : "aguardando upload"}
+                    </p>
+                  </div>
+                  {completed ? (
+                    <span className="flex h-7 items-center gap-1 rounded-md border border-emerald-200 px-3 text-[11px] text-emerald-700">
+                      <Check className="h-3 w-3" />
+                      enviado
+                    </span>
+                  ) : (
+                    <label
+                      className={cn(
+                        "flex h-7 cursor-pointer items-center gap-1 rounded-md border border-border bg-background px-3 text-[11px] text-foreground hover:bg-muted",
+                        uploading && "pointer-events-none opacity-50",
+                      )}
+                    >
+                      <FileUp className="h-3 w-3" />
+                      {uploading ? "enviando..." : "selecionar PDF"}
+                      <input
+                        accept=".pdf,application/pdf"
+                        className="sr-only"
+                        disabled={uploading}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) {
+                            uploadMutation.mutate({ file, task });
+                          }
+                          event.target.value = "";
+                        }}
+                        type="file"
+                      />
+                    </label>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Nenhuma certidão manual solicitada para esta operação.
+          </p>
+        )}
+        {uploadMutation.isError ? (
+          <p className="mt-3 text-xs text-red-700" role="alert">
+            Nao foi possivel enviar o PDF. Verifique o arquivo e tente novamente.
+          </p>
+        ) : null}
+      </div>
+
+      <h2 className="mb-2 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+        Retomar pipeline
+      </h2>
+      <div className="rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
+        <p className="mb-3 text-xs leading-5 text-muted-foreground">
+          Após enviar todas as certidões, o pipeline retoma automaticamente com{" "}
+          <span className="font-medium text-foreground">
+            web_research -&gt; score_engine
+          </span>
+          .
+        </p>
+        <button
+          className={cn(
+            "flex h-8 items-center gap-1.5 rounded-md border px-4 text-xs font-medium opacity-40",
+            allCompleted &&
+              "border-emerald-200 text-emerald-700 opacity-100 hover:bg-emerald-50",
+          )}
+          disabled={!allCompleted}
+          onClick={() => void onRefresh()}
+          type="button"
+        >
+          <Play className="h-3 w-3" />
+          Retomar análise
+        </button>
       </div>
     </section>
   );
@@ -664,11 +899,16 @@ export default function OperationDetailPage() {
     refetchInterval: (query) => {
       const status = query.state.data?.status;
 
-      if (status === "completed" || status === "failed") {
-        return false;
+      if (
+        status === "pending" ||
+        status === "processing" ||
+        status === "manual_review" ||
+        !status
+      ) {
+        return 5_000;
       }
 
-      return 5_000;
+      return false;
     },
     refetchIntervalInBackground: true,
     retry: (failureCount, error) =>
@@ -733,13 +973,20 @@ export default function OperationDetailPage() {
 
   const processing =
     operation.status === "pending" || operation.status === "processing";
+  const manualReview = operation.status === "manual_review";
   const canOverride =
     operation.status === "completed" || operation.status === "failed";
 
   return (
     <div className="flex min-h-dvh flex-col bg-muted/40">
       <Topbar operation={operation} />
-      {processing ? (
+      {manualReview ? (
+        <ManualReviewView
+          operation={operation}
+          operationId={operationId}
+          onRefresh={operationQuery.refetch}
+        />
+      ) : processing ? (
         <ProcessingView
           operation={operation}
           pipeline={pipeline}

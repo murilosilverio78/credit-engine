@@ -10,6 +10,9 @@ import type {
   OverrideReviewInput,
   PaginatedOperations,
   PropostaInput,
+  UploadDocumentType,
+  UploadResult,
+  UploadTask,
 } from "@/lib/types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL;
@@ -29,12 +32,14 @@ class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
   const response = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
+    headers,
   });
 
   if (!response.ok) {
@@ -110,6 +115,26 @@ export function reviewOverride(
 
 export function getHealth() {
   return request<HealthStatus>("/health");
+}
+
+export function getOperationUploads(operationId: string) {
+  return request<UploadTask[]>(
+    `/api/v1/uploads/pending?operation_id=${encodeURIComponent(operationId)}`,
+  );
+}
+
+export function uploadCertificate(
+  token: string,
+  documentType: UploadDocumentType,
+  file: File,
+) {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("document_type", documentType);
+  return request<UploadResult>(`/api/v1/uploads/${encodeURIComponent(token)}`, {
+    method: "POST",
+    body,
+  });
 }
 
 export async function getCompanyByCnpj(cnpj: string) {

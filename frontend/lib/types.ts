@@ -122,3 +122,22 @@ export interface HealthStatus {
   status: string;
   version: string;
 }
+
+export type UploadDocumentType = "cndt_tst" | "cnd_federal" | "fgts";
+
+export interface UploadTask {
+  id: string;
+  operation_id: string;
+  document_type: UploadDocumentType;
+  token: string;
+  status: "pending" | "completed" | "expired";
+  completed_at: string | null;
+  expires_at: string;
+}
+
+export interface UploadResult {
+  status: "uploaded";
+  operation_id: string;
+  pipeline_resumed: boolean;
+  uploads_remaining: number;
+}

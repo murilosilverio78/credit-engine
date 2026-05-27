@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str         # mesmo REDIS_URL
 
     # Upload task SLA
-    UPLOAD_TASK_EXPIRY_HOURS: int = 24
+    UPLOAD_TASK_EXPIRY_HOURS: int = 48
     OPERATION_EXPIRY_HOURS: int = 48
 
     # Frontend URL (para links em emails)

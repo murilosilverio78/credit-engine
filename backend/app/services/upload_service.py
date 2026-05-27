@@ -1,30 +1,29 @@
-"""
-UploadService: gerencia tarefas de upload manual (human-in-the-loop).
-"""
-from typing import Optional
+"""UploadService: manages human-in-the-loop upload tasks."""
 from datetime import datetime, timezone
-from app.core.database import supabase
-from app.services.audit_service import AuditService
+from typing import Optional
+
 import structlog
 
-logger = structlog.get_logger()
+from app.core.database import supabase
+from app.services.audit_service import AuditService
 
+logger = structlog.get_logger()
 audit = AuditService()
 
 
 class UploadService:
-
-    async def list_pending(self) -> list[dict]:
-        """Lista todas as tarefas de upload pendentes com dados da operação."""
-        result = supabase.table("upload_tasks")\
-            .select("*, operations(cnpj, razao_social)")\
-            .eq("status", "pending")\
-            .order("created_at", desc=False)\
-            .execute()
-        return result.data
+    async def list_pending(self, operation_id: Optional[str] = None) -> list[dict]:
+        """List the pending queue or full upload progress for one operation."""
+        query = supabase.table("upload_tasks")\
+            .select("*, operations(cnpj, razao_social)")
+        if operation_id:
+            query = query.eq("operation_id", operation_id)
+        else:
+            query = query.eq("status", "pending")
+        return query.order("created_at", desc=False).execute().data
 
     async def get_by_token(self, token: str) -> Optional[dict]:
-        """Busca task pelo token único de upload."""
+        """Look up an upload task through its unique token."""
         try:
             result = supabase.table("upload_tasks")\
                 .select("*")\
@@ -36,15 +35,14 @@ class UploadService:
             return None
 
     async def create(self, operation_id: str, document_type: str) -> dict:
-        """Cria task de upload pendente e retorna o token."""
-        from app.core.config import settings
+        """Create a pending task and return its upload token."""
         from datetime import timedelta
+        from app.core.config import settings
 
         expires_at = (
             datetime.now(timezone.utc) +
             timedelta(hours=settings.UPLOAD_TASK_EXPIRY_HOURS)
         ).isoformat()
-
         result = supabase.table("upload_tasks").insert({
             "operation_id": operation_id,
             "document_type": document_type,
@@ -58,8 +56,11 @@ class UploadService:
             action="upload_requested",
             payload={"document_type": document_type, "token": task["token"]},
         )
-
-        logger.info("upload_task.created", operation_id=operation_id, document_type=document_type)
+        logger.info(
+            "upload_task.created",
+            operation_id=operation_id,
+            document_type=document_type,
+        )
         return task
 
     async def complete(
@@ -71,50 +72,46 @@ class UploadService:
         mime_type: str,
         file_size: int,
     ):
-        """Marca task como completada e persiste metadados do documento."""
-        # Atualiza task
+        """Complete one task and persist document metadata."""
+        completed_at = datetime.now(timezone.utc).isoformat()
         supabase.table("upload_tasks").update({
             "status": "completed",
-            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "completed_at": completed_at,
         }).eq("id", task_id).execute()
 
-        # Busca document_type da task
         task = supabase.table("upload_tasks")\
             .select("document_type")\
             .eq("id", task_id)\
             .single()\
             .execute()
+        document_type = task.data["document_type"]
 
-        # Persiste documento
         supabase.table("documents").insert({
             "operation_id": operation_id,
-            "document_type": task.data["document_type"],
+            "document_type": document_type,
             "storage_key": storage_key,
             "filename": filename,
             "mime_type": mime_type,
             "file_size_bytes": file_size,
             "upload_source": "manual",
         }).execute()
-
-        # Atualiza snapshot do componente correspondente
         supabase.table("component_snapshots").update({
             "status": "completed",
-            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "completed_at": completed_at,
             "parsed_result": {"storage_key": storage_key, "filename": filename},
         }).eq("operation_id", operation_id)\
-          .eq("component", task.data["document_type"])\
+          .eq("component", document_type)\
           .execute()
 
         audit.log(
             operation_id=operation_id,
             action="upload_received",
-            payload={"document_type": task.data["document_type"], "filename": filename},
+            payload={"document_type": document_type, "filename": filename},
         )
-
         logger.info("upload_task.completed", operation_id=operation_id, task_id=task_id)
 
     async def count_pending(self, operation_id: str) -> int:
-        """Conta uploads ainda pendentes para uma operação."""
+        """Count incomplete uploads required by an operation."""
         result = supabase.table("upload_tasks")\
             .select("id", count="exact")\
             .eq("operation_id", operation_id)\
