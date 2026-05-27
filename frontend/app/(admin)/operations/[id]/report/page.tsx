@@ -1241,8 +1241,14 @@ function Report({ operation }: { operation: OperationDetails }) {
       return;
     }
 
+    const previousSelectedName = selectedName;
     setIsGeneratingPdf(true);
     try {
+      if (snapshots.has("recursos_recebidos")) {
+        setSelectedName("recursos_recebidos");
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
       const canvas = await html2canvas(element, {
         allowTaint: true,
         backgroundColor: "#ffffff",
@@ -1281,6 +1287,7 @@ function Report({ operation }: { operation: OperationDetails }) {
       const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
       pdf.save(`CreditEngine_${cnpj}_${date}.pdf`);
     } finally {
+      setSelectedName(previousSelectedName);
       setIsGeneratingPdf(false);
     }
   }
