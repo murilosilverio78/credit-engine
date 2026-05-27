@@ -38,36 +38,49 @@ Retorne APENAS um JSON válido com esta estrutura:
 }"""
 
 
+def _format_cnpj(cnpj: str) -> str:
+    digits = re.sub(r"\D", "", cnpj)
+    if len(digits) != 14:
+        return cnpj
+    return (
+        f"{digits[:2]}.{digits[2:5]}.{digits[5:8]}/"
+        f"{digits[8:12]}-{digits[12:]}"
+    )
+
+
 def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
     from app.core.config import settings
     from app.core.database import supabase
 
-    # Busca razão social do snapshot brasil_api
+    # Busca a identificação cadastral para restringir a pesquisa à empresa correta.
     razao_social = ""
-    nome_fantasia = ""
+    cnae = ""
+    socios = []
     try:
         if operation_id:
-            result = supabase.table("component_snapshots")\
+            snap = supabase.table("component_snapshots")\
                 .select("parsed_result")\
                 .eq("operation_id", operation_id)\
                 .eq("component", "brasil_api")\
                 .single()\
                 .execute()
-            if result.data and result.data.get("parsed_result"):
-                razao_social = result.data["parsed_result"].get("razao_social", "")
-                nome_fantasia = result.data["parsed_result"].get("nome_fantasia", "")
+            if snap.data and snap.data.get("parsed_result"):
+                brasil = snap.data["parsed_result"]
+                razao_social = brasil.get("razao_social", "")
+                cnae = brasil.get("atividade_principal", "")
+                socios = brasil.get("qsa", [])
     except Exception:
         pass
 
-    empresa_info = f"CNPJ {cnpj}"
-    if razao_social:
-        empresa_info += f" — {razao_social}"
-        if nome_fantasia and nome_fantasia != razao_social:
-            empresa_info += f" (nome fantasia: {nome_fantasia})"
-
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-    prompt = f"""Pesquise a reputação da empresa {empresa_info} no mercado brasileiro.
+    prompt = f"""Pesquise a reputação desta empresa no mercado brasileiro.
+
+IDENTIFICAÇÃO DA EMPRESA:
+- Razão Social: {razao_social}
+- CNPJ: {_format_cnpj(cnpj)}
+- CNAE principal: {cnae}
+- Sócios: {json.dumps(socios, ensure_ascii=False)}
 
 Foque especialmente em:
 - Histórico de fornecimento de serviços para o governo federal
@@ -76,7 +89,9 @@ Foque especialmente em:
 - Notícias negativas recentes
 - Reclamações no Reclame Aqui
 
-IMPORTANTE: Pesquise especificamente esta empresa pelo nome e CNPJ. Não confunda com outras empresas de nomes similares.
+IMPORTANTE: Pesquise ESPECIFICAMENTE esta empresa pelo nome e CNPJ.
+Se encontrar resultados de empresas com nome similar mas CNPJ diferente, IGNORE e retorne score_reputacao=50 com resumo explicando a ausência de dados específicos.
+NUNCA atribua informações de outra empresa a esta.
 
 Retorne apenas o JSON estruturado conforme instruído."""
 
