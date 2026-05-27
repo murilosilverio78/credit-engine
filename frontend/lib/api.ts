@@ -128,12 +128,12 @@ export function uploadCertificate(
   documentType: UploadDocumentType,
   file: File,
 ) {
-  const body = new FormData();
-  body.append("file", file);
-  body.append("document_type", documentType);
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("document_type", documentType);
   return request<UploadResult>(`/api/v1/uploads/${encodeURIComponent(token)}`, {
     method: "POST",
-    body,
+    body: formData,
   });
 }
 
