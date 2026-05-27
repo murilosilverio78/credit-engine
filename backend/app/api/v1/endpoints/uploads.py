@@ -103,7 +103,6 @@ async def receive_upload(
     except Exception as exc:
         storage_backend = "supabase_inline"
         storage_key = f"upload_tasks/{task['id']}/file_content"
-        await upload_svc.store_inline_content(task["id"], content)
         logger.warning(
             "storage.inline_fallback",
             operation_id=task["operation_id"],
@@ -111,6 +110,7 @@ async def receive_upload(
             error=str(exc),
         )
 
+    await upload_svc.store_inline_content(task["id"], content)
     await upload_svc.complete(
         task_id=task["id"],
         operation_id=task["operation_id"],
