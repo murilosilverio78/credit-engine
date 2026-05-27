@@ -50,4 +50,15 @@
     break-before: page;
     page-break-before: always;
   }
+
+  .report-resources-chart {
+    break-inside: avoid;
+    height: 13rem !important;
+  }
+
+  .recharts-wrapper,
+  .recharts-surface {
+    height: auto !important;
+    overflow: visible !important;
+  }
 }

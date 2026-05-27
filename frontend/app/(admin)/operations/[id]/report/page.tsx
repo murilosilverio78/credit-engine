@@ -13,7 +13,15 @@ import {
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import Script from "next/script";
-import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type MutableRefObject,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Bar,
   BarChart,
@@ -38,6 +46,13 @@ interface Dimension {
 
 type RadarChartInstance = {
   destroy: () => void;
+  options: {
+    animation?: false | {
+      duration: number;
+      onComplete: () => void;
+    };
+  };
+  update: () => void;
 };
 
 type RadarChartConstructor = new (canvas: HTMLCanvasElement, config: unknown) => RadarChartInstance;
@@ -315,13 +330,14 @@ function Metric({
 function ScorecardPanel({
   canvasRef,
   dimensions,
+  radarChartRef,
 }: {
   canvasRef: RefObject<HTMLCanvasElement>;
   dimensions: [string, Dimension][];
+  radarChartRef: MutableRefObject<RadarChartInstance | null>;
 }) {
   const [chartReady, setChartReady] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const chartRef = useRef<RadarChartInstance | null>(null);
   const listedDimensions = useMemo(
     () =>
       dimensionOrder.map((key) => {
@@ -348,9 +364,9 @@ function ScorecardPanel({
       if (!Chart || !canvasRef.current) {
         return;
       }
-      chartRef.current?.destroy();
+      radarChartRef.current?.destroy();
       const dark = colorScheme.matches;
-      chartRef.current = new Chart(canvasRef.current, {
+      radarChartRef.current = new Chart(canvasRef.current, {
         data: {
           datasets: [
             {
@@ -405,10 +421,10 @@ function ScorecardPanel({
 
     return () => {
       colorScheme.removeEventListener("change", renderChart);
-      chartRef.current?.destroy();
-      chartRef.current = null;
+      radarChartRef.current?.destroy();
+      radarChartRef.current = null;
     };
-  }, [canvasRef, chartReady, listedDimensions]);
+  }, [canvasRef, chartReady, listedDimensions, radarChartRef]);
 
   return (
     <>
@@ -677,7 +693,7 @@ function ResourcesDetails({ result }: { result: JsonRecord }) {
         ))}
       </div>
       {monthlyValues.length ? (
-        <div className="mt-4 h-52" aria-label="Recebimentos agregados por mês">
+        <div className="report-resources-chart mt-4 h-52" aria-label="Recebimentos agregados por mês">
           <ResponsiveContainer height="100%" width="100%">
             <BarChart data={monthlyValues} margin={{ bottom: 0, left: 14, right: 8, top: 8 }}>
               <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" vertical={false} />
@@ -1197,6 +1213,7 @@ function PrintableAnnex({ snapshots }: { snapshots: Map<string, ComponentSnapsho
 function Report({ operation }: { operation: OperationDetails }) {
   const generatedAt = useMemo(() => new Date(), []);
   const radarCanvasRef = useRef<HTMLCanvasElement>(null);
+  const radarChartRef = useRef<RadarChartInstance | null>(null);
   const snapshots = useMemo(
     () =>
       new Map(
@@ -1242,11 +1259,21 @@ function Report({ operation }: { operation: OperationDetails }) {
     minimumFractionDigits: 1,
   }).format(rate);
 
-  function printPdf() {
+  async function printPdf() {
     const originalTitle = document.title;
     const cnpj = operation.cnpj.replace(/\D/g, "");
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     document.title = `CreditEngine_${cnpj}_${date}.pdf`;
+    const radarChart = radarChartRef.current;
+    if (radarChart) {
+      await new Promise<void>((resolve) => {
+        radarChart.options.animation = {
+          duration: 0,
+          onComplete: resolve,
+        };
+        radarChart.update();
+      });
+    }
     const printedCharts = Array.from(document.querySelectorAll<HTMLCanvasElement>("canvas")).map(
       (canvas) => {
         const bounds = canvas.getBoundingClientRect();
@@ -1363,6 +1390,7 @@ function Report({ operation }: { operation: OperationDetails }) {
         <ScorecardPanel
           canvasRef={radarCanvasRef}
           dimensions={dimensions}
+          radarChartRef={radarChartRef}
         />
 
         <SectionTitle>Parecer do agente</SectionTitle>
@@ -1470,7 +1498,7 @@ function Report({ operation }: { operation: OperationDetails }) {
         <PrintableAnnex snapshots={snapshots} />
 
         {selected ? (
-          <section className="mt-3.5 rounded-lg border border-blue-200 bg-background px-4 py-3.5 print:hidden">
+          <section className="mt-3.5 rounded-lg border border-blue-200 bg-background px-4 py-3.5">
             <h2 className="mb-3 text-xs font-medium text-blue-700">
               {selected.component} — detalhes
             </h2>
