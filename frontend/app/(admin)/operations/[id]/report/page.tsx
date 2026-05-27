@@ -1,6 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -1223,6 +1225,7 @@ function Report({ operation }: { operation: OperationDetails }) {
   const [selectedName, setSelectedName] = useState(
     snapshots.has("contratos") ? "contratos" : components[0]?.component ?? "",
   );
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const selected = snapshots.get(selectedName);
   const status = conclusion(operation.rating);
   const rawRate = operation.taxa_sugerida ?? numberValue(engine.taxa_sugerida_am);
@@ -1232,19 +1235,54 @@ function Report({ operation }: { operation: OperationDetails }) {
     minimumFractionDigits: 1,
   }).format(rate);
 
-  function printPdf() {
-    const originalTitle = document.title;
-    const cnpj = operation.cnpj.replace(/\D/g, "");
-    const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    document.title = `CreditEngine_${cnpj}_${date}.pdf`;
+  async function printPdf() {
+    const element = document.getElementById("report-content");
+    if (!element || isGeneratingPdf) {
+      return;
+    }
 
-    const restorePrintState = () => {
-      document.title = originalTitle;
-      window.removeEventListener("afterprint", restorePrintState);
-    };
+    setIsGeneratingPdf(true);
+    try {
+      const canvas = await html2canvas(element, {
+        allowTaint: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+        scale: 2,
+        useCORS: true,
+        windowWidth: 1200,
+      });
 
-    window.addEventListener("afterprint", restorePrintState);
-    window.print();
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({
+        format: "a4",
+        orientation: "portrait",
+        unit: "mm",
+      });
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = pageWidth;
+      const imgHeight = (canvas.height * pageWidth) / canvas.width;
+
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      const cnpj = operation.cnpj.replace(/\D/g, "");
+      const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      pdf.save(`CreditEngine_${cnpj}_${date}.pdf`);
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   }
 
   return (
@@ -1260,7 +1298,7 @@ function Report({ operation }: { operation: OperationDetails }) {
         <span className="text-sm font-medium">Relatório de crédito</span>
       </header>
 
-      <main className="mx-auto max-w-6xl px-5 py-4 print:max-w-none print:p-0">
+      <main className="mx-auto max-w-6xl px-5 py-4 print:max-w-none print:p-0" id="report-content">
         <section className="rounded-lg border-[0.5px] border-border bg-background px-6 py-5 print:border-0 print:px-0 print:pb-6">
           <div className="mb-4 flex items-start justify-between gap-6">
             <div>
@@ -1296,12 +1334,21 @@ function Report({ operation }: { operation: OperationDetails }) {
                 </span>
               ) : null}
               <button
-                className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring print:hidden"
+                className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring print:hidden"
+                data-html2canvas-ignore="true"
+                disabled={isGeneratingPdf}
                 onClick={printPdf}
                 type="button"
               >
-                <Download className="h-3.5 w-3.5" />
-                Baixar PDF
+                {isGeneratingPdf ? (
+                  <span
+                    aria-hidden="true"
+                    className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent"
+                  />
+                ) : (
+                  <Download className="h-3.5 w-3.5" />
+                )}
+                {isGeneratingPdf ? "Gerando PDF..." : "Baixar PDF"}
               </button>
             </div>
           </div>
