@@ -43,11 +43,17 @@ const groups: ComponentGroup[] = [
   },
 ];
 
-type ComponentType = "auto" | "manual" | "roadmap";
+const ROADMAP_COMPONENTS = ["serasa_pj", "boa_vista", "serpro"];
+
+type ComponentType = "auto" | "manual" | "disabled" | "roadmap";
 
 function componentType(component: Component): ComponentType {
-  if (!component.enabled) {
+  if (ROADMAP_COMPONENTS.includes(component.component)) {
     return "roadmap";
+  }
+
+  if (!component.enabled) {
+    return "disabled";
   }
 
   return component.timeout_seconds === 0 ? "manual" : "auto";
@@ -59,6 +65,8 @@ function typeStyle(type: ComponentType) {
       return "bg-emerald-100 text-emerald-800";
     case "manual":
       return "bg-amber-100 text-amber-800";
+    case "disabled":
+      return "bg-muted text-muted-foreground";
     case "roadmap":
       return "bg-muted text-muted-foreground";
   }
@@ -135,7 +143,7 @@ function ComponentTable({
                       typeStyle(type),
                     )}
                   >
-                    {type}
+                    {type === "disabled" ? "desabilitado" : type}
                   </span>
                 </td>
                 <td className="border-b-[0.5px] border-border px-2.5 py-2 font-mono text-[11px] text-foreground">
