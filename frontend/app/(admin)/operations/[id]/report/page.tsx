@@ -1,8 +1,6 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -26,6 +24,7 @@ import {
 } from "recharts";
 
 import { ApiError, getOperation } from "@/lib/api";
+import { generateReportPdf } from "@/lib/generate-report-pdf";
 import type { ComponentSnapshot, OperationDetails, Rating } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -1236,58 +1235,14 @@ function Report({ operation }: { operation: OperationDetails }) {
   }).format(rate);
 
   async function printPdf() {
-    const element = document.getElementById("report-content");
-    if (!element || isGeneratingPdf) {
+    if (isGeneratingPdf) {
       return;
     }
 
-    const previousSelectedName = selectedName;
     setIsGeneratingPdf(true);
     try {
-      if (snapshots.has("recursos_recebidos")) {
-        setSelectedName("recursos_recebidos");
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-
-      const canvas = await html2canvas(element, {
-        allowTaint: true,
-        backgroundColor: "#ffffff",
-        logging: false,
-        scale: 2,
-        useCORS: true,
-        windowWidth: 1200,
-      });
-
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({
-        format: "a4",
-        orientation: "portrait",
-        unit: "mm",
-      });
-
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgWidth = pageWidth;
-      const imgHeight = (canvas.height * pageWidth) / canvas.width;
-
-      let heightLeft = imgHeight;
-      let position = 0;
-
-      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
-
-      const cnpj = operation.cnpj.replace(/\D/g, "");
-      const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-      pdf.save(`CreditEngine_${cnpj}_${date}.pdf`);
+      await generateReportPdf(operation);
     } finally {
-      setSelectedName(previousSelectedName);
       setIsGeneratingPdf(false);
     }
   }
@@ -1305,7 +1260,7 @@ function Report({ operation }: { operation: OperationDetails }) {
         <span className="text-sm font-medium">Relatório de crédito</span>
       </header>
 
-      <main className="mx-auto max-w-6xl px-5 py-4 print:max-w-none print:p-0" id="report-content">
+      <main className="mx-auto max-w-6xl px-5 py-4 print:max-w-none print:p-0">
         <section className="rounded-lg border-[0.5px] border-border bg-background px-6 py-5 print:border-0 print:px-0 print:pb-6">
           <div className="mb-4 flex items-start justify-between gap-6">
             <div>
@@ -1342,7 +1297,6 @@ function Report({ operation }: { operation: OperationDetails }) {
               ) : null}
               <button
                 className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring print:hidden"
-                data-html2canvas-ignore="true"
                 disabled={isGeneratingPdf}
                 onClick={printPdf}
                 type="button"
