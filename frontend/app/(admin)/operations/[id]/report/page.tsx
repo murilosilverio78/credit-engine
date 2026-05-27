@@ -12,7 +12,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { type ReactNode, useMemo, useState } from "react";
+import Script from "next/script";
+import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -33,6 +34,18 @@ interface Dimension {
   justificativa?: string;
   peso?: number;
   score?: number;
+}
+
+type RadarChartInstance = {
+  destroy: () => void;
+};
+
+type RadarChartConstructor = new (canvas: HTMLCanvasElement, config: unknown) => RadarChartInstance;
+
+declare global {
+  interface Window {
+    Chart?: RadarChartConstructor;
+  }
 }
 
 const ratingColors: Record<Rating, string> = {
@@ -254,23 +267,6 @@ function formatDuration(component: ComponentSnapshot) {
     : `${component.duration_ms.toLocaleString("pt-BR")}ms`;
 }
 
-function scoreColor(score: number) {
-  return score >= 75
-    ? {
-        bar: "bg-emerald-500",
-        text: "text-emerald-700",
-      }
-    : score >= 50
-      ? {
-          bar: "bg-amber-500",
-          text: "text-amber-700",
-        }
-      : {
-          bar: "bg-red-500",
-          text: "text-red-700",
-        };
-}
-
 function conclusion(rating: Rating | null) {
   if (rating === "A" || rating === "B") {
     return {
@@ -313,6 +309,180 @@ function Metric({
       <p className="mb-1 text-[10px] text-muted-foreground">{label}</p>
       <p className="font-mono text-xl font-medium text-foreground">{children}</p>
     </div>
+  );
+}
+
+function ScorecardPanel({
+  canvasRef,
+  dimensions,
+  printImageRef,
+}: {
+  canvasRef: RefObject<HTMLCanvasElement>;
+  dimensions: [string, Dimension][];
+  printImageRef: RefObject<HTMLImageElement>;
+}) {
+  const [chartReady, setChartReady] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const chartRef = useRef<RadarChartInstance | null>(null);
+  const listedDimensions = useMemo(
+    () =>
+      dimensionOrder.map((key) => {
+        const dimension = dimensions.find(([name]) => name === key)?.[1] ?? {};
+        return [key, dimension] as [string, Dimension];
+      }),
+    [dimensions],
+  );
+
+  useEffect(() => {
+    if (window.Chart) {
+      setChartReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!chartReady || !canvasRef.current || !window.Chart) {
+      return;
+    }
+
+    const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
+    const renderChart = () => {
+      const Chart = window.Chart;
+      if (!Chart || !canvasRef.current) {
+        return;
+      }
+      chartRef.current?.destroy();
+      const dark = colorScheme.matches;
+      chartRef.current = new Chart(canvasRef.current, {
+        data: {
+          datasets: [
+            {
+              backgroundColor: "rgba(99,153,34,0.15)",
+              borderColor: "#639922",
+              borderWidth: 2,
+              data: listedDimensions.map(([, dimension]) => numberValue(dimension.score)),
+              pointBackgroundColor: "#639922",
+              pointBorderColor: "#639922",
+              pointRadius: 3,
+            },
+          ],
+          labels: [
+            ["Regularidade", "fiscal"],
+            ["Saúde", "cadastral"],
+            ["Relacionamento", "gov."],
+            ["Porte /", "oper."],
+            ["Reputação", "mercado"],
+          ],
+        },
+        options: {
+          animation: false,
+          plugins: {
+            legend: { display: false },
+          },
+          responsive: false,
+          scales: {
+            r: {
+              angleLines: { color: dark ? "#334155" : "#D8DEE5" },
+              grid: { color: dark ? "#334155" : "#D8DEE5" },
+              max: 100,
+              min: 0,
+              pointLabels: {
+                color: dark ? "#CBD5E1" : "#6B7280",
+                font: { size: 10 },
+              },
+              ticks: {
+                backdropColor: "transparent",
+                color: dark ? "#94A3B8" : "#9CA3AF",
+                display: false,
+                stepSize: 25,
+              },
+            },
+          },
+        },
+        type: "radar",
+      });
+    };
+
+    renderChart();
+    colorScheme.addEventListener("change", renderChart);
+
+    return () => {
+      colorScheme.removeEventListener("change", renderChart);
+      chartRef.current?.destroy();
+      chartRef.current = null;
+    };
+  }, [canvasRef, chartReady, listedDimensions]);
+
+  return (
+    <>
+      <Script
+        onReady={() => setChartReady(true)}
+        src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"
+        strategy="afterInteractive"
+      />
+      <section className="grid gap-5 rounded-lg border-[0.5px] border-border bg-background px-4 py-4 md:grid-cols-[260px_1fr]">
+        <div className="flex items-center justify-center">
+          <canvas
+            aria-label="Gráfico radar das cinco dimensões do scorecard"
+            className="h-[240px] w-[240px] print:hidden"
+            height={240}
+            ref={canvasRef}
+            role="img"
+            width={240}
+          />
+          <img
+            alt="Gráfico radar das cinco dimensões do scorecard"
+            className="hidden h-[240px] w-[240px] print:block"
+            ref={printImageRef}
+          />
+        </div>
+        <div className="flex flex-col justify-center gap-2.5">
+          {listedDimensions.map(([key, dimension]) => {
+            const score = numberValue(dimension.score);
+            const favorable = score >= 75;
+            const open = expanded === key;
+            return (
+              <button
+                aria-expanded={open}
+                className="text-left focus-visible:rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                key={key}
+                onClick={() => setExpanded(open ? null : key)}
+                type="button"
+              >
+                <span className="mb-1 flex items-center justify-between gap-3 text-xs">
+                  <span className="font-medium text-foreground">
+                    {dimensionsLabels[key] ?? key.replaceAll("_", " ")}
+                  </span>
+                  <span className="flex items-baseline gap-3">
+                    <span className="text-[10px] text-muted-foreground">
+                      Peso {formatPercent(dimension.peso)}
+                    </span>
+                    <span
+                      className={cn(
+                        "font-mono text-sm font-medium",
+                        favorable ? "text-[#27500A]" : "text-[#633806]",
+                      )}
+                    >
+                      {score}
+                    </span>
+                  </span>
+                </span>
+                <span className="block h-1.5 overflow-hidden rounded-full bg-muted">
+                  <span
+                    className={cn("block h-full rounded-full", favorable ? "bg-[#639922]" : "bg-[#BA7517]")}
+                    style={{ width: `${Math.min(Math.max(score, 0), 100)}%` }}
+                  />
+                </span>
+                {open ? (
+                  <span className="mt-1.5 block text-[11px] leading-[1.55] text-muted-foreground">
+                    {stringValue(dimension.justificativa)}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -1033,6 +1203,8 @@ function PrintableAnnex({ snapshots }: { snapshots: Map<string, ComponentSnapsho
 
 function Report({ operation }: { operation: OperationDetails }) {
   const generatedAt = useMemo(() => new Date(), []);
+  const radarCanvasRef = useRef<HTMLCanvasElement>(null);
+  const radarPrintImageRef = useRef<HTMLImageElement>(null);
   const snapshots = useMemo(
     () =>
       new Map(
@@ -1071,16 +1243,26 @@ function Report({ operation }: { operation: OperationDetails }) {
   );
   const selected = snapshots.get(selectedName);
   const status = conclusion(operation.rating);
-  const rate = operation.taxa_sugerida ?? numberValue(engine.taxa_sugerida_am);
+  const rawRate = operation.taxa_sugerida ?? numberValue(engine.taxa_sugerida_am);
+  const rate = rawRate < 1 ? rawRate * 100 : rawRate;
+  const formattedRate = new Intl.NumberFormat("pt-BR", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 1,
+  }).format(rate);
 
   function printPdf() {
     const originalTitle = document.title;
     const cnpj = operation.cnpj.replace(/\D/g, "");
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     document.title = `CreditEngine_${cnpj}_${date}.pdf`;
+    const radarImage = radarPrintImageRef.current;
+    if (radarCanvasRef.current && radarImage) {
+      radarImage.src = radarCanvasRef.current.toDataURL("image/png");
+    }
 
     const restoreTitle = () => {
       document.title = originalTitle;
+      radarImage?.removeAttribute("src");
       window.removeEventListener("afterprint", restoreTitle);
     };
 
@@ -1154,7 +1336,7 @@ function Report({ operation }: { operation: OperationDetails }) {
               </span>
             </Metric>
             <Metric label="Taxa sugerida">
-              {rate.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}
+              {formattedRate}
               <span className="ml-0.5 text-[11px] font-normal text-muted-foreground">
                 % a.m.
               </span>
@@ -1174,13 +1356,15 @@ function Report({ operation }: { operation: OperationDetails }) {
           </div>
         </section>
 
+        <SectionTitle>Scorecard — 5 dimensões</SectionTitle>
+        <ScorecardPanel
+          canvasRef={radarCanvasRef}
+          dimensions={dimensions}
+          printImageRef={radarPrintImageRef}
+        />
+
         <SectionTitle>Parecer do agente</SectionTitle>
-        <section
-          className={cn(
-            "rounded-r-lg border-[0.5px] border-l-[3px] border-border bg-background px-4 py-3.5",
-            status.border,
-          )}
-        >
+        <section className="rounded-r-lg border-[0.5px] border-l-[3px] border-border border-l-[#639922] bg-background px-4 py-3.5">
           <p className={cn("mb-1.5 text-[10px] font-medium uppercase tracking-[0.06em]", status.text)}>
             {status.label}
           </p>
@@ -1189,51 +1373,15 @@ function Report({ operation }: { operation: OperationDetails }) {
           </p>
         </section>
 
-        <SectionTitle>Scorecard — 5 dimensões</SectionTitle>
-        <section className="grid gap-2.5 md:grid-cols-2">
-          {dimensions.map(([key, dimension], index) => {
-            const score = numberValue(dimension.score);
-            const colors = scoreColor(score);
-            return (
-              <article
-                className={cn(
-                  "rounded-lg border-[0.5px] border-border bg-background px-3.5 py-3",
-                  index === dimensions.length - 1 && dimensions.length % 2 === 1 && "md:col-span-2",
-                )}
-                key={key}
-              >
-                <div className="mb-1.5 flex items-center justify-between gap-3">
-                  <h3 className="text-xs font-medium">
-                    {dimensionsLabels[key] ?? key.replaceAll("_", " ")}
-                  </h3>
-                  <span className={cn("font-mono text-lg font-medium", colors.text)}>
-                    {score}
-                  </span>
-                </div>
-                <p className="mb-1.5 text-[10px] text-muted-foreground">
-                  Peso {formatPercent(dimension.peso)}
-                </p>
-                <div className="mb-2 h-1 overflow-hidden rounded-full bg-muted">
-                  <div className={cn("h-full rounded-full", colors.bar)} style={{ width: `${score}%` }} />
-                </div>
-                <p className="text-[11px] leading-[1.55] text-muted-foreground">
-                  {stringValue(dimension.justificativa)}
-                </p>
-              </article>
-            );
-          })}
-        </section>
-
         <section className="grid gap-2.5 md:grid-cols-2">
           <div>
             <SectionTitle>Pontos positivos</SectionTitle>
             <div className="h-full rounded-lg border-[0.5px] border-border bg-background px-3.5 py-3">
               {asArray(engine.pontos_positivos).map((point, index) => (
                 <p
-                  className="flex gap-2 border-b-[0.5px] border-border py-1.5 text-[11px] leading-5 text-muted-foreground last:border-b-0"
+                  className="border-b-[0.5px] border-l-2 border-border border-l-[#639922] py-1.5 pl-2.5 text-[11px] leading-5 text-muted-foreground last:border-b-0"
                   key={`${String(point)}-${index}`}
                 >
-                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
                   {stringValue(point)}
                 </p>
               ))}
@@ -1244,10 +1392,9 @@ function Report({ operation }: { operation: OperationDetails }) {
             <div className="h-full rounded-lg border-[0.5px] border-border bg-background px-3.5 py-3">
               {asArray(engine.pontos_atencao).map((point, index) => (
                 <p
-                  className="flex gap-2 border-b-[0.5px] border-border py-1.5 text-[11px] leading-5 text-muted-foreground last:border-b-0"
+                  className="border-b-[0.5px] border-l-2 border-border border-l-[#BA7517] py-1.5 pl-2.5 text-[11px] leading-5 text-muted-foreground last:border-b-0"
                   key={`${String(point)}-${index}`}
                 >
-                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
                   {stringValue(point)}
                 </p>
               ))}
