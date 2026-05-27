@@ -59,12 +59,12 @@ const certificateDetails: Record<
 > = {
   cndt_tst: {
     description: "Tribunal Superior do Trabalho",
-    href: "https://certidao.tst.jus.br/certidao/",
+    href: "https://cndt-certidao.tst.jus.br/inicio.faces",
     label: "CNDT - Certidão Negativa de Débitos Trabalhistas",
   },
   cnd_federal: {
     description: "Receita Federal + PGFN",
-    href: "https://solucoes.receita.fazenda.gov.br/Servicos/certidaointernet/PJ/Emitir",
+    href: "https://servicos.receitafederal.gov.br/servico/certidoes/#/home/cnpj",
     label: "CND Federal - Certidão Negativa de Débitos",
   },
   fgts: {
