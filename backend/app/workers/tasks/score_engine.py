@@ -10,6 +10,7 @@ import re
 import anthropic
 from app.workers.celery_app import celery_app
 from app.workers.base import BaseComponentTask
+from app.utils.encoding import fix_dict_encoding
 import structlog
 
 logger = structlog.get_logger()
@@ -78,6 +79,7 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
             for snap in result.data:
                 if snap.get("parsed_result"):
                     snapshots[snap["component"]] = snap["parsed_result"]
+            snapshots = fix_dict_encoding(snapshots)
 
             logger.info(
                 "score_engine.snapshots_loaded",
@@ -107,9 +109,9 @@ Produza a análise completa conforme o scorecard 5D e retorne o JSON estruturado
 
     try:
         clean = re.sub(r"```json|```", "", result_text).strip()
-        return json.loads(clean)
+        return fix_dict_encoding(json.loads(clean))
     except Exception:
-        return {
+        return fix_dict_encoding({
             "score": 0,
             "rating": "E",
             "taxa_sugerida_am": 0.035,
@@ -120,7 +122,7 @@ Produza a análise completa conforme o scorecard 5D e retorne o JSON estruturado
             "pontos_atencao": [],
             "parecer": "Não foi possível processar a análise.",
             "raw_response": result_text,
-        }
+        })
 
 
 @celery_app.task(

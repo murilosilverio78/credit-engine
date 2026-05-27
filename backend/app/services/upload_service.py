@@ -10,6 +10,7 @@ import structlog
 
 from app.core.database import supabase
 from app.services.audit_service import AuditService
+from app.utils.encoding import fix_dict_encoding
 
 logger = structlog.get_logger()
 audit = AuditService()
@@ -102,10 +103,10 @@ class UploadService:
         error_message = None
 
         try:
-            extraction = self._extract_certificate(
+            extraction = fix_dict_encoding(self._extract_certificate(
                 document_type=document_type,
                 file_content=task.data.get("file_content"),
-            )
+            ))
             parsed_result.update({
                 "status": "obtida",
                 "resultado": extraction.get("resultado"),

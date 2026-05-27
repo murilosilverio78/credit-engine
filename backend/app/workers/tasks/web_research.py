@@ -10,6 +10,7 @@ import json
 import re
 from app.workers.celery_app import celery_app
 from app.workers.base import BaseComponentTask
+from app.utils.encoding import fix_dict_encoding
 import structlog
 
 logger = structlog.get_logger()
@@ -65,7 +66,7 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
                 .single()\
                 .execute()
             if snap.data and snap.data.get("parsed_result"):
-                brasil = snap.data["parsed_result"]
+                brasil = fix_dict_encoding(snap.data["parsed_result"])
                 razao_social = brasil.get("razao_social", "")
                 cnae = brasil.get("atividade_principal", "")
                 socios = brasil.get("qsa", [])
@@ -111,9 +112,9 @@ Retorne apenas o JSON estruturado conforme instruído."""
 
     try:
         clean = re.sub(r"```json|```", "", result_text).strip()
-        return json.loads(clean)
+        return fix_dict_encoding(json.loads(clean))
     except Exception:
-        return {
+        return fix_dict_encoding({
             "score_reputacao": 50,
             "nivel_risco": "medio",
             "noticias_negativas": False,
@@ -124,7 +125,7 @@ Retorne apenas o JSON estruturado conforme instruído."""
             "alertas": [],
             "fontes_consultadas": [],
             "raw_response": result_text,
-        }
+        })
 
 
 @celery_app.task(

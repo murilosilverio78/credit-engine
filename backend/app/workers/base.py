@@ -6,6 +6,7 @@ import time
 from celery import Task
 from typing import Callable
 from app.core.config import settings
+from app.utils.encoding import fix_dict_encoding
 import structlog
 
 logger = structlog.get_logger()
@@ -45,6 +46,7 @@ class BaseComponentTask(Task):
         # Verifica cache
         cached = cache_svc.get(cnpj, component)
         if cached:
+            cached = fix_dict_encoding(cached)
             logger.info("component.cache_hit", component=component, cnpj=cnpj)
             snap_svc.save_result(
                 operation_id=operation_id,
@@ -69,6 +71,7 @@ class BaseComponentTask(Task):
                 result = handler(cnpj, operation_id=operation_id)
             else:
                 result = handler(cnpj)
+            result = fix_dict_encoding(result)
             duration_ms = int((time.time() - start) * 1000)
 
             snap_svc.save_result(
