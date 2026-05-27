@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
   Check,
   ExternalLink,
   FileUp,
@@ -679,16 +680,27 @@ function CompletedView({
               {operation.razao_social || formatCnpj(operation.cnpj)}
             </p>
           </div>
-          {operation.rating ? (
-            <span
-              className={cn(
-                "rounded px-3.5 py-1 text-[13px] font-medium",
-                ratingColors[operation.rating],
-              )}
-            >
-              {operation.rating}
-            </span>
-          ) : null}
+          <div className="flex items-center gap-2">
+            {operation.status === "completed" ? (
+              <Link
+                className="flex h-8 items-center gap-1 rounded-md border border-border px-3 text-xs text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                href={`/operations/${operationId}/report`}
+              >
+                Ver relatório completo
+                <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
+              </Link>
+            ) : null}
+            {operation.rating ? (
+              <span
+                className={cn(
+                  "rounded px-3.5 py-1 text-[13px] font-medium",
+                  ratingColors[operation.rating],
+                )}
+              >
+                {operation.rating}
+              </span>
+            ) : null}
+          </div>
         </div>
         <div className="grid grid-cols-4 gap-2">
           <DetailMetric
@@ -958,7 +970,7 @@ export default function OperationDetailPage() {
   const [refreshIn, setRefreshIn] = useState(5);
   const operationQuery = useQuery({
     queryFn: () => getOperation(operationId),
-    queryKey: ["operations", operationId],
+    queryKey: ["operation", operationId],
     refetchInterval: (query) => {
       const status = query.state.data?.status;
 

@@ -24,3 +24,25 @@
     @apply bg-background text-foreground antialiased;
   }
 }
+
+@media print {
+  @page {
+    margin: 16mm 14mm;
+    size: A4;
+  }
+
+  body {
+    background: #fff;
+    color: #0f172a;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  aside {
+    display: none !important;
+  }
+
+  main {
+    margin-left: 0 !important;
+  }
+}
