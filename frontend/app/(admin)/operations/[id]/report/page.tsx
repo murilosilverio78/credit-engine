@@ -7,6 +7,8 @@ import {
   Check,
   Download,
   FileCheck,
+  FileUp,
+  XCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -188,6 +190,50 @@ function formatDateTime(value: Date) {
     dateStyle: "short",
     timeStyle: "short",
   }).format(value);
+}
+
+function parseBrazilianDate(value: unknown) {
+  const match = stringValue(value, "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) {
+    return null;
+  }
+
+  const [, day, month, year] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day), 23, 59, 59);
+}
+
+function isExpired(value: unknown) {
+  const date = parseBrazilianDate(value);
+  return date ? date.getTime() < Date.now() : false;
+}
+
+function certificateResult(result: unknown) {
+  switch (result) {
+    case "negativa":
+      return {
+        icon: <Check aria-hidden="true" className="h-3.5 w-3.5" />,
+        label: "Negativa",
+        text: "text-emerald-700",
+      };
+    case "positiva_com_efeitos_negativa":
+      return {
+        icon: <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5" />,
+        label: "Positiva com efeitos de negativa",
+        text: "text-amber-700",
+      };
+    case "positiva":
+      return {
+        icon: <XCircle aria-hidden="true" className="h-3.5 w-3.5" />,
+        label: "Positiva",
+        text: "text-red-700",
+      };
+    default:
+      return {
+        icon: null,
+        label: "Não identificado",
+        text: "text-muted-foreground",
+      };
+  }
 }
 
 function formatPercent(value: unknown) {
@@ -584,15 +630,97 @@ function WebResearchDetails({ result }: { result: JsonRecord }) {
   );
 }
 
-function DocumentDetails({ result }: { result: JsonRecord }) {
+function DocumentDetails({
+  errorMessage,
+  result,
+  status,
+}: {
+  errorMessage: string | null;
+  result: JsonRecord;
+  status: string;
+}) {
+  if (result.status !== "obtida") {
+    return (
+      <div className="rounded-md bg-amber-50 px-3 py-4 text-xs text-amber-800">
+        <p className="font-medium">Certidão não enviada</p>
+        <p className="mt-1 text-amber-700">
+          Faça upload da certidão na operação para concluir a validação fiscal.
+        </p>
+      </div>
+    );
+  }
+
+  const regular =
+    status !== "failed" &&
+    (result.resultado === "negativa" ||
+      result.resultado === "positiva_com_efeitos_negativa");
+  const outcome = certificateResult(result.resultado);
+  const expired = isExpired(result.data_validade);
+
   return (
     <>
-      <p className="mb-3 inline-flex items-center gap-1.5 rounded bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
-        <FileCheck className="h-3.5 w-3.5" />
-        certidão recebida
+      <p
+        className={cn(
+          "mb-3 inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium",
+          regular
+            ? "bg-emerald-100 text-emerald-700"
+            : "bg-red-100 text-red-700",
+        )}
+      >
+        {regular ? (
+          <FileCheck aria-hidden="true" className="h-3.5 w-3.5" />
+        ) : (
+          <XCircle aria-hidden="true" className="h-3.5 w-3.5" />
+        )}
+        {regular ? "Certidão recebida" : "Certidão irregular"}
       </p>
-      <DetailRow label="Nome do arquivo" value={stringValue(result.filename)} />
-      <DetailRow label="Storage key" value={stringValue(result.storage_key)} />
+      <DetailRow
+        label="Resultado"
+        value={
+          <span className={cn("inline-flex items-center gap-1 font-sans font-medium", outcome.text)}>
+            {outcome.label}
+            {outcome.icon}
+          </span>
+        }
+      />
+      <DetailRow label="CNPJ na certidão" value={formatCnpj(result.cnpj_certidao)} />
+      <DetailRow label="Data de emissão" value={stringValue(result.data_emissao)} />
+      <DetailRow
+        label="Data de validade"
+        value={
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 font-sans",
+              expired ? "text-red-700" : "text-foreground",
+            )}
+          >
+            {stringValue(result.data_validade)}
+            {expired ? (
+              <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium">
+                vencida
+              </span>
+            ) : null}
+          </span>
+        }
+      />
+      <DetailRow label="Órgão emissor" value={stringValue(result.orgao_emissor)} />
+      <DetailRow label="Número da certidão" value={stringValue(result.numero_certidao)} />
+      <DetailRow
+        label="Arquivo"
+        value={
+          <span
+            className="cursor-default font-sans text-blue-700 underline decoration-blue-200 underline-offset-2"
+            title={stringValue(result.storage_key)}
+          >
+            {stringValue(result.filename)}
+          </span>
+        }
+      />
+      {status === "failed" && errorMessage ? (
+        <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+          {errorMessage}
+        </p>
+      ) : null}
     </>
   );
 }
@@ -619,7 +747,13 @@ function ComponentDetails({ snapshot }: { snapshot: ComponentSnapshot }) {
     return <WebResearchDetails result={result} />;
   }
   if (documentComponents.has(snapshot.component)) {
-    return <DocumentDetails result={result} />;
+    return (
+      <DocumentDetails
+        errorMessage={snapshot.error_message}
+        result={result}
+        status={snapshot.status}
+      />
+    );
   }
 
   return <EmptyData label="Sem detalhes disponíveis" />;
@@ -846,6 +980,14 @@ function Report({ operation }: { operation: OperationDetails }) {
         <section className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {components.map((component) => {
             const manual = documentComponents.has(component.component);
+            const document = asRecord(component.parsed_result);
+            const obtained = manual && document.status === "obtida";
+            const outcome = obtained ? certificateResult(document.resultado) : null;
+            const failed = component.status === "failed";
+            const regular =
+              !failed &&
+              (document.resultado === "negativa" ||
+                document.resultado === "positiva_com_efeitos_negativa");
             return (
               <button
                 aria-pressed={selectedName === component.component}
@@ -861,11 +1003,33 @@ function Report({ operation }: { operation: OperationDetails }) {
                 <p
                   className={cn(
                     "flex items-center gap-1 text-[10px]",
-                    manual ? "text-amber-700" : "text-emerald-700",
+                    failed
+                      ? "text-red-700"
+                      : obtained
+                      ? outcome?.text
+                      : !manual
+                        ? "text-emerald-700"
+                        : "text-amber-700",
                   )}
                 >
-                  {manual ? <FileCheck className="h-3 w-3" /> : <Check className="h-3 w-3" />}
-                  {manual ? "manual" : "ok"}
+                  {failed ? (
+                    <XCircle className="h-3 w-3" />
+                  ) : obtained ? (
+                    outcome?.icon
+                  ) : manual ? (
+                    <FileUp className="h-3 w-3" />
+                  ) : (
+                    <Check className="h-3 w-3" />
+                  )}
+                  {failed
+                    ? "irregular"
+                    : obtained
+                    ? regular
+                      ? outcome?.label.toLowerCase()
+                      : "irregular"
+                      : manual
+                        ? "não enviada"
+                        : "ok"}
                 </p>
                 <p className="mt-1 font-mono text-[10px] text-muted-foreground">
                   {formatDuration(component)}

@@ -12,6 +12,7 @@ import {
   LoaderCircle,
   Play,
   Trash2,
+  XCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -96,6 +97,8 @@ interface PipelineComponent {
   snapshot?: ComponentSnapshot;
 }
 
+type ParsedResult = Record<string, unknown>;
+
 const fieldClassName =
   "h-9 w-full rounded-md border border-input bg-background px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring";
 
@@ -146,6 +149,46 @@ function formatValue(value: unknown) {
   }
 
   return String(value);
+}
+
+function asParsedResult(value: unknown): ParsedResult {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as ParsedResult)
+    : {};
+}
+
+function certificateStatus(component: PipelineComponent) {
+  const result = asParsedResult(component.snapshot?.parsed_result);
+  if (result.status !== "obtida") {
+    return null;
+  }
+
+  switch (result.resultado) {
+    case "negativa":
+      return {
+        icon: <Check aria-hidden="true" className="h-3 w-3" />,
+        label: "certidão negativa",
+        style: "text-emerald-700",
+      };
+    case "positiva_com_efeitos_negativa":
+      return {
+        icon: <AlertTriangle aria-hidden="true" className="h-3 w-3" />,
+        label: "positiva com efeitos",
+        style: "text-amber-700",
+      };
+    case "positiva":
+      return {
+        icon: <XCircle aria-hidden="true" className="h-3 w-3" />,
+        label: "certidão positiva",
+        style: "text-red-700",
+      };
+    default:
+      return {
+        icon: <FileUp aria-hidden="true" className="h-3 w-3" />,
+        label: "recebida",
+        style: "text-muted-foreground",
+      };
+  }
 }
 
 function currentValue(operation: OperationDetails, overrideType: OverrideType) {
@@ -745,14 +788,21 @@ function CompletedView({
           const manual = isManual(component);
           const roadmap = isRoadmap(component);
           const done = isDone(component) && !manual && !roadmap;
+          const certificate = certificateStatus(component);
 
           return (
             <div
               className={cn(
                 "rounded-md border-[0.5px] border-border bg-background p-2.5",
                 done && "rounded-l-none border-l-2 border-l-emerald-500",
+                certificate?.style === "text-emerald-700" &&
+                  "rounded-l-none border-l-2 border-l-emerald-500",
+                certificate?.style === "text-amber-700" &&
+                  "rounded-l-none border-l-2 border-l-amber-500",
+                certificate?.style === "text-red-700" &&
+                  "rounded-l-none border-l-2 border-l-red-500",
                 failed && "rounded-l-none border-l-2 border-l-red-500",
-                manual && "rounded-l-none border-l-2 border-l-amber-500",
+                manual && !certificate && "rounded-l-none border-l-2 border-l-amber-500",
                 roadmap && "opacity-50",
               )}
               key={component.name}
@@ -764,15 +814,22 @@ function CompletedView({
                 className={cn(
                   "flex items-center gap-1 text-[10px] text-muted-foreground",
                   done && "text-emerald-700",
-                  manual && "text-amber-700",
+                  manual && !certificate && "text-amber-700",
                   failed && "text-red-700",
+                  certificate?.style,
                 )}
               >
-                {done ? <Check className="h-3 w-3" /> : null}
+                {failed ? (
+                  <XCircle aria-hidden="true" className="h-3 w-3" />
+                ) : (
+                  certificate?.icon ?? (done ? <Check className="h-3 w-3" /> : null)
+                )}
                 {failed
                   ? component.snapshot?.error_message || "falha"
+                  : certificate
+                    ? certificate.label
                   : manual
-                    ? "upload manual"
+                    ? "certidão não enviada"
                     : roadmap
                       ? "roadmap"
                       : `ok — ${formatDuration(component.snapshot?.duration_ms)}`}
