@@ -51,14 +51,21 @@
     page-break-before: always;
   }
 
-  .report-resources-chart {
-    break-inside: avoid;
-    height: 13rem !important;
+  [data-chart="recursos"] {
+    display: block !important;
+    height: 200px !important;
+    page-break-inside: avoid;
+    width: 100% !important;
   }
 
-  .recharts-wrapper,
-  .recharts-surface {
-    height: auto !important;
-    overflow: visible !important;
+  [data-chart="recursos"] svg {
+    display: block !important;
+    height: 200px !important;
+    width: 100% !important;
+  }
+
+  [data-chart="recursos"] .recharts-wrapper {
+    height: 200px !important;
+    width: 100% !important;
   }
 }

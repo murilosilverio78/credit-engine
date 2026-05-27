@@ -12,16 +12,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import Script from "next/script";
-import {
-  type MutableRefObject,
-  type ReactNode,
-  type RefObject,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -42,25 +33,6 @@ interface Dimension {
   justificativa?: string;
   peso?: number;
   score?: number;
-}
-
-type RadarChartInstance = {
-  destroy: () => void;
-  options: {
-    animation?: false | {
-      duration: number;
-      onComplete: () => void;
-    };
-  };
-  update: () => void;
-};
-
-type RadarChartConstructor = new (canvas: HTMLCanvasElement, config: unknown) => RadarChartInstance;
-
-declare global {
-  interface Window {
-    Chart?: RadarChartConstructor;
-  }
 }
 
 const ratingColors: Record<Rating, string> = {
@@ -327,16 +299,108 @@ function Metric({
   );
 }
 
-function ScorecardPanel({
-  canvasRef,
-  dimensions,
-  radarChartRef,
-}: {
-  canvasRef: RefObject<HTMLCanvasElement>;
-  dimensions: [string, Dimension][];
-  radarChartRef: MutableRefObject<RadarChartInstance | null>;
-}) {
-  const [chartReady, setChartReady] = useState(false);
+function RadarSvg({ dimensions }: { dimensions: [string, Dimension][] }) {
+  const labels = [
+    ["Regularidade", "fiscal"],
+    ["Saúde", "cadastral"],
+    ["Relacionamento", "gov."],
+    ["Porte /", "oper."],
+    ["Reputação", "mercado"],
+  ];
+  const center = 120;
+  const radius = 72;
+  const axisPoints = dimensionOrder.map((_, index) => {
+    const angle = -Math.PI / 2 + (index * 2 * Math.PI) / dimensionOrder.length;
+    return {
+      x: center + Math.cos(angle) * radius,
+      y: center + Math.sin(angle) * radius,
+    };
+  });
+  const dataPoints = dimensionOrder.map((key, index) => {
+    const dimension = dimensions.find(([name]) => name === key)?.[1] ?? {};
+    const score = Math.min(Math.max(numberValue(dimension.score), 0), 100);
+    const angle = -Math.PI / 2 + (index * 2 * Math.PI) / dimensionOrder.length;
+    const scaledRadius = (radius * score) / 100;
+    return {
+      x: center + Math.cos(angle) * scaledRadius,
+      y: center + Math.sin(angle) * scaledRadius,
+    };
+  });
+  const toPoints = (points: Array<{ x: number; y: number }>) =>
+    points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+
+  return (
+    <svg
+      aria-label="Gráfico radar das cinco dimensões do scorecard"
+      className="h-[240px] w-[240px]"
+      role="img"
+      viewBox="0 0 240 240"
+    >
+      {[0.25, 0.5, 0.75, 1].map((scale) => (
+        <polygon
+          fill="none"
+          key={scale}
+          points={toPoints(
+            axisPoints.map((point) => ({
+              x: center + (point.x - center) * scale,
+              y: center + (point.y - center) * scale,
+            })),
+          )}
+          stroke="#D8DEE5"
+          strokeWidth={scale === 1 ? 1.2 : 0.7}
+        />
+      ))}
+      {axisPoints.map((point, index) => (
+        <line
+          key={index}
+          stroke="#D8DEE5"
+          strokeWidth={0.8}
+          x1={center}
+          x2={point.x}
+          y1={center}
+          y2={point.y}
+        />
+      ))}
+      <polygon
+        fill="rgba(99,153,34,0.15)"
+        points={toPoints(dataPoints)}
+        stroke="#639922"
+        strokeLinejoin="round"
+        strokeWidth={2}
+      />
+      {dataPoints.map((point, index) => (
+        <circle cx={point.x} cy={point.y} fill="#639922" key={index} r={3} />
+      ))}
+      {axisPoints.map((point, index) => {
+        const offsetX = point.x < center - 8 ? -10 : point.x > center + 8 ? 10 : 0;
+        const offsetY = point.y < center - 8 ? -12 : point.y > center + 8 ? 14 : 0;
+        const anchor = offsetX < 0 ? "end" : offsetX > 0 ? "start" : "middle";
+        return (
+          <text
+            fill="#6B7280"
+            fontSize={10}
+            key={index}
+            textAnchor={anchor}
+            x={point.x + offsetX}
+            y={point.y + offsetY}
+          >
+            {labels[index].map((label, lineIndex) => (
+              <tspan
+                dy={lineIndex === 0 ? 0 : 11}
+                key={label}
+                x={point.x + offsetX}
+              >
+                {label}
+              </tspan>
+            ))}
+          </text>
+        );
+      })}
+    </svg>
+  );
+}
+
+function ScorecardPanel({ dimensions }: { dimensions: [string, Dimension][] }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const listedDimensions = useMemo(
     () =>
@@ -347,151 +411,58 @@ function ScorecardPanel({
     [dimensions],
   );
 
-  useEffect(() => {
-    if (window.Chart) {
-      setChartReady(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!chartReady || !canvasRef.current || !window.Chart) {
-      return;
-    }
-
-    const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
-    const renderChart = () => {
-      const Chart = window.Chart;
-      if (!Chart || !canvasRef.current) {
-        return;
-      }
-      radarChartRef.current?.destroy();
-      const dark = colorScheme.matches;
-      radarChartRef.current = new Chart(canvasRef.current, {
-        data: {
-          datasets: [
-            {
-              backgroundColor: "rgba(99,153,34,0.15)",
-              borderColor: "#639922",
-              borderWidth: 2,
-              data: listedDimensions.map(([, dimension]) => numberValue(dimension.score)),
-              pointBackgroundColor: "#639922",
-              pointBorderColor: "#639922",
-              pointRadius: 3,
-            },
-          ],
-          labels: [
-            ["Regularidade", "fiscal"],
-            ["Saúde", "cadastral"],
-            ["Relacionamento", "gov."],
-            ["Porte /", "oper."],
-            ["Reputação", "mercado"],
-          ],
-        },
-        options: {
-          animation: false,
-          plugins: {
-            legend: { display: false },
-          },
-          responsive: false,
-          scales: {
-            r: {
-              angleLines: { color: dark ? "#334155" : "#D8DEE5" },
-              grid: { color: dark ? "#334155" : "#D8DEE5" },
-              max: 100,
-              min: 0,
-              pointLabels: {
-                color: dark ? "#CBD5E1" : "#6B7280",
-                font: { size: 10 },
-              },
-              ticks: {
-                backdropColor: "transparent",
-                color: dark ? "#94A3B8" : "#9CA3AF",
-                display: false,
-                stepSize: 25,
-              },
-            },
-          },
-        },
-        type: "radar",
-      });
-    };
-
-    renderChart();
-    colorScheme.addEventListener("change", renderChart);
-
-    return () => {
-      colorScheme.removeEventListener("change", renderChart);
-      radarChartRef.current?.destroy();
-      radarChartRef.current = null;
-    };
-  }, [canvasRef, chartReady, listedDimensions, radarChartRef]);
-
   return (
-    <>
-      <Script
-        onReady={() => setChartReady(true)}
-        src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"
-        strategy="afterInteractive"
-      />
-      <section className="grid gap-5 rounded-lg border-[0.5px] border-border bg-background px-4 py-4 md:grid-cols-[260px_1fr]">
-        <div className="flex items-center justify-center">
-          <canvas
-            aria-label="Gráfico radar das cinco dimensões do scorecard"
-            className="h-[240px] w-[240px]"
-            height={240}
-            ref={canvasRef}
-            role="img"
-            width={240}
-          />
-        </div>
-        <div className="flex flex-col justify-center gap-2.5">
-          {listedDimensions.map(([key, dimension]) => {
-            const score = numberValue(dimension.score);
-            const favorable = score >= 75;
-            const open = expanded === key;
-            return (
-              <button
-                aria-expanded={open}
-                className="text-left focus-visible:rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                key={key}
-                onClick={() => setExpanded(open ? null : key)}
-                type="button"
-              >
-                <span className="mb-1 flex items-center justify-between gap-3 text-xs">
-                  <span className="font-medium text-foreground">
-                    {dimensionsLabels[key] ?? key.replaceAll("_", " ")}
-                  </span>
-                  <span className="flex items-baseline gap-3">
-                    <span className="text-[10px] text-muted-foreground">
-                      Peso {formatPercent(dimension.peso)}
-                    </span>
-                    <span
-                      className={cn(
-                        "font-mono text-sm font-medium",
-                        favorable ? "text-[#27500A]" : "text-[#633806]",
-                      )}
-                    >
-                      {score}
-                    </span>
-                  </span>
+    <section className="grid gap-5 rounded-lg border-[0.5px] border-border bg-background px-4 py-4 md:grid-cols-[260px_1fr]">
+      <div className="flex items-center justify-center">
+        <RadarSvg dimensions={listedDimensions} />
+      </div>
+      <div className="flex flex-col justify-center gap-2.5">
+        {listedDimensions.map(([key, dimension]) => {
+          const score = numberValue(dimension.score);
+          const favorable = score >= 75;
+          const open = expanded === key;
+          return (
+            <button
+              aria-expanded={open}
+              className="text-left focus-visible:rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              key={key}
+              onClick={() => setExpanded(open ? null : key)}
+              type="button"
+            >
+              <span className="mb-1 flex items-center justify-between gap-3 text-xs">
+                <span className="font-medium text-foreground">
+                  {dimensionsLabels[key] ?? key.replaceAll("_", " ")}
                 </span>
-                <span className="block h-1.5 overflow-hidden rounded-full bg-muted">
+                <span className="flex items-baseline gap-3">
+                  <span className="text-[10px] text-muted-foreground">
+                    Peso {formatPercent(dimension.peso)}
+                  </span>
                   <span
-                    className={cn("block h-full rounded-full", favorable ? "bg-[#639922]" : "bg-[#BA7517]")}
-                    style={{ width: `${Math.min(Math.max(score, 0), 100)}%` }}
-                  />
-                </span>
-                {open ? (
-                  <span className="mt-1.5 block text-[11px] leading-[1.55] text-muted-foreground">
-                    {stringValue(dimension.justificativa)}
+                    className={cn(
+                      "font-mono text-sm font-medium",
+                      favorable ? "text-[#27500A]" : "text-[#633806]",
+                    )}
+                  >
+                    {score}
                   </span>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
-      </section>
-    </>
+                </span>
+              </span>
+              <span className="block h-1.5 overflow-hidden rounded-full bg-muted">
+                <span
+                  className={cn("block h-full rounded-full", favorable ? "bg-[#639922]" : "bg-[#BA7517]")}
+                  style={{ width: `${Math.min(Math.max(score, 0), 100)}%` }}
+                />
+              </span>
+              {open ? (
+                <span className="mt-1.5 block text-[11px] leading-[1.55] text-muted-foreground">
+                  {stringValue(dimension.justificativa)}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -693,7 +664,11 @@ function ResourcesDetails({ result }: { result: JsonRecord }) {
         ))}
       </div>
       {monthlyValues.length ? (
-        <div className="report-resources-chart mt-4 h-52" aria-label="Recebimentos agregados por mês">
+        <div
+          aria-label="Recebimentos agregados por mês"
+          className="report-resources-chart mt-4 h-52"
+          data-chart="recursos"
+        >
           <ResponsiveContainer height="100%" width="100%">
             <BarChart data={monthlyValues} margin={{ bottom: 0, left: 14, right: 8, top: 8 }}>
               <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" vertical={false} />
@@ -1212,8 +1187,6 @@ function PrintableAnnex({ snapshots }: { snapshots: Map<string, ComponentSnapsho
 
 function Report({ operation }: { operation: OperationDetails }) {
   const generatedAt = useMemo(() => new Date(), []);
-  const radarCanvasRef = useRef<HTMLCanvasElement>(null);
-  const radarChartRef = useRef<RadarChartInstance | null>(null);
   const snapshots = useMemo(
     () =>
       new Map(
@@ -1259,40 +1232,14 @@ function Report({ operation }: { operation: OperationDetails }) {
     minimumFractionDigits: 1,
   }).format(rate);
 
-  async function printPdf() {
+  function printPdf() {
     const originalTitle = document.title;
     const cnpj = operation.cnpj.replace(/\D/g, "");
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     document.title = `CreditEngine_${cnpj}_${date}.pdf`;
-    const radarChart = radarChartRef.current;
-    if (radarChart) {
-      await new Promise<void>((resolve) => {
-        radarChart.options.animation = {
-          duration: 0,
-          onComplete: resolve,
-        };
-        radarChart.update();
-      });
-    }
-    const printedCharts = Array.from(document.querySelectorAll<HTMLCanvasElement>("canvas")).map(
-      (canvas) => {
-        const bounds = canvas.getBoundingClientRect();
-        const image = document.createElement("img");
-        image.src = canvas.toDataURL("image/png");
-        image.alt = canvas.getAttribute("aria-label") ?? "Gráfico do relatório";
-        image.width = Math.round(bounds.width || canvas.width);
-        image.height = Math.round(bounds.height || canvas.height);
-        image.style.width = `${bounds.width || canvas.width}px`;
-        image.style.height = `${bounds.height || canvas.height}px`;
-        image.className = canvas.className;
-        canvas.replaceWith(image);
-        return { canvas, image };
-      },
-    );
 
     const restorePrintState = () => {
       document.title = originalTitle;
-      printedCharts.forEach(({ canvas, image }) => image.replaceWith(canvas));
       window.removeEventListener("afterprint", restorePrintState);
     };
 
@@ -1387,11 +1334,7 @@ function Report({ operation }: { operation: OperationDetails }) {
         </section>
 
         <SectionTitle>Scorecard — 5 dimensões</SectionTitle>
-        <ScorecardPanel
-          canvasRef={radarCanvasRef}
-          dimensions={dimensions}
-          radarChartRef={radarChartRef}
-        />
+        <ScorecardPanel dimensions={dimensions} />
 
         <SectionTitle>Parecer do agente</SectionTitle>
         <section className="rounded-r-lg border-[0.5px] border-l-[3px] border-border border-l-[#639922] bg-background px-4 py-3.5">
