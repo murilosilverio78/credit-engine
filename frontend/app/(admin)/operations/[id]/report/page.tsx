@@ -315,11 +315,9 @@ function Metric({
 function ScorecardPanel({
   canvasRef,
   dimensions,
-  printImageRef,
 }: {
   canvasRef: RefObject<HTMLCanvasElement>;
   dimensions: [string, Dimension][];
-  printImageRef: RefObject<HTMLImageElement>;
 }) {
   const [chartReady, setChartReady] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -423,16 +421,11 @@ function ScorecardPanel({
         <div className="flex items-center justify-center">
           <canvas
             aria-label="Gráfico radar das cinco dimensões do scorecard"
-            className="h-[240px] w-[240px] print:hidden"
+            className="h-[240px] w-[240px]"
             height={240}
             ref={canvasRef}
             role="img"
             width={240}
-          />
-          <img
-            alt="Gráfico radar das cinco dimensões do scorecard"
-            className="hidden h-[240px] w-[240px] print:block"
-            ref={printImageRef}
           />
         </div>
         <div className="flex flex-col justify-center gap-2.5">
@@ -1204,7 +1197,6 @@ function PrintableAnnex({ snapshots }: { snapshots: Map<string, ComponentSnapsho
 function Report({ operation }: { operation: OperationDetails }) {
   const generatedAt = useMemo(() => new Date(), []);
   const radarCanvasRef = useRef<HTMLCanvasElement>(null);
-  const radarPrintImageRef = useRef<HTMLImageElement>(null);
   const snapshots = useMemo(
     () =>
       new Map(
@@ -1255,18 +1247,29 @@ function Report({ operation }: { operation: OperationDetails }) {
     const cnpj = operation.cnpj.replace(/\D/g, "");
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     document.title = `CreditEngine_${cnpj}_${date}.pdf`;
-    const radarImage = radarPrintImageRef.current;
-    if (radarCanvasRef.current && radarImage) {
-      radarImage.src = radarCanvasRef.current.toDataURL("image/png");
-    }
+    const printedCharts = Array.from(document.querySelectorAll<HTMLCanvasElement>("canvas")).map(
+      (canvas) => {
+        const bounds = canvas.getBoundingClientRect();
+        const image = document.createElement("img");
+        image.src = canvas.toDataURL("image/png");
+        image.alt = canvas.getAttribute("aria-label") ?? "Gráfico do relatório";
+        image.width = Math.round(bounds.width || canvas.width);
+        image.height = Math.round(bounds.height || canvas.height);
+        image.style.width = `${bounds.width || canvas.width}px`;
+        image.style.height = `${bounds.height || canvas.height}px`;
+        image.className = canvas.className;
+        canvas.replaceWith(image);
+        return { canvas, image };
+      },
+    );
 
-    const restoreTitle = () => {
+    const restorePrintState = () => {
       document.title = originalTitle;
-      radarImage?.removeAttribute("src");
-      window.removeEventListener("afterprint", restoreTitle);
+      printedCharts.forEach(({ canvas, image }) => image.replaceWith(canvas));
+      window.removeEventListener("afterprint", restorePrintState);
     };
 
-    window.addEventListener("afterprint", restoreTitle);
+    window.addEventListener("afterprint", restorePrintState);
     window.print();
   }
 
@@ -1360,7 +1363,6 @@ function Report({ operation }: { operation: OperationDetails }) {
         <ScorecardPanel
           canvasRef={radarCanvasRef}
           dimensions={dimensions}
-          printImageRef={radarPrintImageRef}
         />
 
         <SectionTitle>Parecer do agente</SectionTitle>
