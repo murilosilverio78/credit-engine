@@ -45,4 +45,9 @@
   main {
     margin-left: 0 !important;
   }
+
+  .report-annex {
+    break-before: page;
+    page-break-before: always;
+  }
 }

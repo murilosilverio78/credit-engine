@@ -767,6 +767,270 @@ function PdfFooter({ generatedAt }: { generatedAt: Date }) {
   );
 }
 
+function AnnexRow({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex justify-between gap-5 border-b border-slate-200 py-1 last:border-b-0">
+      <span className="text-slate-500">{label}</span>
+      <span className="max-w-[68%] text-right text-slate-900">{value}</span>
+    </div>
+  );
+}
+
+function AnnexTable({
+  children,
+  headers,
+}: {
+  children: ReactNode;
+  headers: string[];
+}) {
+  return (
+    <table className="mt-2 w-full border-collapse text-[9px]">
+      <thead>
+        <tr className="bg-slate-100">
+          {headers.map((header) => (
+            <th className="border border-slate-300 px-1.5 py-1 text-left font-semibold" key={header}>
+              {header}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>{children}</tbody>
+    </table>
+  );
+}
+
+function AnnexSection({
+  children,
+  title,
+}: {
+  children: ReactNode;
+  title: string;
+}) {
+  return (
+    <section className="mb-4 break-inside-avoid">
+      <h3 className="mb-1.5 border-b border-slate-300 pb-1 font-semibold text-blue-800">
+        {title}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+function BrasilApiAnnex({ result }: { result: JsonRecord }) {
+  const taxRegimes = asArray(result.regime_tributario).slice(-3).map((item) => asRecord(item));
+  const partners = asArray(result.qsa).map((item) => asRecord(item));
+  const secondaryActivities = asArray(result.atividades_secundarias).slice(0, 3);
+
+  return (
+    <AnnexSection title="brasil_api">
+      <div className="grid grid-cols-2 gap-x-5">
+        <AnnexRow label="Razão social" value={stringValue(result.razao_social)} />
+        <AnnexRow label="CNPJ" value={formatCnpj(result.cnpj)} />
+        <AnnexRow label="Porte" value={stringValue(result.porte)} />
+        <AnnexRow label="Capital social" value={formatCurrency(result.capital_social)} />
+        <AnnexRow label="Data abertura" value={formatDate(result.data_abertura)} />
+        <AnnexRow label="Situação cadastral" value={stringValue(result.situacao_cadastral)} />
+      </div>
+      <AnnexRow
+        label="Regime tributário"
+        value={taxRegimes
+          .map((regime) => `${stringValue(regime.ano)}: ${stringValue(regime.forma)}`)
+          .join(" | ") || "—"}
+      />
+      <AnnexRow
+        label="Sócios"
+        value={partners
+          .map(
+            (partner) =>
+              `${stringValue(partner.nome)} (${stringValue(partner.qualificacao)}, ${stringValue(partner.data_entrada)})`,
+          )
+          .join("; ") || "—"}
+      />
+      <AnnexRow label="Atividade principal" value={stringValue(result.atividade_principal)} />
+      <AnnexRow
+        label="Atividades secundárias"
+        value={secondaryActivities.map((activity) => stringValue(activity)).join("; ") || "—"}
+      />
+    </AnnexSection>
+  );
+}
+
+function ContractsAnnex({ result }: { result: JsonRecord }) {
+  const contracts = asArray(result.contratos_detalhe).map((item) => asRecord(item));
+
+  return (
+    <AnnexSection title="contratos">
+      <div className="grid grid-cols-2 gap-x-5">
+        <AnnexRow label="Total / ativos / encerrados" value={`${stringValue(result.total_contratos)} / ${stringValue(result.contratos_ativos)} / ${stringValue(result.contratos_encerrados)}`} />
+        <AnnexRow label="Valor total ativo" value={formatCurrency(result.valor_total_ativo)} />
+        <AnnexRow label="Valor histórico" value={formatCurrency(result.valor_total_historico)} />
+      </div>
+      {contracts.length ? (
+        <AnnexTable headers={["Número", "Órgão", "Valor", "Status", "Vigência"]}>
+          {contracts.map((contract, index) => (
+            <tr key={`${String(contract.numero)}-${index}`}>
+              <td className="border border-slate-300 px-1.5 py-1">{stringValue(contract.numero)}</td>
+              <td className="border border-slate-300 px-1.5 py-1">{stringValue(contract.orgao)}</td>
+              <td className="border border-slate-300 px-1.5 py-1">{formatCurrency(contract.valor_final ?? contract.valor_inicial)}</td>
+              <td className="border border-slate-300 px-1.5 py-1">{contract.ativo ? "ativo" : "encerrado"}</td>
+              <td className="border border-slate-300 px-1.5 py-1">{formatDate(contract.data_inicio)} - {formatDate(contract.data_fim)}</td>
+            </tr>
+          ))}
+        </AnnexTable>
+      ) : (
+        <p>Nenhum registro</p>
+      )}
+    </AnnexSection>
+  );
+}
+
+function ResourcesAnnex({ result }: { result: JsonRecord }) {
+  const valuesByAgency = new Map<string, number>();
+  asArray(result.recursos_detalhe).forEach((item) => {
+    const resource = asRecord(item);
+    const agency = stringValue(resource.orgao, "");
+    if (agency) {
+      valuesByAgency.set(agency, (valuesByAgency.get(agency) ?? 0) + numberValue(resource.valor));
+    }
+  });
+  const topAgencies = Array.from(valuesByAgency.entries())
+    .sort(([, first], [, second]) => second - first)
+    .slice(0, 5);
+
+  return (
+    <AnnexSection title="recursos_recebidos">
+      <div className="grid grid-cols-2 gap-x-5">
+        <AnnexRow label="Valor total recebido" value={formatCurrency(result.valor_total_recebido)} />
+        <AnnexRow label="Período" value={`${stringValue(result.periodo_inicio)} - ${stringValue(result.periodo_fim)}`} />
+      </div>
+      <AnnexRow
+        label="Valor por ano"
+        value={Object.entries(asRecord(result.valor_por_ano))
+          .map(([year, value]) => `${year}: ${formatCurrency(value)}`)
+          .join(" | ") || "—"}
+      />
+      <AnnexTable headers={["Top órgãos pagadores", "Valor identificado"]}>
+        {topAgencies.map(([agency, value]) => (
+          <tr key={agency}>
+            <td className="border border-slate-300 px-1.5 py-1">{agency}</td>
+            <td className="border border-slate-300 px-1.5 py-1">{formatCurrency(value)}</td>
+          </tr>
+        ))}
+      </AnnexTable>
+    </AnnexSection>
+  );
+}
+
+function LegalEntityAnnex({ result }: { result: JsonRecord }) {
+  const flags = Object.entries(result).filter(([, value]) => typeof value === "boolean");
+  return (
+    <AnnexSection title="pessoa_juridica">
+      <div className="grid grid-cols-2 gap-x-5">
+        {flags.map(([key, value]) => (
+          <AnnexRow
+            key={key}
+            label={legalEntityLabels[key] ?? key.replaceAll("_", " ")}
+            value={value ? "Sim" : "Não"}
+          />
+        ))}
+      </div>
+    </AnnexSection>
+  );
+}
+
+function SanctionAnnex({ component, result }: { component: string; result: JsonRecord }) {
+  const records = asArray(result.registros ?? result.acordos).map((item) => asRecord(item));
+  if (!records.length) {
+    return (
+      <AnnexSection title={component}>
+        <p>Nenhum registro</p>
+      </AnnexSection>
+    );
+  }
+
+  const columns = Object.keys(records[0]).slice(0, 5);
+  return (
+    <AnnexSection title={component}>
+      <AnnexTable headers={columns.map((column) => column.replaceAll("_", " "))}>
+        {records.map((record, index) => (
+          <tr key={`${component}-${index}`}>
+            {columns.map((column) => (
+              <td className="border border-slate-300 px-1.5 py-1" key={column}>
+                {stringValue(record[column])}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </AnnexTable>
+    </AnnexSection>
+  );
+}
+
+function CertificateAnnex({ component, result }: { component: string; result: JsonRecord }) {
+  return (
+    <AnnexSection title={component}>
+      {result.status === "obtida" ? (
+        <div className="grid grid-cols-2 gap-x-5">
+          <AnnexRow label="Resultado" value={certificateResult(result.resultado).label} />
+          <AnnexRow label="CNPJ na certidão" value={formatCnpj(result.cnpj_certidao)} />
+          <AnnexRow label="Emissão" value={stringValue(result.data_emissao)} />
+          <AnnexRow label="Validade" value={stringValue(result.data_validade)} />
+          <AnnexRow label="Órgão emissor" value={stringValue(result.orgao_emissor)} />
+        </div>
+      ) : (
+        <p>Certidão não enviada</p>
+      )}
+    </AnnexSection>
+  );
+}
+
+function WebResearchAnnex({ result }: { result: JsonRecord }) {
+  const alerts = asArray(result.alertas).map((alert) => stringValue(alert));
+  return (
+    <AnnexSection title="web_research">
+      <AnnexRow label="Nível de risco" value={stringValue(result.nivel_risco)} />
+      <AnnexRow label="Resumo" value={stringValue(result.resumo)} />
+      {alerts.length ? <AnnexRow label="Alertas" value={alerts.join("; ")} /> : null}
+    </AnnexSection>
+  );
+}
+
+function PrintableAnnex({ snapshots }: { snapshots: Map<string, ComponentSnapshot> }) {
+  const brasilApi = asRecord(snapshots.get("brasil_api")?.parsed_result);
+  const contracts = asRecord(snapshots.get("contratos")?.parsed_result);
+  const resources = asRecord(snapshots.get("recursos_recebidos")?.parsed_result);
+  const legalEntity = asRecord(snapshots.get("pessoa_juridica")?.parsed_result);
+
+  return (
+    <section className="report-annex hidden text-[10px] leading-4 text-slate-900 print:block">
+      <div className="mb-5 border-t-2 border-blue-800 pt-3">
+        <h2 className="text-sm font-semibold tracking-[0.06em] text-blue-800">
+          ANEXO — DADOS CONSULTADOS
+        </h2>
+      </div>
+      <BrasilApiAnnex result={brasilApi} />
+      <ContractsAnnex result={contracts} />
+      <ResourcesAnnex result={resources} />
+      <LegalEntityAnnex result={legalEntity} />
+      {["ceis", "cnep", "cepim", "acordos_leniencia"].map((component) => (
+        <SanctionAnnex
+          component={component}
+          key={component}
+          result={asRecord(snapshots.get(component)?.parsed_result)}
+        />
+      ))}
+      {["cnd_federal", "cndt_tst", "fgts"].map((component) => (
+        <CertificateAnnex
+          component={component}
+          key={component}
+          result={asRecord(snapshots.get(component)?.parsed_result)}
+        />
+      ))}
+      <WebResearchAnnex result={asRecord(snapshots.get("web_research")?.parsed_result)} />
+    </section>
+  );
+}
+
 function Report({ operation }: { operation: OperationDetails }) {
   const generatedAt = useMemo(() => new Date(), []);
   const snapshots = useMemo(
@@ -808,6 +1072,21 @@ function Report({ operation }: { operation: OperationDetails }) {
   const selected = snapshots.get(selectedName);
   const status = conclusion(operation.rating);
   const rate = operation.taxa_sugerida ?? numberValue(engine.taxa_sugerida_am);
+
+  function printPdf() {
+    const originalTitle = document.title;
+    const cnpj = operation.cnpj.replace(/\D/g, "");
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    document.title = `CreditEngine_${cnpj}_${date}.pdf`;
+
+    const restoreTitle = () => {
+      document.title = originalTitle;
+      window.removeEventListener("afterprint", restoreTitle);
+    };
+
+    window.addEventListener("afterprint", restoreTitle);
+    window.print();
+  }
 
   return (
     <div className="min-h-dvh bg-muted/40 print:bg-white">
@@ -859,7 +1138,7 @@ function Report({ operation }: { operation: OperationDetails }) {
               ) : null}
               <button
                 className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring print:hidden"
-                onClick={() => window.print()}
+                onClick={printPdf}
                 type="button"
               >
                 <Download className="h-3.5 w-3.5" />
@@ -1038,6 +1317,8 @@ function Report({ operation }: { operation: OperationDetails }) {
             );
           })}
         </section>
+
+        <PrintableAnnex snapshots={snapshots} />
 
         {selected ? (
           <section className="mt-3.5 rounded-lg border border-blue-200 bg-background px-4 py-3.5 print:hidden">
