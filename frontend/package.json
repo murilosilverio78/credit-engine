@@ -11,7 +11,7 @@
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
     "@radix-ui/react-switch": "^1.2.6",
-    "@react-pdf/renderer": "^4.5.1",
+    "@sparticuz/chromium": "^149.0.0",
     "@tanstack/react-query": "^5.56.2",
     "axios": "^1.7.7",
     "clsx": "^2.1.1",
@@ -19,6 +19,7 @@
     "geist": "^1.7.1",
     "lucide-react": "^0.446.0",
     "next": "14.2.13",
+    "puppeteer-core": "^25.1.0",
     "react": "^18",
     "react-dom": "^18",
     "react-hook-form": "^7.76.1",

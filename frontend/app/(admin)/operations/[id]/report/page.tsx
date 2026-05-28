@@ -11,8 +11,8 @@ import {
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { type ReactNode, useMemo, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -24,7 +24,6 @@ import {
 } from "recharts";
 
 import { ApiError, getOperation } from "@/lib/api";
-import { generateReportPdf } from "@/lib/generate-report-pdf";
 import type { ComponentSnapshot, OperationDetails, Rating } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -1186,7 +1185,13 @@ function PrintableAnnex({ snapshots }: { snapshots: Map<string, ComponentSnapsho
   );
 }
 
-function Report({ operation }: { operation: OperationDetails }) {
+function Report({
+  operation,
+  printMode,
+}: {
+  operation: OperationDetails;
+  printMode: boolean;
+}) {
   const generatedAt = useMemo(() => new Date(), []);
   const snapshots = useMemo(
     () =>
@@ -1225,6 +1230,7 @@ function Report({ operation }: { operation: OperationDetails }) {
     snapshots.has("contratos") ? "contratos" : components[0]?.component ?? "",
   );
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [isPrintReady, setIsPrintReady] = useState(!printMode);
   const selected = snapshots.get(selectedName);
   const status = conclusion(operation.rating);
   const rawRate = operation.taxa_sugerida ?? numberValue(engine.taxa_sugerida_am);
@@ -1234,6 +1240,20 @@ function Report({ operation }: { operation: OperationDetails }) {
     minimumFractionDigits: 1,
   }).format(rate);
 
+  useEffect(() => {
+    if (!printMode) {
+      setIsPrintReady(true);
+      return;
+    }
+
+    if (snapshots.has("recursos_recebidos")) {
+      setSelectedName("recursos_recebidos");
+    }
+
+    const timer = window.setTimeout(() => setIsPrintReady(true), 1000);
+    return () => window.clearTimeout(timer);
+  }, [printMode, snapshots]);
+
   async function printPdf() {
     if (isGeneratingPdf) {
       return;
@@ -1241,7 +1261,7 @@ function Report({ operation }: { operation: OperationDetails }) {
 
     setIsGeneratingPdf(true);
     try {
-      await generateReportPdf(operation);
+      window.open(`/api/pdf?operation_id=${encodeURIComponent(operation.id)}`, "_blank");
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -1249,7 +1269,24 @@ function Report({ operation }: { operation: OperationDetails }) {
 
   return (
     <div className="min-h-dvh bg-muted/40 print:bg-white">
-      <header className="flex items-center gap-2 border-b-[0.5px] border-border bg-background px-5 py-3 print:hidden">
+      {printMode ? (
+        <style jsx global>{`
+          aside,
+          [data-pdf-hidden="true"] {
+            display: none !important;
+          }
+
+          main {
+            margin-left: 0 !important;
+          }
+        `}</style>
+      ) : null}
+      <header
+        className={cn(
+          "flex items-center gap-2 border-b-[0.5px] border-border bg-background px-5 py-3 print:hidden",
+          printMode && "hidden",
+        )}
+      >
         <Link
           className="flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-xs text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           href={`/operations/${operation.id}`}
@@ -1296,7 +1333,10 @@ function Report({ operation }: { operation: OperationDetails }) {
                 </span>
               ) : null}
               <button
-                className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring print:hidden"
+                className={cn(
+                  "flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring print:hidden",
+                  printMode && "hidden",
+                )}
                 disabled={isGeneratingPdf}
                 onClick={printPdf}
                 type="button"
@@ -1313,6 +1353,11 @@ function Report({ operation }: { operation: OperationDetails }) {
               </button>
             </div>
           </div>
+          {printMode && !isPrintReady ? (
+            <p className="mb-3 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+              Preparando relatório para PDF...
+            </p>
+          ) : null}
           <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
             <Metric label="Score">
               {operation.score ?? numberValue(engine.score)}
@@ -1464,7 +1509,9 @@ function Report({ operation }: { operation: OperationDetails }) {
 
 export default function OperationReportPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const operationId = params.id;
+  const printMode = searchParams.get("print") === "true";
   const operationQuery = useQuery({
     queryFn: () => getOperation(operationId),
     queryKey: ["operation", operationId],
@@ -1498,5 +1545,5 @@ export default function OperationReportPage() {
     );
   }
 
-  return <Report operation={decodedValue(operationQuery.data)} />;
+  return <Report operation={decodedValue(operationQuery.data)} printMode={printMode} />;
 }
