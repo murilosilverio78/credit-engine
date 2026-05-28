@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  ArrowUpCircle,
   FileSearch,
   Plus,
   SlidersHorizontal,
@@ -11,7 +12,8 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { getHealth, getPendingOverrides } from "@/lib/api";
+import { useSession } from "@/hooks/use-session";
+import { getHealth, getPendingEscaladas, getPendingOverrides } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface NavigationItem {
@@ -19,6 +21,8 @@ interface NavigationItem {
   icon: LucideIcon;
   label: string;
   showPendingCount?: boolean;
+  directorOnly?: boolean;
+  pendingType?: "escaladas" | "overrides";
 }
 
 const navigation: NavigationItem[] = [
@@ -29,11 +33,25 @@ const navigation: NavigationItem[] = [
     icon: AlertTriangle,
     label: "Overrides",
     showPendingCount: true,
+    pendingType: "overrides",
+  },
+  {
+    href: "/escaladas",
+    icon: ArrowUpCircle,
+    label: "Escaladas",
+    showPendingCount: true,
+    pendingType: "escaladas",
   },
   {
     href: "/components",
     icon: SlidersHorizontal,
     label: "Componentes",
+  },
+  {
+    href: "/settings/alcadas",
+    icon: SlidersHorizontal,
+    label: "Alçadas",
+    directorOnly: true,
   },
 ];
 
@@ -50,9 +68,16 @@ function isActivePath(pathname: string, href: string) {
 
 export function AdminSidebar() {
   const pathname = usePathname();
+  const { session } = useSession();
   const { data: pendingOverrides = [] } = useQuery({
     queryKey: ["overrides", "pending"],
     queryFn: getPendingOverrides,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: true,
+  });
+  const { data: pendingEscaladas = [] } = useQuery({
+    queryKey: ["escaladas", "pendentes"],
+    queryFn: getPendingEscaladas,
     refetchInterval: 30_000,
     refetchIntervalInBackground: true,
   });
@@ -69,6 +94,23 @@ export function AdminSidebar() {
     : healthQuery.isError
       ? { color: "bg-red-500", label: "API offline" }
       : { color: "bg-muted-foreground/50", label: "Verificando API" };
+  const alcadaLabel =
+    session?.user.alcada === "committee"
+      ? "comitê"
+      : session?.user.alcada === "manager"
+        ? "gerente"
+        : "analista";
+  const alcadaDot =
+    session?.user.alcada === "committee"
+      ? "bg-amber-500"
+      : session?.user.alcada === "manager"
+        ? "bg-blue-500"
+        : "bg-muted-foreground/50";
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.href = "/login";
+  }
 
   return (
     <aside className="fixed inset-y-0 left-0 flex w-[200px] flex-col border-r-[0.5px] border-border bg-background">
@@ -83,9 +125,13 @@ export function AdminSidebar() {
 
       <nav aria-label="Navegação principal" className="flex-1 py-2">
         <ul>
-          {navigation.map((item) => {
+          {navigation.filter((item) => !item.directorOnly || session?.user.role === "diretor").map((item) => {
             const active = isActivePath(pathname, item.href);
             const Icon = item.icon;
+            const pendingCount =
+              item.pendingType === "escaladas"
+                ? pendingEscaladas.length
+                : pendingOverrides.length;
 
             return (
               <li key={item.href}>
@@ -103,10 +149,10 @@ export function AdminSidebar() {
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
                   {item.showPendingCount ? (
                     <span
-                      aria-label={`${pendingOverrides.length} overrides pendentes`}
+                      aria-label={`${pendingCount} pendências`}
                       className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium tabular-nums leading-none text-amber-800"
                     >
-                      {pendingOverrides.length}
+                      {pendingCount}
                     </span>
                   ) : null}
                 </Link>
@@ -115,6 +161,25 @@ export function AdminSidebar() {
           })}
         </ul>
       </nav>
+
+      {session ? (
+        <div className="border-t-[0.5px] border-border px-3.5 py-3">
+          <p className="truncate text-[11px] font-medium text-foreground">
+            {session.user.name || session.user.email}
+          </p>
+          <p className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+            <span aria-hidden="true" className={cn("h-1.5 w-1.5 rounded-full", alcadaDot)} />
+            {alcadaLabel}
+            <button
+              className="ml-auto text-[10px] hover:text-foreground"
+              onClick={logout}
+              type="button"
+            >
+              Sair
+            </button>
+          </p>
+        </div>
+      ) : null}
 
       <div className="border-t-[0.5px] border-border px-3.5 py-3">
         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">

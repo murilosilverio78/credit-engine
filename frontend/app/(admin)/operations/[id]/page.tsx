@@ -20,6 +20,9 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { ApprovalActions } from "@/components/approval-actions";
+import { useAlcada } from "@/hooks/use-alcada";
+import { useSession } from "@/hooks/use-session";
 import {
   ApiError,
   createOverride,
@@ -666,6 +669,8 @@ function CompletedView({
   operationId: string;
 }) {
   const queryClient = useQueryClient();
+  const { session } = useSession();
+  const alcada = useAlcada();
   const [confirmation, setConfirmation] = useState("");
   const {
     formState: { errors },
@@ -685,13 +690,25 @@ function CompletedView({
     resolver: zodResolver(overrideSchema),
   });
   const overrideType = watch("override_type");
+  const newValue = watch("new_value");
+  const requestedBy = watch("requested_by");
+  const operationValue = operation.valor_solicitado ?? operation.limite_aprovado ?? null;
+  const newRating =
+    overrideType === "rating" && ["A", "B", "C", "D", "E"].includes(newValue.toUpperCase())
+      ? (newValue.toUpperCase() as Rating)
+      : undefined;
+  const canSubmitOverride = alcada.podeOverride(operationValue, newRating);
+  const escalationRole = alcada.roleEscalaDest();
   const overridesQuery = useQuery({
     queryFn: () => getOperationOverrides(operationId),
     queryKey: ["operations", operationId, "overrides"],
   });
   const overrideMutation = useMutation({
     mutationFn: (values: OverrideFormValues) =>
-      createOverride(operationId, values),
+      createOverride(operationId, {
+        ...values,
+        escalar: !canSubmitOverride,
+      }),
     onSuccess: async () => {
       setConfirmation("Override solicitado com sucesso.");
       reset({
@@ -699,7 +716,7 @@ function CompletedView({
         new_value: "",
         override_type: overrideType,
         previous_value: currentValue(operation, overrideType),
-        requested_by: "",
+        requested_by: session?.user.name ?? session?.user.email ?? "",
       });
       await queryClient.invalidateQueries({
         queryKey: ["operations", operationId, "overrides"],
@@ -710,6 +727,12 @@ function CompletedView({
   useEffect(() => {
     setValue("previous_value", currentValue(operation, overrideType));
   }, [operation, overrideType, setValue]);
+
+  useEffect(() => {
+    if (session?.user && !requestedBy) {
+      setValue("requested_by", session.user.name || session.user.email);
+    }
+  }, [requestedBy, session?.user, setValue]);
 
   return (
     <section className="flex-1 px-5 py-4">
@@ -778,6 +801,10 @@ function CompletedView({
           />
         </div>
       </div>
+
+      {operation.status === "completed" ? (
+        <ApprovalActions operation={operation} />
+      ) : null}
 
       <h2 className="mb-2 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
         Pipeline de componentes
@@ -896,6 +923,11 @@ function CompletedView({
             {...register("justificativa")}
           />
         </OverrideField>
+        {!canSubmitOverride ? (
+          <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            Este override exige aprovação do {escalationRole ?? "diretor"}.
+          </p>
+        ) : null}
         {confirmation ? (
           <p className="mt-3 text-xs text-emerald-700" role="status">
             {confirmation}

@@ -1,9 +1,14 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel, field_validator
-from typing import Optional
+from typing import Literal, Optional
 import re
 
+from app.core.auth import get_current_user
+from app.core.database import supabase
+from app.services.audit_service import AuditService
+
 router = APIRouter()
+audit = AuditService()
 
 
 class PropostaInput(BaseModel):
@@ -20,6 +25,50 @@ class PropostaInput(BaseModel):
         if len(digits) != 14:
             raise ValueError("CNPJ deve ter 14 dígitos")
         return digits
+
+
+class ApprovalInput(BaseModel):
+    justificativa: Optional[str] = None
+
+
+class ResolveEscalationInput(BaseModel):
+    approval_id: str
+    decision: Literal["approved", "rejected"]
+    justificativa: str
+
+
+def _operation_snapshot(operation_id: str) -> dict:
+    result = supabase.table("operations")\
+        .select("*")\
+        .eq("id", operation_id)\
+        .single()\
+        .execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Operação não encontrada")
+    return result.data
+
+
+def _insert_approval(
+    operation: dict,
+    action: str,
+    current_user: dict,
+    justificativa: Optional[str] = None,
+    extra: Optional[dict] = None,
+) -> dict:
+    data = {
+        "action": action,
+        "justificativa": justificativa,
+        "operation_id": operation["id"],
+        "rating_momento": operation.get("rating"),
+        "requested_by": current_user.get("id"),
+        "requested_role": current_user.get("role"),
+        "score_momento": operation.get("score"),
+        "valor_operacao": operation.get("valor_solicitado") or operation.get("limite_aprovado"),
+    }
+    if extra:
+        data.update(extra)
+    result = supabase.table("operation_approvals").insert(data).execute()
+    return result.data[0]
 
 
 @router.post("/", status_code=201)
@@ -77,3 +126,103 @@ async def list_operations(
 
     svc = OperationService()
     return await svc.list(status=status, cnpj=cnpj, limit=limit, offset=offset)
+
+
+@router.post("/{operation_id}/approve")
+async def approve_operation(
+    operation_id: str,
+    payload: ApprovalInput,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    operation = _operation_snapshot(operation_id)
+    approval = _insert_approval(operation, "approved", current_user, payload.justificativa)
+    audit.log(
+        operation_id=operation_id,
+        action="operation_approved",
+        actor_id=current_user.get("id"),
+        actor_type=current_user.get("role", "analista"),
+        ip_address=request.client.host if request.client else None,
+        payload={"approval_id": approval.get("id")},
+    )
+    return approval
+
+
+@router.post("/{operation_id}/reject")
+async def reject_operation(
+    operation_id: str,
+    payload: ApprovalInput,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    if not payload.justificativa or len(payload.justificativa.strip()) < 10:
+        raise HTTPException(status_code=400, detail="Justificativa obrigatória com ao menos 10 caracteres")
+    operation = _operation_snapshot(operation_id)
+    approval = _insert_approval(operation, "rejected", current_user, payload.justificativa.strip())
+    audit.log(
+        operation_id=operation_id,
+        action="operation_rejected",
+        actor_id=current_user.get("id"),
+        actor_type=current_user.get("role", "analista"),
+        ip_address=request.client.host if request.client else None,
+        override_reason=payload.justificativa.strip(),
+        payload={"approval_id": approval.get("id")},
+    )
+    return approval
+
+
+@router.post("/{operation_id}/escalate")
+async def escalate_operation(
+    operation_id: str,
+    payload: ApprovalInput,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    operation = _operation_snapshot(operation_id)
+    approval = _insert_approval(operation, "escalated", current_user, payload.justificativa)
+    audit.log(
+        operation_id=operation_id,
+        action="operation_escalated",
+        actor_id=current_user.get("id"),
+        actor_type=current_user.get("role", "analista"),
+        ip_address=request.client.host if request.client else None,
+        override_reason=payload.justificativa,
+        payload={"approval_id": approval.get("id")},
+    )
+    return approval
+
+
+@router.post("/{operation_id}/resolve-escalation")
+async def resolve_escalation(
+    operation_id: str,
+    payload: ResolveEscalationInput,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    if len(payload.justificativa.strip()) < 10:
+        raise HTTPException(status_code=400, detail="Justificativa obrigatória com ao menos 10 caracteres")
+    operation = _operation_snapshot(operation_id)
+    action = "escalation_approved" if payload.decision == "approved" else "escalation_rejected"
+    approval = _insert_approval(
+        operation,
+        action,
+        current_user,
+        payload.justificativa.strip(),
+        extra={
+            "decided_by": current_user.get("id"),
+            "decided_role": current_user.get("role"),
+        },
+    )
+    audit.log(
+        operation_id=operation_id,
+        action=action,
+        actor_id=current_user.get("id"),
+        actor_type=current_user.get("role", "gerente"),
+        ip_address=request.client.host if request.client else None,
+        override_reason=payload.justificativa.strip(),
+        payload={
+            "approval_id": approval.get("id"),
+            "resolved_approval_id": payload.approval_id,
+        },
+    )
+    return approval

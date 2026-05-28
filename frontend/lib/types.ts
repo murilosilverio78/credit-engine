@@ -15,6 +15,7 @@ export type OverrideType =
   | "status_operacao";
 
 export type Alcada = "analyst" | "manager" | "committee";
+export type UserRole = "analista" | "gerente" | "diretor";
 
 export interface Operation {
   id: string;
@@ -24,6 +25,7 @@ export interface Operation {
   rating: Rating | null;
   score: number | null;
   taxa_sugerida: number | null;
+  valor_solicitado?: number | null;
   source: string;
   created_at: string;
   limite_aprovado?: number | null;
@@ -71,6 +73,7 @@ export interface OverrideInput {
   new_value: unknown;
   justificativa: string;
   requested_by?: string;
+  escalar?: boolean;
 }
 
 export interface OverrideReviewInput {
@@ -150,4 +153,46 @@ export interface UploadResetResult {
 export interface UploadResumeResult {
   operation_id: string;
   status: "resume_requested";
+}
+
+export interface AlcadaConfig {
+  role: UserRole;
+  max_valor: number;
+  max_rating: Rating;
+  pode_override: boolean;
+  override_max_valor: number | null;
+  override_max_rating: Rating | null;
+  pode_aprovar_escalada: boolean;
+  updated_at?: string | null;
+}
+
+export interface ApprovalActionInput {
+  justificativa?: string | null;
+}
+
+export interface EscaladaPendente {
+  id: string;
+  operation_id: string;
+  cnpj: string;
+  razao_social: string | null;
+  rating_momento: Rating | null;
+  score_momento: number | null;
+  taxa_sugerida?: number | null;
+  valor_operacao: number | null;
+  requested_by: string | null;
+  requested_name?: string | null;
+  requested_role: UserRole | null;
+  created_at: string;
+  justificativa: string | null;
+}
+
+export interface AuditTrailItem {
+  id?: string;
+  action: string;
+  actor_id: string | null;
+  actor_type: string | null;
+  override_reason: string | null;
+  previous_value: unknown;
+  new_value: unknown;
+  created_at: string;
 }

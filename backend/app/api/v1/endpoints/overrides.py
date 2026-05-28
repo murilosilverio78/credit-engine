@@ -13,6 +13,7 @@ class OverrideInput(BaseModel):
     new_value: Any
     justificativa: str = Field(min_length=1)
     requested_by: Optional[str] = None
+    escalar: bool = False
 
 
 class OverrideReviewInput(BaseModel):
@@ -28,7 +29,7 @@ async def create_override(operation_id: str, payload: OverrideInput, request: Re
 
     svc = OverrideService()
     try:
-        return await svc.create(
+        override = await svc.create(
             operation_id=operation_id,
             override_type=payload.override_type,
             previous_value=payload.previous_value,
@@ -38,6 +39,30 @@ async def create_override(operation_id: str, payload: OverrideInput, request: Re
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
         )
+        if payload.escalar:
+            from app.core.database import supabase
+
+            operation = supabase.table("operations")\
+                .select("*")\
+                .eq("id", operation_id)\
+                .single()\
+                .execute()\
+                .data
+            supabase.table("operation_approvals").insert({
+                "action": "escalated",
+                "credit_override_id": override.get("id"),
+                "justificativa": payload.justificativa,
+                "operation_id": operation_id,
+                "override_campo": payload.override_type,
+                "override_valor_de": payload.previous_value,
+                "override_valor_para": payload.new_value,
+                "rating_momento": operation.get("rating") if operation else None,
+                "requested_by": payload.requested_by,
+                "requested_role": "analista",
+                "score_momento": operation.get("score") if operation else None,
+                "valor_operacao": (operation or {}).get("valor_solicitado") or (operation or {}).get("limite_aprovado"),
+            }).execute()
+        return override
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

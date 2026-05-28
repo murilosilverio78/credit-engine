@@ -1,7 +1,11 @@
 import type {
+  AlcadaConfig,
+  ApprovalActionInput,
+  AuditTrailItem,
   BrasilApiCompany,
   Component,
   ComponentToggleResult,
+  EscaladaPendente,
   HealthStatus,
   OperationCreated,
   OperationDetails,
@@ -41,6 +45,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const response = await fetch(`${BASE}${path}`, {
     ...init,
+    credentials: "include",
     headers,
   });
 
@@ -151,6 +156,72 @@ export function resumeAfterUploads(operationId: string) {
     `/api/v1/uploads/operations/${encodeURIComponent(operationId)}/resume`,
     { method: "POST" },
   );
+}
+
+export function getAlcadas() {
+  return request<AlcadaConfig[]>("/api/v1/alcadas");
+}
+
+export function updateAlcada(
+  role: string,
+  payload: Partial<AlcadaConfig> & { justificativa: string },
+) {
+  return request<AlcadaConfig>(`/api/v1/alcadas/${encodeURIComponent(role)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getAlcadaAuditTrail() {
+  return request<AuditTrailItem[]>("/api/v1/alcadas/audit");
+}
+
+export function approveOperation(
+  operationId: string,
+  payload: ApprovalActionInput = {},
+) {
+  return request(`/api/v1/operations/${operationId}/approve`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function rejectOperation(
+  operationId: string,
+  payload: ApprovalActionInput,
+) {
+  return request(`/api/v1/operations/${operationId}/reject`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function escalateOperation(
+  operationId: string,
+  payload: ApprovalActionInput = {},
+) {
+  return request(`/api/v1/operations/${operationId}/escalate`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getPendingEscaladas() {
+  return request<EscaladaPendente[]>("/api/v1/escaladas/pendentes");
+}
+
+export function resolveEscalation(
+  operationId: string,
+  payload: {
+    approval_id: string;
+    decision: "approved" | "rejected";
+    justificativa: string;
+  },
+) {
+  return request(`/api/v1/operations/${operationId}/resolve-escalation`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function getCompanyByCnpj(cnpj: string) {

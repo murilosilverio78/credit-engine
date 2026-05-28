@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = False
     SECRET_KEY: str
+    NEXTAUTH_SECRET: str = ""
 
     # Supabase
     SUPABASE_URL: str
