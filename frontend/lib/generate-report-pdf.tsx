@@ -59,21 +59,25 @@ const legalEntityLabels: Record<string, string> = {
 const styles = StyleSheet.create({
   page: {
     backgroundColor: "#FFFFFF",
-    color: "#0F172A",
+    color: "#2C2C2A",
     fontFamily: "Helvetica",
-    fontSize: 10,
+    fontSize: 9,
+    lineHeight: 1.5,
     paddingBottom: 57,
     paddingLeft: 43,
     paddingRight: 43,
     paddingTop: 57,
   },
   footer: {
-    bottom: 24,
-    color: "#6B7280",
-    fontSize: 8,
-    left: 43,
+    bottom: 20,
+    left: 0,
     position: "absolute",
-    right: 43,
+    right: 0,
+    textAlign: "center",
+  },
+  footerText: {
+    color: "#888780",
+    fontSize: 8,
     textAlign: "center",
   },
   headerTop: {
@@ -90,8 +94,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   companyName: {
+    fontFamily: "Helvetica-Bold",
     fontSize: 16,
-    fontWeight: 700,
     marginBottom: 5,
   },
   companyMeta: {
@@ -102,13 +106,17 @@ const styles = StyleSheet.create({
   ratingBadge: {
     alignItems: "center",
     backgroundColor: "#E6F1FB",
-    borderRadius: 4,
-    color: "#0C447C",
-    fontSize: 24,
-    fontWeight: 700,
+    borderRadius: 6,
     height: 40,
     justifyContent: "center",
     width: 40,
+  },
+  ratingBadgeText: {
+    color: "#0C447C",
+    fontFamily: "Helvetica-Bold",
+    fontSize: 24,
+    lineHeight: 1,
+    textAlign: "center",
   },
   metricsRow: {
     flexDirection: "row",
@@ -127,15 +135,18 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   metricValue: {
+    color: "#2C2C2A",
+    fontFamily: "Helvetica-Bold",
     fontSize: 16,
-    fontWeight: 700,
   },
   sectionTitle: {
-    color: "#6B7280",
-    fontSize: 9,
-    fontWeight: 700,
+    color: "#5F5E5A",
+    fontFamily: "Helvetica-Bold",
+    fontSize: 8,
+    letterSpacing: 0.5,
     marginBottom: 8,
     marginTop: 12,
+    textTransform: "uppercase",
   },
   scorecard: {
     flexDirection: "row",
@@ -170,18 +181,19 @@ const styles = StyleSheet.create({
   opinionBox: {
     borderLeftColor: "#639922",
     borderLeftWidth: 3,
-    marginBottom: 4,
+    marginBottom: 12,
     paddingLeft: 10,
     paddingVertical: 3,
   },
   conclusion: {
+    fontFamily: "Helvetica-Bold",
     fontSize: 8,
-    fontWeight: 700,
     marginBottom: 5,
     textTransform: "uppercase",
   },
   opinionText: {
-    fontSize: 10,
+    color: "#2C2C2A",
+    fontSize: 9,
     lineHeight: 1.5,
   },
   twoColumns: {
@@ -195,9 +207,15 @@ const styles = StyleSheet.create({
   listItem: {
     flexDirection: "row",
     fontSize: 9,
-    gap: 4,
     lineHeight: 1.35,
     marginBottom: 4,
+  },
+  listBullet: {
+    borderRadius: 2.5,
+    height: 5,
+    marginRight: 6,
+    marginTop: 4,
+    width: 5,
   },
   annexTitleBox: {
     borderTopColor: "#0C447C",
@@ -207,15 +225,16 @@ const styles = StyleSheet.create({
   },
   annexTitle: {
     color: "#0C447C",
+    fontFamily: "Helvetica-Bold",
     fontSize: 12,
-    fontWeight: 700,
   },
   annexSection: {
     marginBottom: 12,
   },
   annexSectionTitle: {
+    color: "#5F5E5A",
+    fontFamily: "Helvetica-Bold",
     fontSize: 10,
-    fontWeight: 700,
     marginBottom: 5,
   },
   grid2: {
@@ -224,16 +243,19 @@ const styles = StyleSheet.create({
   },
   dataRow: {
     flexDirection: "row",
-    fontSize: 8,
     marginBottom: 3,
     paddingRight: 8,
     width: "50%",
   },
   rowLabel: {
-    color: "#6B7280",
+    color: "#888780",
+    fontSize: 8,
     width: "38%",
   },
   rowValue: {
+    color: "#2C2C2A",
+    fontFamily: "Helvetica-Bold",
+    fontSize: 9,
     width: "62%",
   },
   table: {
@@ -249,7 +271,7 @@ const styles = StyleSheet.create({
   },
   tableHead: {
     backgroundColor: "#F3F4F6",
-    fontWeight: 700,
+    fontFamily: "Helvetica-Bold",
   },
   tableCell: {
     fontSize: 8,
@@ -358,6 +380,37 @@ function suggestedRate(operation: OperationDetails, engine: JsonRecord) {
   }).format(rate)}% a.m.`;
 }
 
+function truncate(value: unknown, maxLength: number) {
+  const text = textValue(value);
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+function formatTaxRegime(value: unknown) {
+  const records = asArray(value);
+  if (records.length) {
+    return records
+      .map((item) => {
+        const record = asRecord(item);
+        return `${textValue(record.ano)}: ${textValue(record.forma ?? record.regime ?? record.descricao)}`;
+      })
+      .join(" | ");
+  }
+  return textValue(value);
+}
+
+function formatCertificateResult(value: unknown) {
+  switch (value) {
+    case "positiva_com_efeitos_negativa":
+      return "Positiva com efeitos de negativa";
+    case "negativa":
+      return "Negativa";
+    case "positiva":
+      return "Positiva";
+    default:
+      return textValue(value);
+  }
+}
+
 function snapshotsMap(operation: OperationDetails) {
   return new Map(
     (operation.components ?? []).map((snapshot) => [
@@ -379,9 +432,11 @@ function conclusion(rating: Rating | null) {
 
 function Footer({ generatedAt }: { generatedAt: Date }) {
   return (
-    <Text fixed style={styles.footer}>
-      Gerado em {formatDateTime(generatedAt)} · Credit Engine AntecipaGov · Confidencial
-    </Text>
+    <View fixed style={styles.footer}>
+      <Text style={styles.footerText}>
+        Gerado em {formatDateTime(generatedAt)} · Credit Engine AntecipaGov · Confidencial
+      </Text>
+    </View>
   );
 }
 
@@ -501,7 +556,7 @@ function ScorecardPdf({ dimensions }: { dimensions: [string, Dimension][] }) {
               <View key={key} style={styles.dimensionItem}>
                 <View style={styles.dimensionHeader}>
                   <Text>{dimensionLabels[key]}</Text>
-                  <Text style={{ color: favorable ? "#27500A" : "#633806", fontWeight: 700 }}>
+                  <Text style={{ color: favorable ? "#27500A" : "#633806", fontFamily: "Helvetica-Bold" }}>
                     {score} · Peso {formatPercent(dimension.peso)}
                   </Text>
                 </View>
@@ -546,7 +601,7 @@ function PointsPdf({ engine }: { engine: JsonRecord }) {
           <Text style={[styles.annexSectionTitle, { color: "#27500A" }]}>Pontos positivos</Text>
           {positive.map((point, index) => (
             <View key={index} style={styles.listItem}>
-              <Text style={{ color: "#639922" }}>●</Text>
+              <View style={[styles.listBullet, { backgroundColor: "#639922" }]} />
               <Text>{textValue(point)}</Text>
             </View>
           ))}
@@ -555,7 +610,7 @@ function PointsPdf({ engine }: { engine: JsonRecord }) {
           <Text style={[styles.annexSectionTitle, { color: "#633806" }]}>Pontos de atenção</Text>
           {attention.map((point, index) => (
             <View key={index} style={styles.listItem}>
-              <Text style={{ color: "#BA7517" }}>●</Text>
+              <View style={[styles.listBullet, { backgroundColor: "#BA7517" }]} />
               <Text>{textValue(point)}</Text>
             </View>
           ))}
@@ -566,11 +621,15 @@ function PointsPdf({ engine }: { engine: JsonRecord }) {
 }
 
 function Table({
+  cellFontSize = 8,
   columns,
+  rowBackgrounds,
   rows,
   widths,
 }: {
+  cellFontSize?: number;
   columns: string[];
+  rowBackgrounds?: string[];
   rows: string[][];
   widths: string[];
 }) {
@@ -584,9 +643,15 @@ function Table({
         ))}
       </View>
       {rows.map((row, rowIndex) => (
-        <View key={rowIndex} style={styles.tableRow}>
+        <View
+          key={rowIndex}
+          style={[
+            styles.tableRow,
+            rowBackgrounds?.[rowIndex] ? { backgroundColor: rowBackgrounds[rowIndex] } : {},
+          ]}
+        >
           {row.map((cell, index) => (
-            <Text key={`${rowIndex}-${index}`} style={[styles.tableCell, { width: widths[index] }]}>
+            <Text key={`${rowIndex}-${index}`} style={[styles.tableCell, { fontSize: cellFontSize, width: widths[index] }]}>
               {cell}
             </Text>
           ))}
@@ -619,7 +684,7 @@ function BrasilApiAnnex({ result }: { result: JsonRecord }) {
         <DataRow label="Capital social" value={formatCurrency(result.capital_social)} />
         <DataRow label="Data abertura" value={formatDate(result.data_abertura)} />
         <DataRow label="Situação" value={result.situacao_cadastral ?? result.descricao_situacao_cadastral} />
-        <DataRow label="Regime tributário" value={textValue(result.regime_tributario)} />
+        <DataRow label="Regime tributário" value={formatTaxRegime(result.regime_tributario)} />
         <DataRow label="Sócios" value={qsa} />
         <DataRow label="Atividade principal" value={textValue(asRecord(result.atividade_principal).text ?? result.atividade_principal)} />
         <DataRow label="Atividades secundárias" value={secondary} />
@@ -629,7 +694,7 @@ function BrasilApiAnnex({ result }: { result: JsonRecord }) {
 }
 
 function ContractsAnnex({ result }: { result: JsonRecord }) {
-  const contracts = asArray(result.contratos).slice(0, 20);
+  const contracts = asArray(result.contratos_detalhe ?? result.contratos).slice(0, 20);
   return (
     <View style={styles.annexSection}>
       <Text style={styles.annexSectionTitle}>contratos</Text>
@@ -646,12 +711,14 @@ function ContractsAnnex({ result }: { result: JsonRecord }) {
           const contract = asRecord(item);
           return [
             textValue(contract.numero ?? contract.numero_contrato),
-            textValue(contract.orgao ?? contract.orgao_contratante),
+            truncate(contract.orgao ?? contract.orgao_contratante, 20),
             formatCurrency(contract.valor ?? contract.valor_inicial ?? contract.valor_global),
             textValue(contract.status),
             `${formatDate(contract.data_inicio ?? contract.data_assinatura)} - ${formatDate(contract.data_fim ?? contract.data_vigencia_fim)}`,
           ];
         })}
+        cellFontSize={7}
+        rowBackgrounds={contracts.map((_, index) => (index % 2 === 0 ? "#FFFFFF" : "#F9F9F9"))}
         widths={["16%", "30%", "18%", "14%", "22%"]}
       />
     </View>
@@ -670,39 +737,36 @@ function ResourcesBarChart({ result }: { result: JsonRecord }) {
     .slice(-13)
     .map(([month, value]) => ({ label: `${month.slice(4, 6)}/${month.slice(0, 4)}`, value }));
   const maxValue = Math.max(...monthlyValues.map((item) => item.value), 1);
-  const chartWidth = 480;
-  const chartHeight = 120;
-  const plotTop = 10;
-  const plotLeft = 34;
-  const plotBottom = 94;
-  const barGap = 4;
-  const barWidth = monthlyValues.length
-    ? (chartWidth - plotLeft - 12 - barGap * (monthlyValues.length - 1)) / monthlyValues.length
-    : 0;
+  const chartWidth = 460;
+  const chartHeight = 100;
+  const labelHeight = 18;
+  const axisLeft = 0;
+  const baseY = chartHeight - labelHeight;
+  const maxBarHeight = 64;
+  const barWidth = monthlyValues.length ? chartWidth / monthlyValues.length - 2 : 0;
 
   if (!monthlyValues.length) {
     return <Text style={[styles.muted, { fontSize: 8 }]}>Sem pagamentos mensais para exibir</Text>;
   }
 
   return (
-    <Svg height={140} viewBox={`0 0 ${chartWidth} ${chartHeight}`} width={480}>
-      <Line stroke="#CBD5E1" strokeWidth={0.8} x1={plotLeft} x2={chartWidth - 8} y1={plotBottom} y2={plotBottom} />
-      <Line stroke="#CBD5E1" strokeWidth={0.8} x1={plotLeft} x2={plotLeft} y1={plotTop} y2={plotBottom} />
-      <Text style={{ fill: "#6B7280", fontSize: 7 }} x={0} y={plotTop + 4}>
+    <Svg height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`} width={chartWidth}>
+      <Line stroke="#CBD5E1" strokeWidth={0.8} x1={axisLeft} x2={chartWidth} y1={baseY} y2={baseY} />
+      <Text style={{ fill: "#888780", fontSize: 6 }} x={0} y={8}>
         {formatCurrency(maxValue)}
       </Text>
       {monthlyValues.map((item, index) => {
-        const height = ((plotBottom - plotTop) * item.value) / maxValue;
-        const x = plotLeft + index * (barWidth + barGap);
-        const y = plotBottom - height;
+        const height = (item.value / maxValue) * maxBarHeight;
+        const x = index * (barWidth + 2) + 1;
+        const y = baseY - height;
         return (
           <G key={item.label}>
             <Rect fill="#378ADD" height={height} width={barWidth} x={x} y={y} />
             <Text
-              style={{ fill: "#6B7280", fontSize: 7 }}
-              transform={`rotate(45 ${x + barWidth / 2} ${plotBottom + 10})`}
+              style={{ fill: "#888780", fontSize: 6 }}
+              textAnchor="middle"
               x={x + barWidth / 2}
-              y={plotBottom + 10}
+              y={baseY + 10}
             >
               {item.label}
             </Text>
@@ -790,7 +854,7 @@ function CertificateAnnex({ component, result }: { component: string; result: Js
     <View style={styles.annexSection}>
       <Text style={styles.annexSectionTitle}>{component}</Text>
       <View style={styles.grid2}>
-        <DataRow label="Resultado" value={textValue(result.resultado)} />
+        <DataRow label="Resultado" value={formatCertificateResult(result.resultado)} />
         <DataRow label="CNPJ certidão" value={formatCnpj(result.cnpj_certidao ?? result.cnpj)} />
         <DataRow label="Emissão" value={result.data_emissao} />
         <DataRow label="Validade" value={result.data_validade} />
@@ -831,7 +895,6 @@ function MainReportPage({
 
   return (
     <Page size="A4" style={styles.page}>
-      <Footer generatedAt={generatedAt} />
       <View style={styles.headerTop}>
         <Text>Credit Engine / AntecipaGov</Text>
         <Text>Gerado em {formatDateTime(generatedAt)}</Text>
@@ -844,7 +907,11 @@ function MainReportPage({
             {company.uf ? `/${textValue(company.uf)}` : ""} · abertura {formatDate(company.data_abertura)}
           </Text>
         </View>
-        {operation.rating ? <Text style={styles.ratingBadge}>{operation.rating}</Text> : null}
+        {operation.rating ? (
+          <View style={styles.ratingBadge}>
+            <Text style={styles.ratingBadgeText}>{operation.rating}</Text>
+          </View>
+        ) : null}
       </View>
       <View style={styles.metricsRow}>
         <MetricCard label="Score" value={`${operation.score ?? numberValue(engine.score)}/100`} />
@@ -858,6 +925,7 @@ function MainReportPage({
       <ScorecardPdf dimensions={dimensions} />
       <OpinionPdf engine={engine} rating={operation.rating} />
       <PointsPdf engine={engine} />
+      <Footer generatedAt={generatedAt} />
     </Page>
   );
 }
@@ -871,7 +939,6 @@ function AnnexPages({
 }) {
   return (
     <Page size="A4" style={styles.page}>
-      <Footer generatedAt={generatedAt} />
       <View style={styles.annexTitleBox}>
         <Text style={styles.annexTitle}>ANEXO — DADOS CONSULTADOS</Text>
       </View>
@@ -894,6 +961,7 @@ function AnnexPages({
         />
       ))}
       <WebResearchAnnex result={asRecord(snapshots.get("web_research")?.parsed_result)} />
+      <Footer generatedAt={generatedAt} />
     </Page>
   );
 }
