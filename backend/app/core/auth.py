@@ -19,9 +19,16 @@ def _secret() -> str:
 
 def _decode_token(token: str) -> Optional[dict]:
     try:
-        return jwt.decode(token, _secret(), algorithms=["HS256"])
+        payload = jwt.decode(token, _secret(), algorithms=["HS256"])
     except JWTError:
         return None
+
+    user_id = payload.get("id") or payload.get("sub") or payload.get("user_id")
+    if user_id:
+        payload["id"] = user_id
+    if payload.get("role") and not payload.get("alcada"):
+        payload["alcada"] = ROLE_TO_ALCADA.get(payload["role"], "analyst")
+    return payload
 
 
 async def get_current_user_optional(request: Request) -> Optional[dict]:
@@ -43,7 +50,7 @@ async def get_current_user(request: Request) -> dict:
 
     # Compatibility fallback while the Admin UI uses cross-origin FastAPI calls.
     return {
-        "id": "00000000-0000-0000-0000-000000000001",
+        "id": None,
         "email": "system@credit-engine.local",
         "name": "Sistema",
         "role": "diretor",

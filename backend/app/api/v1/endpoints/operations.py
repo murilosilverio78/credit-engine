@@ -60,11 +60,12 @@ def _insert_approval(
         "justificativa": justificativa,
         "operation_id": operation["id"],
         "rating_momento": operation.get("rating"),
-        "requested_by": current_user.get("id"),
         "requested_role": current_user.get("role"),
         "score_momento": operation.get("score"),
         "valor_operacao": operation.get("valor_solicitado") or operation.get("limite_aprovado"),
     }
+    if current_user.get("id"):
+        data["requested_by"] = current_user.get("id")
     if extra:
         data.update(extra)
     result = supabase.table("operation_approvals").insert(data).execute()
@@ -203,15 +204,15 @@ async def resolve_escalation(
     if payload.action == "escalation_rejected" and len(justificativa) < 10:
         raise HTTPException(status_code=400, detail="Justificativa obrigatória com ao menos 10 caracteres")
     operation = _operation_snapshot(operation_id)
+    decision_extra = {"decided_role": current_user.get("role")}
+    if current_user.get("id"):
+        decision_extra["decided_by"] = current_user.get("id")
     approval = _insert_approval(
         operation,
         payload.action,
         current_user,
         justificativa or None,
-        extra={
-            "decided_by": current_user.get("id"),
-            "decided_role": current_user.get("role"),
-        },
+        extra=decision_extra,
     )
     audit.log(
         operation_id=operation_id,
