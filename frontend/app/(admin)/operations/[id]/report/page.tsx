@@ -579,7 +579,11 @@ function ContractsDetails({ result }: { result: JsonRecord }) {
             </thead>
             <tbody>
               {contracts.map((contract, index) => (
-                <tr className="border-t border-border" key={`${contract.numero}-${index}`}>
+                <tr
+                  className="border-t border-border"
+                  key={`${contract.numero}-${index}`}
+                  style={{ breakInside: "avoid" }}
+                >
                   <td className="px-2.5 py-2 font-mono">{stringValue(contract.numero)}</td>
                   <td className="px-2.5 py-2">{stringValue(contract.orgao)}</td>
                   <td className="px-2.5 py-2">
@@ -634,7 +638,7 @@ function ResourcesDetails({ result }: { result: JsonRecord }) {
     }));
 
   return (
-    <>
+    <div className="print:break-before-page print:break-inside-avoid">
       <div className="grid gap-x-8 sm:grid-cols-2">
         <DetailRow label="Valor total recebido" value={formatCurrency(result.valor_total_recebido)} />
         <DetailRow
@@ -686,7 +690,7 @@ function ResourcesDetails({ result }: { result: JsonRecord }) {
       ) : (
         <EmptyData label="Sem pagamentos mensais para exibir" />
       )}
-    </>
+    </div>
   );
 }
 
@@ -1022,7 +1026,7 @@ function ContractsAnnex({ result }: { result: JsonRecord }) {
       {contracts.length ? (
         <AnnexTable headers={["Número", "Órgão", "Valor", "Status", "Vigência"]}>
           {contracts.map((contract, index) => (
-            <tr key={`${String(contract.numero)}-${index}`}>
+            <tr key={`${String(contract.numero)}-${index}`} style={{ breakInside: "avoid" }}>
               <td className="border border-slate-300 px-1.5 py-1">{stringValue(contract.numero)}</td>
               <td className="border border-slate-300 px-1.5 py-1">{stringValue(contract.orgao)}</td>
               <td className="border border-slate-300 px-1.5 py-1">{formatCurrency(contract.valor_final ?? contract.valor_inicial)}</td>
@@ -1173,13 +1177,15 @@ function PrintableAnnex({ snapshots }: { snapshots: Map<string, ComponentSnapsho
           result={asRecord(snapshots.get(component)?.parsed_result)}
         />
       ))}
-      {["cnd_federal", "cndt_tst", "fgts"].map((component) => (
-        <CertificateAnnex
-          component={component}
-          key={component}
-          result={asRecord(snapshots.get(component)?.parsed_result)}
-        />
-      ))}
+      <div className="print:break-inside-avoid">
+        {["cnd_federal", "cndt_tst", "fgts"].map((component) => (
+          <CertificateAnnex
+            component={component}
+            key={component}
+            result={asRecord(snapshots.get(component)?.parsed_result)}
+          />
+        ))}
+      </div>
       <WebResearchAnnex result={asRecord(snapshots.get("web_research")?.parsed_result)} />
     </section>
   );
@@ -1435,7 +1441,13 @@ function Report({ operation }: { operation: OperationDetails }) {
         <PrintableAnnex snapshots={snapshots} />
 
         {selected ? (
-          <section className="mt-3.5 rounded-lg border border-blue-200 bg-background px-4 py-3.5">
+          <section
+            className={cn(
+              "report-section mt-3.5 rounded-lg border border-blue-200 bg-background px-4 py-3.5 print:break-inside-avoid",
+              selected.component === "recursos_recebidos" &&
+                "report-resources-detail print:break-before-page",
+            )}
+          >
             <h2 className="mb-3 text-xs font-medium text-blue-700">
               {selected.component} — detalhes
             </h2>

@@ -31,6 +31,10 @@
     margin: 15mm;
   }
 
+  a[href]::after {
+    content: none !important;
+  }
+
   /* Ocultar sidebar e navegação */
   nav,
   aside,
@@ -71,6 +75,7 @@
 
   .report-section {
     page-break-inside: avoid;
+    break-inside: avoid;
   }
 
   /* Cada seção do anexo não quebra internamente */
@@ -80,9 +85,14 @@
     break-inside: avoid;
   }
 
-  [data-chart="recursos"] {
+  .report-resources-detail {
     page-break-before: always;
     break-before: page;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  [data-chart="recursos"] {
     page-break-inside: avoid;
     break-inside: avoid;
   }
