@@ -17,5 +17,5 @@ async def list_pending_escaladas(current_user: dict = Depends(get_current_user))
     elif role in {"manager", "gerente"}:
         query = query.in_("deve_resolver_role", ["gerente", "diretor"])
 
-    result = query.order("created_at", desc=False).execute()
+    result = query.order("requested_at", desc=False).execute()
     return result.data or []
