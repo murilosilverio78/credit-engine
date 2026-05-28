@@ -29,15 +29,15 @@ function ensurePdfFonts() {
 
   const origin = window.location.origin;
   Font.register({
-    family: "Geist",
+    family: "Inter",
     fonts: [
       {
         fontWeight: 400,
-        src: `${origin}/fonts/Geist-Regular.ttf`,
+        src: `${origin}/fonts/Inter-Regular.ttf`,
       },
       {
         fontWeight: 500,
-        src: `${origin}/fonts/Geist-Medium.ttf`,
+        src: `${origin}/fonts/Inter-Medium.ttf`,
       },
     ],
   });
@@ -85,7 +85,7 @@ const styles = StyleSheet.create({
   page: {
     backgroundColor: "#FFFFFF",
     color: "#2C2C2A",
-    fontFamily: "Geist",
+    fontFamily: "Inter",
     fontSize: 9,
     fontWeight: 400,
     lineHeight: 1.5,
@@ -120,7 +120,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   companyName: {
-    fontFamily: "Geist",
+    fontFamily: "Inter",
     fontSize: 16,
     fontWeight: 500,
     marginBottom: 5,
@@ -140,7 +140,7 @@ const styles = StyleSheet.create({
   },
   ratingBadgeText: {
     color: "#0C447C",
-    fontFamily: "Geist",
+    fontFamily: "Inter",
     fontSize: 24,
     fontWeight: 500,
     lineHeight: 1,
@@ -164,13 +164,13 @@ const styles = StyleSheet.create({
   },
   metricValue: {
     color: "#2C2C2A",
-    fontFamily: "Geist",
+    fontFamily: "Inter",
     fontSize: 16,
     fontWeight: 500,
   },
   sectionTitle: {
     color: "#5F5E5A",
-    fontFamily: "Geist",
+    fontFamily: "Inter",
     fontSize: 8,
     fontWeight: 500,
     letterSpacing: 0.5,
@@ -216,7 +216,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   conclusion: {
-    fontFamily: "Geist",
+    fontFamily: "Inter",
     fontSize: 8,
     fontWeight: 500,
     marginBottom: 5,
@@ -256,7 +256,7 @@ const styles = StyleSheet.create({
   },
   annexTitle: {
     color: "#0C447C",
-    fontFamily: "Geist",
+    fontFamily: "Inter",
     fontSize: 12,
     fontWeight: 500,
   },
@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
   },
   annexSectionTitle: {
     color: "#5F5E5A",
-    fontFamily: "Geist",
+    fontFamily: "Inter",
     fontSize: 10,
     fontWeight: 500,
     marginBottom: 5,
@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
   },
   rowValue: {
     color: "#2C2C2A",
-    fontFamily: "Geist",
+    fontFamily: "Inter",
     fontSize: 9,
     fontWeight: 500,
     width: "62%",
@@ -305,7 +305,7 @@ const styles = StyleSheet.create({
   },
   tableHead: {
     backgroundColor: "#F3F4F6",
-    fontFamily: "Geist",
+    fontFamily: "Inter",
     fontWeight: 500,
   },
   tableCell: {
@@ -377,10 +377,10 @@ function formatCnpj(cnpj: unknown) {
     : value || "-";
 }
 
-function formatCurrency(value: unknown) {
+function formatBRL(value: unknown) {
   return new Intl.NumberFormat("pt-BR", {
     currency: "BRL",
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 0,
     style: "currency",
   }).format(numberValue(value));
 }
@@ -598,7 +598,7 @@ function ScorecardPdf({ dimensions }: { dimensions: [string, Dimension][] }) {
               <View key={key} style={styles.dimensionItem}>
                 <View style={styles.dimensionHeader}>
                   <Text>{dimensionLabels[key]}</Text>
-                  <Text style={{ color: favorable ? "#27500A" : "#633806", fontFamily: "Geist", fontWeight: 500 }}>
+                  <Text style={{ color: favorable ? "#27500A" : "#633806", fontFamily: "Inter", fontWeight: 500 }}>
                     {score} · Peso {formatPercent(dimension.peso)}
                   </Text>
                 </View>
@@ -723,7 +723,7 @@ function BrasilApiAnnex({ result }: { result: JsonRecord }) {
         <DataRow label="Razão social" value={result.razao_social} />
         <DataRow label="CNPJ" value={formatCnpj(result.cnpj)} />
         <DataRow label="Porte" value={result.porte} />
-        <DataRow label="Capital social" value={formatCurrency(result.capital_social)} />
+        <DataRow label="Capital social" value={formatBRL(result.capital_social)} />
         <DataRow label="Data abertura" value={formatDate(result.data_abertura)} />
         <DataRow label="Situação" value={result.situacao_cadastral ?? result.descricao_situacao_cadastral} />
         <DataRow label="Regime tributário" value={formatTaxRegime(result.regime_tributario)} />
@@ -744,8 +744,8 @@ function ContractsAnnex({ result }: { result: JsonRecord }) {
         <DataRow label="Total" value={result.total_contratos} />
         <DataRow label="Ativos" value={result.contratos_ativos} />
         <DataRow label="Encerrados" value={result.contratos_encerrados} />
-        <DataRow label="Valor ativo" value={formatCurrency(result.valor_total_ativo)} />
-        <DataRow label="Histórico" value={formatCurrency(result.valor_total_historico)} />
+        <DataRow label="Valor ativo" value={formatBRL(result.valor_total_ativo)} />
+        <DataRow label="Histórico" value={formatBRL(result.valor_total_historico)} />
       </View>
       <Table
         columns={["Número", "Órgão", "Valor", "Status", "Vigência"]}
@@ -754,7 +754,7 @@ function ContractsAnnex({ result }: { result: JsonRecord }) {
           return [
             textValue(contract.numero ?? contract.numero_contrato),
             truncate(contract.orgao ?? contract.orgao_contratante, 20),
-            formatCurrency(contract.valor ?? contract.valor_inicial ?? contract.valor_global),
+            formatBRL(contract.valor_final ?? contract.valor_inicial ?? contract.valor ?? contract.valor_global),
             formatContractStatus(contract),
             `${formatDate(contract.data_inicio ?? contract.data_assinatura)} - ${formatDate(contract.data_fim ?? contract.data_vigencia_fim)}`,
           ];
@@ -768,23 +768,26 @@ function ContractsAnnex({ result }: { result: JsonRecord }) {
 }
 
 function ResourcesBarChart({ result }: { result: JsonRecord }) {
-  const monthlyMap = new Map<string, number>();
-  asArray(result.recursos_detalhe).forEach((item) => {
-    const resource = asRecord(item);
-    const month = textValue(resource.mes, "");
-    if (month) monthlyMap.set(month, (monthlyMap.get(month) ?? 0) + numberValue(resource.valor));
-  });
-  const monthlyValues = Array.from(monthlyMap.entries())
-    .sort(([first], [second]) => first.localeCompare(second))
+  const resources = asArray(result.recursos_detalhe)
+    .map((item) => {
+      const resource = asRecord(item);
+      const month = textValue(resource.mes, "");
+      return {
+        label: `${month.slice(4, 6)}/${month.slice(0, 4)}`,
+        month,
+        value: numberValue(resource.valor),
+      };
+    })
+    .filter((item) => item.month && item.value > 0)
+    .sort((first, second) => first.month.localeCompare(second.month));
+  const monthlyValues = resources
     .slice(-13)
-    .map(([month, value]) => ({ label: `${month.slice(4, 6)}/${month.slice(0, 4)}`, value }));
-  const maxValue = Math.max(...monthlyValues.map((item) => item.value), 1);
+    .map(({ label, value }) => ({ label, value }));
+  const maxValue = Math.max(...resources.map((item) => item.value), 1);
   const chartWidth = 460;
   const chartHeight = 100;
-  const labelHeight = 18;
-  const axisLeft = 0;
-  const baseY = chartHeight - labelHeight;
-  const maxBarHeight = 64;
+  const chartAreaHeight = 80;
+  const baseY = chartAreaHeight;
   const barWidth = monthlyValues.length ? chartWidth / monthlyValues.length - 2 : 0;
 
   if (!monthlyValues.length) {
@@ -793,17 +796,14 @@ function ResourcesBarChart({ result }: { result: JsonRecord }) {
 
   return (
     <Svg height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`} width={chartWidth}>
-      <Line stroke="#CBD5E1" strokeWidth={0.8} x1={axisLeft} x2={chartWidth} y1={baseY} y2={baseY} />
-      <Text style={{ fill: "#888780", fontSize: 6 }} x={0} y={8}>
-        {formatCurrency(maxValue)}
-      </Text>
+      <Line stroke="#CBD5E1" strokeWidth={0.8} x1={0} x2={chartWidth} y1={baseY} y2={baseY} />
       {monthlyValues.map((item, index) => {
-        const height = (item.value / maxValue) * maxBarHeight;
+        const barHeight = (item.value / maxValue) * chartAreaHeight;
         const x = index * (barWidth + 2) + 1;
-        const y = baseY - height;
+        const y = chartAreaHeight - barHeight;
         return (
           <G key={item.label}>
-            <Rect fill="#378ADD" height={height} style={{ fill: "#378ADD" }} width={barWidth} x={x} y={y} />
+            <Rect fill="#378ADD" height={barHeight} style={{ fill: "#378ADD" }} width={barWidth - 1} x={x} y={y} />
             <Text
               style={{ fill: "#888780", fontSize: 6 }}
               textAnchor="middle"
@@ -821,7 +821,7 @@ function ResourcesBarChart({ result }: { result: JsonRecord }) {
 
 function ResourcesAnnex({ result }: { result: JsonRecord }) {
   const annualValues = Object.entries(asRecord(result.valor_por_ano))
-    .map(([year, value]) => `${year}: ${formatCurrency(value)}`)
+    .map(([year, value]) => `${year}: ${formatBRL(value)}`)
     .join("; ");
   const valuesByAgency = new Map<string, number>();
   asArray(result.recursos_detalhe).forEach((item) => {
@@ -837,7 +837,7 @@ function ResourcesAnnex({ result }: { result: JsonRecord }) {
     <View style={styles.annexSection}>
       <Text style={styles.annexSectionTitle}>recursos_recebidos</Text>
       <View style={styles.grid2}>
-        <DataRow label="Valor total" value={formatCurrency(result.valor_total_recebido)} />
+        <DataRow label="Valor total" value={formatBRL(result.valor_total_recebido)} />
         <DataRow label="Período" value={`${textValue(result.periodo_inicio)} - ${textValue(result.periodo_fim)}`} />
         <DataRow label="Valor por ano" value={annualValues} />
       </View>
@@ -845,7 +845,7 @@ function ResourcesAnnex({ result }: { result: JsonRecord }) {
       <Text style={[styles.annexSectionTitle, { fontSize: 8, marginTop: 4 }]}>Top órgãos pagadores</Text>
       {agencies.map(([agency, value]) => (
         <Text key={agency} style={{ fontSize: 8, marginBottom: 2 }}>
-          {agency}: {formatCurrency(value)}
+          {agency}: {formatBRL(value)}
         </Text>
       ))}
     </View>
@@ -961,7 +961,7 @@ function MainReportPage({
         <MetricCard label="Limite sugerido" value={`${formatPercent(engine.limite_sugerido_pct_contrato)} contrato`} />
         <MetricCard
           label="Contratos ativos"
-          value={`${textValue(contracts.contratos_ativos)} · ${formatCurrency(contracts.valor_total_ativo)}`}
+          value={`${textValue(contracts.contratos_ativos)} · ${formatBRL(contracts.valor_total_ativo)}`}
         />
       </View>
       <ScorecardPdf dimensions={dimensions} />
