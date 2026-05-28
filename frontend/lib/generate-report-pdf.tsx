@@ -20,19 +20,29 @@ import type { ComponentSnapshot, OperationDetails, Rating } from "@/lib/types";
 
 type JsonRecord = Record<string, unknown>;
 
-Font.register({
-  family: "Geist",
-  fonts: [
-    {
-      fontWeight: 400,
-      src: "https://fonts.gstatic.com/s/geist/v1/UcCO3FwrK3iLTcvneQg7Ca725JhhKnNqk4j1ebLhAm8SrXTc2dphjZ-Ik-7sw3Lz.woff",
-    },
-    {
-      fontWeight: 500,
-      src: "https://fonts.gstatic.com/s/geist/v1/UcCO3FwrK3iLTcvneQg7Ca725JhhKnNqk4j1ebLhAm8SrXTc2dphjZ-Ik-7AwnLz.woff",
-    },
-  ],
-});
+let fontsRegistered = false;
+
+function ensurePdfFonts() {
+  if (fontsRegistered) {
+    return;
+  }
+
+  const origin = window.location.origin;
+  Font.register({
+    family: "Geist",
+    fonts: [
+      {
+        fontWeight: 400,
+        src: `${origin}/fonts/Geist-Regular.ttf`,
+      },
+      {
+        fontWeight: 500,
+        src: `${origin}/fonts/Geist-Medium.ttf`,
+      },
+    ],
+  });
+  fontsRegistered = true;
+}
 
 interface Dimension {
   justificativa?: string;
@@ -1009,16 +1019,22 @@ function ReportDocument({ generatedAt, operation }: { generatedAt: Date; operati
 }
 
 export async function generateReportPdf(operation: OperationDetails) {
-  const generatedAt = new Date();
-  const blob = await pdf(<ReportDocument generatedAt={generatedAt} operation={operation} />).toBlob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  const cnpj = operation.cnpj.replace(/\D/g, "");
-  const date = generatedAt.toISOString().slice(0, 10).replace(/-/g, "");
-  link.href = url;
-  link.download = `CreditEngine_${cnpj}_${date}.pdf`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  try {
+    ensurePdfFonts();
+    const generatedAt = new Date();
+    const blob = await pdf(<ReportDocument generatedAt={generatedAt} operation={operation} />).toBlob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const cnpj = operation.cnpj.replace(/\D/g, "");
+    const date = generatedAt.toISOString().slice(0, 10).replace(/-/g, "");
+    link.href = url;
+    link.download = `CreditEngine_${cnpj}_${date}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error("Erro ao gerar PDF:", error);
+    throw error;
+  }
 }
