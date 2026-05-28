@@ -86,8 +86,6 @@
   }
 
   .report-resources-detail {
-    page-break-before: always;
-    break-before: page;
     page-break-inside: avoid;
     break-inside: avoid;
   }

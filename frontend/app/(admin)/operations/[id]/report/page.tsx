@@ -638,7 +638,7 @@ function ResourcesDetails({ result }: { result: JsonRecord }) {
     }));
 
   return (
-    <div className="print:break-before-page print:break-inside-avoid">
+    <div className="print:break-inside-avoid">
       <div className="grid gap-x-8 sm:grid-cols-2">
         <DetailRow label="Valor total recebido" value={formatCurrency(result.valor_total_recebido)} />
         <DetailRow
@@ -1445,7 +1445,7 @@ function Report({ operation }: { operation: OperationDetails }) {
             className={cn(
               "report-section mt-3.5 rounded-lg border border-blue-200 bg-background px-4 py-3.5 print:break-inside-avoid",
               selected.component === "recursos_recebidos" &&
-                "report-resources-detail print:break-before-page",
+                "report-resources-detail",
             )}
           >
             <h2 className="mb-3 text-xs font-medium text-blue-700">
