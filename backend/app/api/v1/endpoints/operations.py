@@ -72,6 +72,13 @@ def _insert_approval(
     return result.data[0]
 
 
+def _update_operation_status(operation_id: str, status: str):
+    supabase.table("operations")\
+        .update({"status": status})\
+        .eq("id", operation_id)\
+        .execute()
+
+
 @router.post("/", status_code=201)
 async def create_operation(payload: PropostaInput, background_tasks: BackgroundTasks):
     """
@@ -138,6 +145,7 @@ async def approve_operation(
 ):
     operation = _operation_snapshot(operation_id)
     approval = _insert_approval(operation, "approved", current_user, payload.justificativa)
+    _update_operation_status(operation_id, "approved")
     audit.log(
         operation_id=operation_id,
         action="operation_approved",
@@ -160,6 +168,7 @@ async def reject_operation(
         raise HTTPException(status_code=400, detail="Justificativa obrigatória com ao menos 10 caracteres")
     operation = _operation_snapshot(operation_id)
     approval = _insert_approval(operation, "rejected", current_user, payload.justificativa.strip())
+    _update_operation_status(operation_id, "rejected")
     audit.log(
         operation_id=operation_id,
         action="operation_rejected",
@@ -181,6 +190,7 @@ async def escalate_operation(
 ):
     operation = _operation_snapshot(operation_id)
     approval = _insert_approval(operation, "escalated", current_user, payload.justificativa)
+    _update_operation_status(operation_id, "escalated")
     audit.log(
         operation_id=operation_id,
         action="operation_escalated",
@@ -213,6 +223,10 @@ async def resolve_escalation(
         current_user,
         justificativa or None,
         extra=decision_extra,
+    )
+    _update_operation_status(
+        operation_id,
+        "approved" if payload.action == "escalation_approved" else "rejected",
     )
     audit.log(
         operation_id=operation_id,

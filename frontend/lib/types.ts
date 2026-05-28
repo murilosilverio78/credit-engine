@@ -5,7 +5,10 @@ export type OperationStatus =
   | "processing"
   | "completed"
   | "failed"
-  | "manual_review";
+  | "manual_review"
+  | "approved"
+  | "rejected"
+  | "escalated";
 
 export type OverrideType =
   | "rating"

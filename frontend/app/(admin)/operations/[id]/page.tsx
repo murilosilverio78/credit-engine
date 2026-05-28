@@ -734,6 +734,15 @@ function CompletedView({
     }
   }, [requestedBy, session?.user, setValue]);
 
+  const decisionBadge =
+    operation.status === "approved"
+      ? { label: "Aprovada", style: "bg-emerald-100 text-emerald-700" }
+      : operation.status === "rejected"
+        ? { label: "Rejeitada", style: "bg-red-100 text-red-700" }
+        : operation.status === "escalated"
+          ? { label: "Escalada — aguardando decisão", style: "bg-amber-100 text-amber-800" }
+          : null;
+
   return (
     <section className="flex-1 px-5 py-4">
       <div className="mb-3.5 rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
@@ -804,6 +813,17 @@ function CompletedView({
 
       {operation.status === "completed" ? (
         <ApprovalActions operation={operation} />
+      ) : decisionBadge ? (
+        <div className="mb-3.5 rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
+          <span
+            className={cn(
+              "inline-flex rounded px-2.5 py-1 text-[11px] font-medium",
+              decisionBadge.style,
+            )}
+          >
+            {decisionBadge.label}
+          </span>
+        </div>
       ) : null}
 
       <h2 className="mb-2 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
@@ -1139,7 +1159,11 @@ export default function OperationDetailPage() {
     operation.status === "pending" || operation.status === "processing";
   const manualReview = operation.status === "manual_review";
   const canOverride =
-    operation.status === "completed" || operation.status === "failed";
+    operation.status === "completed" ||
+    operation.status === "failed" ||
+    operation.status === "approved" ||
+    operation.status === "rejected" ||
+    operation.status === "escalated";
 
   return (
     <div className="flex min-h-dvh flex-col bg-muted/40">

@@ -22,6 +22,9 @@ const statusOptions: OperationStatus[] = [
   "completed",
   "failed",
   "manual_review",
+  "approved",
+  "rejected",
+  "escalated",
 ];
 const ratingOptions: Rating[] = ["A", "B", "C", "D", "E"];
 
@@ -39,6 +42,9 @@ const statusColors: Record<OperationStatus, string> = {
   completed: "bg-emerald-100 text-emerald-800",
   failed: "bg-red-100 text-red-800",
   manual_review: "bg-amber-100 text-amber-800",
+  approved: "bg-emerald-100 text-emerald-800",
+  rejected: "bg-red-100 text-red-800",
+  escalated: "bg-amber-100 text-amber-800",
 };
 
 function normalizeCnpj(cnpj: string) {
