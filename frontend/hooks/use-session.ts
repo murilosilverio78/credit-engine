@@ -19,8 +19,35 @@ async function fetchSession() {
   if (!response.ok) {
     return null;
   }
-  const data = (await response.json()) as { session: Session | null };
-  return data.session;
+  const data = (await response.json()) as
+    | { session: Session | null }
+    | {
+        id: string;
+        email: string;
+        name: string;
+        role: UserRole;
+      };
+
+  if ("session" in data) {
+    return data.session;
+  }
+
+  const alcada: Alcada =
+    data.role === "diretor"
+      ? "committee"
+      : data.role === "gerente"
+        ? "manager"
+        : "analyst";
+
+  return {
+    user: {
+      alcada,
+      email: data.email,
+      id: data.id,
+      name: data.name,
+      role: data.role,
+    },
+  };
 }
 
 export function useSession(): { session: Session | null; loading: boolean } {
