@@ -60,8 +60,11 @@ function EscaladaCard({ item }: { item: EscaladaPendente }) {
   const mutation = useMutation({
     mutationFn: (decision: "approved" | "rejected") =>
       resolveEscalation(item.operation_id, {
+        action:
+          decision === "approved"
+            ? "escalation_approved"
+            : "escalation_rejected",
         approval_id: item.id,
-        decision,
         justificativa: decision === "approved" ? "Escalada aprovada pela alçada responsável." : justificativa,
       }),
     onSuccess: async () => {

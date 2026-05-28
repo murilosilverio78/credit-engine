@@ -214,7 +214,7 @@ export function resolveEscalation(
   operationId: string,
   payload: {
     approval_id: string;
-    decision: "approved" | "rejected";
+    action: "escalation_approved" | "escalation_rejected";
     justificativa: string;
   },
 ) {

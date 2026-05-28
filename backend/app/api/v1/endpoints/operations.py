@@ -32,9 +32,9 @@ class ApprovalInput(BaseModel):
 
 
 class ResolveEscalationInput(BaseModel):
-    approval_id: str
-    decision: Literal["approved", "rejected"]
-    justificativa: str
+    approval_id: Optional[str] = None
+    action: Literal["escalation_approved", "escalation_rejected"]
+    justificativa: Optional[str] = None
 
 
 def _operation_snapshot(operation_id: str) -> dict:
@@ -145,7 +145,7 @@ async def approve_operation(
         ip_address=request.client.host if request.client else None,
         payload={"approval_id": approval.get("id")},
     )
-    return approval
+    return {"ok": True, "approval_id": approval.get("id")}
 
 
 @router.post("/{operation_id}/reject")
@@ -168,7 +168,7 @@ async def reject_operation(
         override_reason=payload.justificativa.strip(),
         payload={"approval_id": approval.get("id")},
     )
-    return approval
+    return {"ok": True, "approval_id": approval.get("id")}
 
 
 @router.post("/{operation_id}/escalate")
@@ -189,7 +189,7 @@ async def escalate_operation(
         override_reason=payload.justificativa,
         payload={"approval_id": approval.get("id")},
     )
-    return approval
+    return {"ok": True, "approval_id": approval.get("id")}
 
 
 @router.post("/{operation_id}/resolve-escalation")
@@ -199,15 +199,15 @@ async def resolve_escalation(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    if len(payload.justificativa.strip()) < 10:
+    justificativa = (payload.justificativa or "").strip()
+    if payload.action == "escalation_rejected" and len(justificativa) < 10:
         raise HTTPException(status_code=400, detail="Justificativa obrigatória com ao menos 10 caracteres")
     operation = _operation_snapshot(operation_id)
-    action = "escalation_approved" if payload.decision == "approved" else "escalation_rejected"
     approval = _insert_approval(
         operation,
-        action,
+        payload.action,
         current_user,
-        payload.justificativa.strip(),
+        justificativa or None,
         extra={
             "decided_by": current_user.get("id"),
             "decided_role": current_user.get("role"),
@@ -215,14 +215,14 @@ async def resolve_escalation(
     )
     audit.log(
         operation_id=operation_id,
-        action=action,
+        action=payload.action,
         actor_id=current_user.get("id"),
         actor_type=current_user.get("role", "gerente"),
         ip_address=request.client.host if request.client else None,
-        override_reason=payload.justificativa.strip(),
+        override_reason=justificativa or None,
         payload={
             "approval_id": approval.get("id"),
             "resolved_approval_id": payload.approval_id,
         },
     )
-    return approval
+    return {"ok": True, "approval_id": approval.get("id")}
