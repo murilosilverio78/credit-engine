@@ -67,6 +67,20 @@
     page-break-inside: avoid;
   }
 
+  /* Cada seção do anexo não quebra internamente */
+  [data-section],
+  .anexo-section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  [data-chart="recursos"] {
+    page-break-before: always;
+    break-before: page;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;

@@ -961,7 +961,7 @@ function AnnexSection({
   title: string;
 }) {
   return (
-    <section className="mb-4 break-inside-avoid">
+    <section className="anexo-section mb-4 break-inside-avoid" data-section={title}>
       <h3 className="mb-1.5 border-b border-slate-300 pb-1 font-semibold text-blue-800">
         {title}
       </h3>
