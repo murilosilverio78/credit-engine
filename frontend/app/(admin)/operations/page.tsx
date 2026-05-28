@@ -39,10 +39,10 @@ const ratingColors: Record<Rating, string> = {
 const statusColors: Record<OperationStatus, string> = {
   pending: "bg-muted text-muted-foreground",
   processing: "animate-pulse bg-blue-100 text-blue-800",
-  completed: "bg-emerald-100 text-emerald-800",
+  completed: "bg-blue-100 text-blue-800",
   failed: "bg-red-100 text-red-800",
-  manual_review: "bg-amber-100 text-amber-800",
-  approved: "bg-emerald-100 text-emerald-800",
+  manual_review: "bg-orange-100 text-orange-800",
+  approved: "bg-green-100 text-green-800",
   rejected: "bg-red-100 text-red-800",
   escalated: "bg-amber-100 text-amber-800",
 };
