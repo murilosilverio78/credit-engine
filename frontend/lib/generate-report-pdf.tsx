@@ -3,6 +3,7 @@
 import {
   Circle,
   Document,
+  Font,
   G,
   Line,
   Page,
@@ -18,6 +19,20 @@ import {
 import type { ComponentSnapshot, OperationDetails, Rating } from "@/lib/types";
 
 type JsonRecord = Record<string, unknown>;
+
+Font.register({
+  family: "Geist",
+  fonts: [
+    {
+      fontWeight: 400,
+      src: "https://fonts.gstatic.com/s/geist/v1/UcCO3FwrK3iLTcvneQg7Ca725JhhKnNqk4j1ebLhAm8SrXTc2dphjZ-Ik-7sw3Lz.woff",
+    },
+    {
+      fontWeight: 500,
+      src: "https://fonts.gstatic.com/s/geist/v1/UcCO3FwrK3iLTcvneQg7Ca725JhhKnNqk4j1ebLhAm8SrXTc2dphjZ-Ik-7AwnLz.woff",
+    },
+  ],
+});
 
 interface Dimension {
   justificativa?: string;
@@ -60,8 +75,9 @@ const styles = StyleSheet.create({
   page: {
     backgroundColor: "#FFFFFF",
     color: "#2C2C2A",
-    fontFamily: "Helvetica",
+    fontFamily: "Geist",
     fontSize: 9,
+    fontWeight: 400,
     lineHeight: 1.5,
     paddingBottom: 57,
     paddingLeft: 43,
@@ -94,8 +110,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   companyName: {
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Geist",
     fontSize: 16,
+    fontWeight: 500,
     marginBottom: 5,
   },
   companyMeta: {
@@ -113,8 +130,9 @@ const styles = StyleSheet.create({
   },
   ratingBadgeText: {
     color: "#0C447C",
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Geist",
     fontSize: 24,
+    fontWeight: 500,
     lineHeight: 1,
     textAlign: "center",
   },
@@ -136,13 +154,15 @@ const styles = StyleSheet.create({
   },
   metricValue: {
     color: "#2C2C2A",
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Geist",
     fontSize: 16,
+    fontWeight: 500,
   },
   sectionTitle: {
     color: "#5F5E5A",
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Geist",
     fontSize: 8,
+    fontWeight: 500,
     letterSpacing: 0.5,
     marginBottom: 8,
     marginTop: 12,
@@ -186,8 +206,9 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   conclusion: {
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Geist",
     fontSize: 8,
+    fontWeight: 500,
     marginBottom: 5,
     textTransform: "uppercase",
   },
@@ -225,16 +246,18 @@ const styles = StyleSheet.create({
   },
   annexTitle: {
     color: "#0C447C",
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Geist",
     fontSize: 12,
+    fontWeight: 500,
   },
   annexSection: {
     marginBottom: 12,
   },
   annexSectionTitle: {
     color: "#5F5E5A",
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Geist",
     fontSize: 10,
+    fontWeight: 500,
     marginBottom: 5,
   },
   grid2: {
@@ -254,8 +277,9 @@ const styles = StyleSheet.create({
   },
   rowValue: {
     color: "#2C2C2A",
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Geist",
     fontSize: 9,
+    fontWeight: 500,
     width: "62%",
   },
   table: {
@@ -271,7 +295,8 @@ const styles = StyleSheet.create({
   },
   tableHead: {
     backgroundColor: "#F3F4F6",
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Geist",
+    fontWeight: 500,
   },
   tableCell: {
     fontSize: 8,
@@ -409,6 +434,13 @@ function formatCertificateResult(value: unknown) {
     default:
       return textValue(value);
   }
+}
+
+function formatContractStatus(contract: JsonRecord) {
+  if (typeof contract.ativo === "boolean") {
+    return contract.ativo ? "ativo" : "encerrado";
+  }
+  return textValue(contract.status);
 }
 
 function snapshotsMap(operation: OperationDetails) {
@@ -556,7 +588,7 @@ function ScorecardPdf({ dimensions }: { dimensions: [string, Dimension][] }) {
               <View key={key} style={styles.dimensionItem}>
                 <View style={styles.dimensionHeader}>
                   <Text>{dimensionLabels[key]}</Text>
-                  <Text style={{ color: favorable ? "#27500A" : "#633806", fontFamily: "Helvetica-Bold" }}>
+                  <Text style={{ color: favorable ? "#27500A" : "#633806", fontFamily: "Geist", fontWeight: 500 }}>
                     {score} · Peso {formatPercent(dimension.peso)}
                   </Text>
                 </View>
@@ -713,7 +745,7 @@ function ContractsAnnex({ result }: { result: JsonRecord }) {
             textValue(contract.numero ?? contract.numero_contrato),
             truncate(contract.orgao ?? contract.orgao_contratante, 20),
             formatCurrency(contract.valor ?? contract.valor_inicial ?? contract.valor_global),
-            textValue(contract.status),
+            formatContractStatus(contract),
             `${formatDate(contract.data_inicio ?? contract.data_assinatura)} - ${formatDate(contract.data_fim ?? contract.data_vigencia_fim)}`,
           ];
         })}
@@ -761,7 +793,7 @@ function ResourcesBarChart({ result }: { result: JsonRecord }) {
         const y = baseY - height;
         return (
           <G key={item.label}>
-            <Rect fill="#378ADD" height={height} width={barWidth} x={x} y={y} />
+            <Rect fill="#378ADD" height={height} style={{ fill: "#378ADD" }} width={barWidth} x={x} y={y} />
             <Text
               style={{ fill: "#888780", fontSize: 6 }}
               textAnchor="middle"
