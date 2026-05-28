@@ -24,3 +24,32 @@
     @apply bg-background text-foreground antialiased;
   }
 }
+
+@media print {
+  nav,
+  aside,
+  header,
+  .no-print,
+  [data-html2canvas-ignore] {
+    display: none !important;
+  }
+
+  svg {
+    display: block !important;
+    overflow: visible !important;
+  }
+
+  .recharts-wrapper,
+  .recharts-surface {
+    overflow: visible !important;
+  }
+
+  .report-section {
+    page-break-inside: avoid;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

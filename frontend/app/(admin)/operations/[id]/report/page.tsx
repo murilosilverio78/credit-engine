@@ -11,8 +11,8 @@ import {
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { useParams } from "next/navigation";
+import { type ReactNode, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -412,7 +412,7 @@ function ScorecardPanel({ dimensions }: { dimensions: [string, Dimension][] }) {
   );
 
   return (
-    <section className="grid gap-5 rounded-lg border-[0.5px] border-border bg-background px-4 py-4 md:grid-cols-[260px_1fr]">
+    <section className="report-section grid gap-5 rounded-lg border-[0.5px] border-border bg-background px-4 py-4 md:grid-cols-[260px_1fr]">
       <div className="flex items-center justify-center">
         <RadarSvg dimensions={listedDimensions} />
       </div>
@@ -1185,13 +1185,7 @@ function PrintableAnnex({ snapshots }: { snapshots: Map<string, ComponentSnapsho
   );
 }
 
-function Report({
-  operation,
-  printMode,
-}: {
-  operation: OperationDetails;
-  printMode: boolean;
-}) {
+function Report({ operation }: { operation: OperationDetails }) {
   const generatedAt = useMemo(() => new Date(), []);
   const snapshots = useMemo(
     () =>
@@ -1229,8 +1223,6 @@ function Report({
   const [selectedName, setSelectedName] = useState(
     snapshots.has("contratos") ? "contratos" : components[0]?.component ?? "",
   );
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const [isPrintReady, setIsPrintReady] = useState(!printMode);
   const selected = snapshots.get(selectedName);
   const status = conclusion(operation.rating);
   const rawRate = operation.taxa_sugerida ?? numberValue(engine.taxa_sugerida_am);
@@ -1240,53 +1232,15 @@ function Report({
     minimumFractionDigits: 1,
   }).format(rate);
 
-  useEffect(() => {
-    if (!printMode) {
-      setIsPrintReady(true);
-      return;
-    }
-
-    if (snapshots.has("recursos_recebidos")) {
-      setSelectedName("recursos_recebidos");
-    }
-
-    const timer = window.setTimeout(() => setIsPrintReady(true), 1000);
-    return () => window.clearTimeout(timer);
-  }, [printMode, snapshots]);
-
-  async function printPdf() {
-    if (isGeneratingPdf) {
-      return;
-    }
-
-    setIsGeneratingPdf(true);
-    try {
-      window.open(`/api/pdf?operation_id=${encodeURIComponent(operation.id)}`, "_blank");
-    } finally {
-      setIsGeneratingPdf(false);
-    }
+  function handleDownloadPdf() {
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    document.title = `CreditEngine_${operation.cnpj}_${date}`;
+    window.print();
   }
 
   return (
     <div className="min-h-dvh bg-muted/40 print:bg-white">
-      {printMode ? (
-        <style jsx global>{`
-          aside,
-          [data-pdf-hidden="true"] {
-            display: none !important;
-          }
-
-          main {
-            margin-left: 0 !important;
-          }
-        `}</style>
-      ) : null}
-      <header
-        className={cn(
-          "flex items-center gap-2 border-b-[0.5px] border-border bg-background px-5 py-3 print:hidden",
-          printMode && "hidden",
-        )}
-      >
+      <header className="flex items-center gap-2 border-b-[0.5px] border-border bg-background px-5 py-3 print:hidden">
         <Link
           className="flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-xs text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           href={`/operations/${operation.id}`}
@@ -1333,31 +1287,15 @@ function Report({
                 </span>
               ) : null}
               <button
-                className={cn(
-                  "flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring print:hidden",
-                  printMode && "hidden",
-                )}
-                disabled={isGeneratingPdf}
-                onClick={printPdf}
+                className="no-print flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring print:hidden"
+                onClick={handleDownloadPdf}
                 type="button"
               >
-                {isGeneratingPdf ? (
-                  <span
-                    aria-hidden="true"
-                    className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent"
-                  />
-                ) : (
-                  <Download className="h-3.5 w-3.5" />
-                )}
-                {isGeneratingPdf ? "Gerando PDF..." : "Baixar PDF"}
+                <Download className="h-3.5 w-3.5" />
+                Baixar PDF
               </button>
             </div>
           </div>
-          {printMode && !isPrintReady ? (
-            <p className="mb-3 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
-              Preparando relatório para PDF...
-            </p>
-          ) : null}
           <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
             <Metric label="Score">
               {operation.score ?? numberValue(engine.score)}
@@ -1390,7 +1328,7 @@ function Report({
         <ScorecardPanel dimensions={dimensions} />
 
         <SectionTitle>Parecer do agente</SectionTitle>
-        <section className="rounded-r-lg border-[0.5px] border-l-[3px] border-border border-l-[#639922] bg-background px-4 py-3.5">
+        <section className="report-section rounded-r-lg border-[0.5px] border-l-[3px] border-border border-l-[#639922] bg-background px-4 py-3.5">
           <p className={cn("mb-1.5 text-[10px] font-medium uppercase tracking-[0.06em]", status.text)}>
             {status.label}
           </p>
@@ -1399,7 +1337,7 @@ function Report({
           </p>
         </section>
 
-        <section className="grid gap-2.5 md:grid-cols-2">
+        <section className="report-section grid gap-2.5 md:grid-cols-2">
           <div>
             <SectionTitle>Pontos positivos</SectionTitle>
             <div className="h-full rounded-lg border-[0.5px] border-border bg-background px-3.5 py-3">
@@ -1429,7 +1367,7 @@ function Report({
         </section>
 
         <SectionTitle>Componentes consultados — clique para ver detalhes</SectionTitle>
-        <section className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="report-section grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {components.map((component) => {
             const manual = documentComponents.has(component.component);
             const document = asRecord(component.parsed_result);
@@ -1509,9 +1447,7 @@ function Report({
 
 export default function OperationReportPage() {
   const params = useParams<{ id: string }>();
-  const searchParams = useSearchParams();
   const operationId = params.id;
-  const printMode = searchParams.get("print") === "true";
   const operationQuery = useQuery({
     queryFn: () => getOperation(operationId),
     queryKey: ["operation", operationId],
@@ -1545,5 +1481,5 @@ export default function OperationReportPage() {
     );
   }
 
-  return <Report operation={decodedValue(operationQuery.data)} printMode={printMode} />;
+  return <Report operation={decodedValue(operationQuery.data)} />;
 }
