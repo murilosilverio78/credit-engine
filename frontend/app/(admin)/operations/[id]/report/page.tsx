@@ -1232,7 +1232,10 @@ function Report({ operation }: { operation: OperationDetails }) {
     minimumFractionDigits: 1,
   }).format(rate);
 
-  function handleDownloadPdf() {
+  async function handleDownloadPdf() {
+    setSelectedName("recursos_recebidos");
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     document.title = `CreditEngine_${operation.cnpj}_${date}`;
     window.print();

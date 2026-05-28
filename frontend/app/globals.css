@@ -26,12 +26,31 @@
 }
 
 @media print {
+  /* Ocultar sidebar e navegação */
   nav,
   aside,
+  [class*="sidebar"],
+  [class*="admin-sidebar"],
+  .admin-sidebar,
   header,
   .no-print,
   [data-html2canvas-ignore] {
     display: none !important;
+  }
+
+  /* Remover margens do layout */
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* O conteúdo do relatório ocupa toda a largura */
+  main,
+  [class*="main"],
+  [class*="content"] {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   svg {
