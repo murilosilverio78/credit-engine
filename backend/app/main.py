@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api.v1.endpoints import admin, alcadas, auth, components, escaladas, operations, overrides, uploads
+from app.api.v1.endpoints import admin, alcadas, auth, components, escaladas, operations, overrides, pricing, uploads
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -34,6 +34,7 @@ app.include_router(overrides.router,  prefix="/api/v1/overrides",  tags=["overri
 app.include_router(auth.router,       prefix="/api/v1/auth",       tags=["auth"])
 app.include_router(alcadas.router,    prefix="/api/v1/alcadas",    tags=["alcadas"])
 app.include_router(escaladas.router,  prefix="/api/v1/escaladas",  tags=["escaladas"])
+app.include_router(pricing.router,    prefix="/api/v1/pricing",    tags=["pricing"])
 app.include_router(operations.router, prefix="/api/operations",    tags=["operations"])
 app.include_router(escaladas.router,  prefix="/api/escaladas",     tags=["escaladas"])
 

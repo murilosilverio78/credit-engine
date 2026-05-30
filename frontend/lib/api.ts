@@ -13,6 +13,8 @@ import type {
   OverrideInput,
   OverrideReviewInput,
   PaginatedOperations,
+  PricingMatrixRow,
+  PricingParameter,
   PropostaInput,
   UploadDocumentType,
   UploadResetResult,
@@ -174,6 +176,42 @@ export function updateAlcada(
 
 export function getAlcadaAuditTrail() {
   return request<AuditTrailItem[]>("/api/v1/alcadas/audit");
+}
+
+export function getPricingParameters() {
+  return request<PricingParameter[]>("/api/v1/pricing/parameters");
+}
+
+export function getPricingMatrix() {
+  return request<PricingMatrixRow[]>("/api/v1/pricing/matrix");
+}
+
+export function getPricingAudit() {
+  return request<AuditTrailItem[]>("/api/v1/pricing/audit");
+}
+
+export function updatePricingParameter(
+  key: string,
+  value: number,
+  justificativa: string,
+) {
+  return request<PricingParameter>(`/api/v1/pricing/parameters/${encodeURIComponent(key)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ justificativa, value }),
+  });
+}
+
+export function updatePricingMatrix(
+  rating: string,
+  patch: Partial<Pick<
+    PricingMatrixRow,
+    "bond_cobertura" | "bond_premio_aa" | "lgd_mult" | "pd_mult" | "perfil"
+  >> & { justificativa: string },
+) {
+  return request<PricingMatrixRow>(`/api/v1/pricing/matrix/${encodeURIComponent(rating)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
 }
 
 export function approveOperation(

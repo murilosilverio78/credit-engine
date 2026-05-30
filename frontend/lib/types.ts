@@ -198,5 +198,29 @@ export interface AuditTrailItem {
   override_reason: string | null;
   previous_value: unknown;
   new_value: unknown;
+  payload?: unknown;
   created_at: string;
+}
+
+export interface PricingParameter {
+  key: string;
+  value: number;
+  label: string;
+  unit: string;
+  grupo: "estrutura_capital" | "custos_operacionais" | "risco_credito" | string;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+export interface PricingMatrixRow {
+  rating: Rating;
+  pd_mult: number;
+  lgd_mult: number;
+  bond_cobertura: number;
+  bond_premio_aa: number | null;
+  recusa: boolean;
+  perfil: string | null;
+  ordem: number;
+  updated_by: string | null;
+  updated_at: string;
 }

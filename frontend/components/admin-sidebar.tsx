@@ -55,6 +55,12 @@ const navigation: NavigationItem[] = [
     directorOnly: true,
   },
   {
+    href: "/settings/pricing",
+    icon: SlidersHorizontal,
+    label: "Precificação",
+    directorOnly: true,
+  },
+  {
     href: "/settings/users",
     icon: Users,
     label: "Usuários",
