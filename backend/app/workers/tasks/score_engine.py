@@ -16,51 +16,107 @@ import structlog
 
 logger = structlog.get_logger()
 
-SYSTEM_PROMPT = """Você é um analista sênior de crédito PJ especializado em fornecedores do governo brasileiro.
+SYSTEM_PROMPT = """Voce e um analista senior de credito PJ especializado em
+fornecedores do governo brasileiro.
 
-Seu trabalho é analisar os dados coletados sobre uma empresa e produzir:
-1. Um score de crédito de 0 a 100
-2. Um rating de A a E
-3. Uma taxa de juros sugerida para antecipação de recebíveis
-4. Um parecer executivo objetivo
+Analise os dados coletados dos componentes e atribua uma nota de 0 a 100 para
+CADA dimensao do Scorecard 5D com base nas evidencias presentes.
 
-SCORECARD 5D (pesos):
-- Saúde Cadastral (25%): situação na Receita, tempo de existência, capital social, porte
-- Regularidade Fiscal/Sanções (35%): certidões, CEIS, CNEP, CEPIM, sanções
-- Relacionamento Governamental (15%): contratos ativos, diversificação de órgãos, histórico
-- Reputação/Mercado (15%): pesquisa web, notícias, reclamações
-- Porte/Operacionalidade (10%): faturamento estimado, recursos recebidos, capacidade operacional
+SCORECARD 5D - criterios de pontuacao por dimensao:
 
-RATING:
-- A: 85-100 | Taxa: CDI + 1,5% a.m.
-- B: 70-84  | Taxa: CDI + 2,0% a.m.
-- C: 55-69  | Taxa: CDI + 2,8% a.m.
-- D: 40-54  | Taxa: CDI + 3,5% a.m.
-- E: 0-39   | Não operar
+D1 - Saude Cadastral (peso 25%):
+  100 -> CNPJ ativo >=5 anos, capital social >=R$500k, sem restricoes cadastrais
+   80 -> CNPJ ativo >=2 anos, capital adequado ao porte declarado
+   60 -> CNPJ ativo <2 anos OU capital social abaixo do porte
+   40 -> Irregularidades cadastrais menores ou dados inconsistentes
+    0 -> situacao_cadastral != "ATIVA" (bloqueio automatico)
 
-REGRAS DE BLOQUEIO AUTOMÁTICO (score → E independente dos demais):
-- Situação cadastral != ATIVA
-- Qualquer sanção ativa (CEIS, CNEP, CEPIM, CEAF)
-- Acordo de leniência ativo
+D2 - Regularidade Fiscal/Sancoes (peso 35%):
+  100 -> Todas certidoes negativas + sem ocorrencias em CEIS/CNEP/CEPIM
+   80 -> Certidoes OK, sem sancoes ativas
+   60 -> Certidao ausente (nao enviada) OU divida ativa de baixo valor
+   30 -> Sancao ativa em CEIS ou CNEP (situacao="Ativo")
+    0 -> Acordo de leniencia ativo (bloqueio automatico)
 
-Retorne APENAS um JSON válido:
+D3 - Relacionamento Governamental (peso 15%):
+  100 -> >=3 contratos ativos, >=2 orgaos distintos, historico de contratos >3 anos
+   80 -> 1-2 contratos ativos com bom historico de cumprimento
+   50 -> Sem contratos ativos mas historico positivo anterior
+   20 -> Nunca contratado pelo governo OU historico muito recente (<1 ano)
+
+D4 - Reputacao/Mercado (peso 15%):
+  100 -> score_reputacao web >=80, sem alertas, sem noticias_negativas
+   70 -> score_reputacao 50-79, sem problemas_governo
+   40 -> noticias_negativas=true OU reclamacoes_graves=true
+   10 -> problemas_governo=true OU processos_relevantes graves
+
+D5 - Porte/Operacionalidade (peso 10%):
+  100 -> recursos_recebidos >R$5M/ano, empresa >=5 anos no mercado
+   70 -> recursos_recebidos R$1M-R$5M/ano
+   40 -> recursos_recebidos abaixo de R$1M/ano OU dados operacionais limitados
+   20 -> porte incompativel com contratos/recebiveis analisados
+
+IMPORTANTE:
+- Nao calcule score final.
+- Nao determine rating.
+- Nao sugira taxa.
+- Apenas atribua notas por dimensao, liste bloqueios e escreva o parecer.
+
+Retorne APENAS um JSON valido:
 {
-  "score": <0-100>,
-  "rating": "<A|B|C|D|E>",
-  "taxa_sugerida_am": <float>,
-  "limite_sugerido_pct_contrato": <float entre 0 e 0.70>,
   "dimensoes": {
-    "saude_cadastral": {"score": <0-100>, "peso": 0.25, "justificativa": "..."},
-    "regularidade_fiscal": {"score": <0-100>, "peso": 0.35, "justificativa": "..."},
-    "relacionamento_governamental": {"score": <0-100>, "peso": 0.15, "justificativa": "..."},
-    "reputacao_mercado": {"score": <0-100>, "peso": 0.15, "justificativa": "..."},
-    "porte_operacionalidade": {"score": <0-100>, "peso": 0.10, "justificativa": "..."}
+    "saude_cadastral":              {"nota": <0-100>, "justificativa": "<1-2 frases>"},
+    "regularidade_fiscal":          {"nota": <0-100>, "justificativa": "<1-2 frases>"},
+    "relacionamento_governamental": {"nota": <0-100>, "justificativa": "<1-2 frases>"},
+    "reputacao_mercado":            {"nota": <0-100>, "justificativa": "<1-2 frases>"},
+    "porte_operacionalidade":       {"nota": <0-100>, "justificativa": "<1-2 frases>"}
   },
-  "bloqueios": ["<motivo de bloqueio se houver>"],
-  "pontos_positivos": ["<ponto1>", "<ponto2>"],
-  "pontos_atencao": ["<ponto1>", "<ponto2>"],
-  "parecer": "<3-5 frases executivas>"
+  "bloqueios": [],
+  "pontos_positivos": ["", ""],
+  "pontos_atencao":   ["", ""],
+  "parecer": "<3-5 frases executivas para o relatorio de credito>"
 }"""
+
+PESOS = {
+    "saude_cadastral": 0.25,
+    "regularidade_fiscal": 0.35,
+    "relacionamento_governamental": 0.15,
+    "reputacao_mercado": 0.15,
+    "porte_operacionalidade": 0.10,
+}
+LIMITES_POR_RATING = {"A": 0.70, "B": 0.70, "C": 0.60, "D": 0.40, "E": 0.0}
+COMPONENT_DIMENSION_MAP = {
+    "brasil_api": "saude_cadastral",
+    "pessoa_juridica": "saude_cadastral",
+    "ceis": "regularidade_fiscal",
+    "cnep": "regularidade_fiscal",
+    "cepim": "regularidade_fiscal",
+    "acordos_leniencia": "regularidade_fiscal",
+    "cndt_tst": "regularidade_fiscal",
+    "cnd_federal": "regularidade_fiscal",
+    "fgts": "regularidade_fiscal",
+    "contratos": "relacionamento_governamental",
+    "web_research": "reputacao_mercado",
+    "recursos_recebidos": "porte_operacionalidade",
+}
+
+
+def _calcular(dimensoes: dict, bloqueios: list) -> tuple[float, str]:
+    if bloqueios:
+        return 0.0, "E"
+    score = round(sum(
+        dimensoes.get(dim, {}).get("nota", 0) * peso
+        for dim, peso in PESOS.items()
+    ), 2)
+    if score >= 85:
+        return score, "A"
+    if score >= 70:
+        return score, "B"
+    if score >= 55:
+        return score, "C"
+    if score >= 40:
+        return score, "D"
+    return score, "E"
 
 
 def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
@@ -118,31 +174,74 @@ Produza a análise completa conforme o scorecard 5D e retorne o JSON estruturado
 
     try:
         clean = re.sub(r"```json|```", "", result_text).strip()
-        result = fix_dict_encoding(json.loads(clean))
+        opus_result = fix_dict_encoding(json.loads(clean))
     except Exception:
-        result = fix_dict_encoding({
-            "score": 0,
-            "rating": "E",
-            "taxa_sugerida_am": 0.035,
-            "limite_sugerido_pct_contrato": 0,
-            "dimensoes": {},
+        opus_result = fix_dict_encoding({
+            "dimensoes": {
+                dim: {"nota": 0, "justificativa": "erro"}
+                for dim in PESOS
+            },
             "bloqueios": ["Erro ao processar score engine"],
             "pontos_positivos": [],
             "pontos_atencao": [],
-            "parecer": "Não foi possível processar a análise.",
+            "parecer": "Nao foi possivel processar a analise.",
             "raw_response": result_text,
         })
 
-    try:
-        pricing = compute_taxa(
-            rating=result["rating"],
-            valor=operacao.get("valor_solicitado") or 500_000,
-            prazo_meses=round((operacao.get("prazo_dias") or 180) / 30),
-        )
-        result["taxa_sugerida_am"] = pricing["taxa_sugerida_am"]
-        result["taxa_breakdown"] = pricing
-    except Exception as exc:
-        logger.error("score_engine.pricing_error", operation_id=operation_id, error=str(exc))
+    dimensoes = opus_result.get("dimensoes", {})
+    bloqueios = opus_result.get("bloqueios", [])
+    score, rating = _calcular(dimensoes, bloqueios)
+
+    for dim, peso in PESOS.items():
+        if dim in dimensoes:
+            nota = dimensoes[dim].get("nota", 0)
+            dimensoes[dim]["peso"] = peso
+            dimensoes[dim]["score"] = nota
+            dimensoes[dim]["score_contrib"] = round(nota * peso, 2)
+
+    pricing = {}
+    if rating != "E":
+        try:
+            valor = float(operacao.get("valor_solicitado") or 500_000)
+            prazo_meses = max(round((float(operacao.get("prazo_dias") or 180)) / 30), 1)
+            pricing = compute_taxa(rating, valor, prazo_meses)
+        except Exception as exc:
+            logger.error("score_engine.pricing_error", error=str(exc), operation_id=operation_id)
+
+    result = {
+        "score": score,
+        "rating": rating,
+        "taxa_sugerida_am": pricing.get("taxa_sugerida_am", 0.0),
+        "taxa_breakdown": pricing,
+        "limite_sugerido_pct_contrato": LIMITES_POR_RATING.get(rating, 0.0),
+        "dimensoes": dimensoes,
+        "bloqueios": bloqueios,
+        "pontos_positivos": opus_result.get("pontos_positivos", []),
+        "pontos_atencao": opus_result.get("pontos_atencao", []),
+        "parecer": opus_result.get("parecer", ""),
+    }
+    if "raw_response" in opus_result:
+        result["raw_response"] = opus_result["raw_response"]
+
+    if operation_id:
+        for component, dim in COMPONENT_DIMENSION_MAP.items():
+            try:
+                score_contrib = dimensoes.get(dim, {}).get("score_contrib")
+                if score_contrib is None:
+                    continue
+                supabase.table("component_snapshots")\
+                    .update({"score_contrib": score_contrib})\
+                    .eq("operation_id", operation_id)\
+                    .eq("component", component)\
+                    .execute()
+            except Exception as exc:
+                logger.error(
+                    "score_engine.score_contrib_error",
+                    component=component,
+                    error=str(exc),
+                    operation_id=operation_id,
+                )
+
 
     return result
 
