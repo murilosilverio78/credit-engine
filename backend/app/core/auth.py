@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 from jose import JWTError, jwt
 
 from app.core.config import settings
@@ -47,15 +47,7 @@ async def get_current_user(request: Request) -> dict:
     user = await get_current_user_optional(request)
     if user:
         return user
-
-    # Compatibility fallback while the Admin UI uses cross-origin FastAPI calls.
-    return {
-        "id": None,
-        "email": "system@credit-engine.local",
-        "name": "Sistema",
-        "role": "diretor",
-        "alcada": "committee",
-    }
+    raise HTTPException(status_code=401, detail="Não autenticado")
 
 
 CurrentUser = Depends(get_current_user)
