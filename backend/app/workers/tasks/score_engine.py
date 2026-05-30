@@ -129,7 +129,7 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
     if operation_id:
         try:
             operation_result = supabase.table("operations")\
-                .select("valor_solicitado,prazo_dias")\
+                .select("valor_solicitado,prazo_dias,contrato_saldo")\
                 .eq("id", operation_id)\
                 .single()\
                 .execute()
@@ -192,6 +192,18 @@ Produza a análise completa conforme o scorecard 5D e retorne o JSON estruturado
     bloqueios = opus_result.get("bloqueios", [])
     score, rating = _calcular(dimensoes, bloqueios)
 
+    contrato_saldo = float(operacao.get("contrato_saldo") or 0)
+    valor_solicitado = float(operacao.get("valor_solicitado") or 0)
+    pct_limite = LIMITES_POR_RATING.get(rating, 0.0)
+    if contrato_saldo > 0:
+        limite_pelo_saldo = round(contrato_saldo * pct_limite, 2)
+        if valor_solicitado > 0:
+            limite_aprovado_rs = min(limite_pelo_saldo, valor_solicitado)
+        else:
+            limite_aprovado_rs = limite_pelo_saldo
+    else:
+        limite_aprovado_rs = round(valor_solicitado * pct_limite, 2)
+
     for dim, peso in PESOS.items():
         if dim in dimensoes:
             nota = dimensoes[dim].get("nota", 0)
@@ -213,7 +225,8 @@ Produza a análise completa conforme o scorecard 5D e retorne o JSON estruturado
         "rating": rating,
         "taxa_sugerida_am": pricing.get("taxa_sugerida_am", 0.0),
         "taxa_breakdown": pricing,
-        "limite_sugerido_pct_contrato": LIMITES_POR_RATING.get(rating, 0.0),
+        "limite_aprovado_rs": limite_aprovado_rs,
+        "limite_sugerido_pct_contrato": pct_limite,
         "dimensoes": dimensoes,
         "bloqueios": bloqueios,
         "pontos_positivos": opus_result.get("pontos_positivos", []),

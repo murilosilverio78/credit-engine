@@ -47,6 +47,7 @@ def complete_analysis(_results: list[dict], operation_id: str):
         "rating": score_result.get("rating"),
         "taxa_sugerida": score_result.get("taxa_sugerida_am"),
         "taxa_breakdown": score_result.get("taxa_breakdown"),
+        "limite_aprovado": score_result.get("limite_aprovado_rs"),
     }
 
     supabase.table("operations")\
