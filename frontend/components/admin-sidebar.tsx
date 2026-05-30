@@ -7,6 +7,7 @@ import {
   FileSearch,
   Plus,
   SlidersHorizontal,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -51,6 +52,12 @@ const navigation: NavigationItem[] = [
     href: "/settings/alcadas",
     icon: SlidersHorizontal,
     label: "Alçadas",
+    directorOnly: true,
+  },
+  {
+    href: "/settings/users",
+    icon: Users,
+    label: "Usuários",
     directorOnly: true,
   },
 ];

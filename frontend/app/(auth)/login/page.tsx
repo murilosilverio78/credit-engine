@@ -11,8 +11,10 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const { loading, session } = useSession();
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [showResend, setShowResend] = useState(false);
+  const [resendSent, setResendSent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -25,21 +27,55 @@ function LoginForm() {
     event.preventDefault();
     setSubmitting(true);
     setError("");
+    setShowResend(false);
+    setResendSent(false);
+
     try {
-      const response = await fetch("/api/auth/magic-link", {
+      const response = await fetch("/api/auth/login", {
+        body: JSON.stringify({ email, password }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (data?.detail?.code === "EMAIL_NOT_VERIFIED") {
+          setError(
+            "Email ainda não confirmado. Verifique sua caixa de entrada ou solicite um novo link abaixo.",
+          );
+          setShowResend(true);
+        } else {
+          setError(
+            typeof data?.detail === "string"
+              ? data.detail
+              : "Email ou senha inválidos.",
+          );
+        }
+        return;
+      }
+
+      router.replace(searchParams.get("next") || "/operations");
+    } catch {
+      setError("Erro ao conectar. Tente novamente.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function resendVerification() {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+    if (!apiUrl) {
+      return;
+    }
+
+    try {
+      await fetch(`${apiUrl}/api/v1/auth/resend-verification`, {
         body: JSON.stringify({ email }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
       });
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
-      setSent(true);
-    } catch {
-      setError("Não foi possível enviar o link. Verifique o email informado.");
-    } finally {
-      setSubmitting(false);
-    }
+      setResendSent(true);
+    } catch {}
   }
 
   return (
@@ -59,7 +95,7 @@ function LoginForm() {
             Iniciar sessão
           </p>
           <p className="mb-5 text-xs leading-5 text-muted-foreground">
-            Informe seu email corporativo para receber um link mágico de acesso.
+            Informe seu email e senha para acessar o Credit Engine.
           </p>
           <label className="block text-[11px] font-medium text-muted-foreground">
             <span className="mb-1 block">Email</span>
@@ -71,11 +107,16 @@ function LoginForm() {
               value={email}
             />
           </label>
-          {sent ? (
-            <p className="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-              Link enviado. Verifique sua caixa de entrada.
-            </p>
-          ) : null}
+          <label className="mt-3 block text-[11px] font-medium text-muted-foreground">
+            <span className="mb-1 block">Senha</span>
+            <input
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring"
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Sua senha"
+              type="password"
+              value={password}
+            />
+          </label>
           {error ? (
             <p className="mt-3 text-xs text-red-700" role="alert">
               {error}
@@ -83,14 +124,28 @@ function LoginForm() {
           ) : null}
           <button
             className="mt-4 flex h-10 w-full items-center justify-center gap-1.5 rounded-md border-[0.5px] border-foreground bg-background text-[13px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={submitting || !email.trim()}
+            disabled={submitting || !email.trim() || !password}
             type="submit"
           >
             {submitting ? (
               <LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
             ) : null}
-            {submitting ? "Enviando..." : "Iniciar sessão"}
+            {submitting ? "Entrando..." : "Iniciar sessão"}
           </button>
+          {showResend && !resendSent ? (
+            <button
+              className="mt-3 w-full text-center text-xs font-medium text-foreground underline-offset-4 hover:underline"
+              onClick={resendVerification}
+              type="button"
+            >
+              Reenviar email de confirmação
+            </button>
+          ) : null}
+          {resendSent ? (
+            <p className="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+              Novo link enviado. Verifique sua caixa de entrada.
+            </p>
+          ) : null}
         </form>
       </main>
     </div>
