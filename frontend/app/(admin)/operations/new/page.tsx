@@ -81,6 +81,7 @@ const formSchema = z.object({
     .min(1, "Informe o CNPJ.")
     .refine(isValidCnpj, "Informe um CNPJ válido."),
   valor_solicitado: z.string(),
+  contrato_saldo: z.string(),
   prazo_dias: z
     .string()
     .refine(
@@ -158,6 +159,7 @@ export default function NewOperationPage() {
     defaultValues: {
       cnpj: "",
       contrato_id: "",
+      contrato_saldo: "",
       prazo_dias: "",
       valor_solicitado: "",
     },
@@ -204,6 +206,7 @@ export default function NewOperationPage() {
           if (
             field === "cnpj" ||
             field === "valor_solicitado" ||
+            field === "contrato_saldo" ||
             field === "prazo_dias" ||
             field === "contrato_id"
           ) {
@@ -239,6 +242,10 @@ export default function NewOperationPage() {
 
     if (value !== undefined) {
       payload.valor_solicitado = value;
+    }
+    const saldo = parseCurrency(values.contrato_saldo);
+    if (saldo !== undefined) {
+      payload.contrato_saldo = saldo;
     }
     if (values.prazo_dias) {
       payload.prazo_dias = Number(values.prazo_dias);
@@ -333,6 +340,32 @@ export default function NewOperationPage() {
                   placeholder="R$ 0,00"
                 />
                 <FieldError message={errors.valor_solicitado?.message} />
+              </div>
+              <div className="mb-3.5">
+                <label
+                  className="mb-1.5 block text-xs font-medium text-muted-foreground"
+                  htmlFor="contrato_saldo"
+                >
+                  Saldo do contrato (R$)
+                </label>
+                <input
+                  {...register("contrato_saldo")}
+                  aria-invalid={Boolean(errors.contrato_saldo)}
+                  className={inputClassName}
+                  id="contrato_saldo"
+                  inputMode="numeric"
+                  onChange={(event) => {
+                    setValue(
+                      "contrato_saldo",
+                      formatCurrency(event.target.value),
+                    );
+                  }}
+                  placeholder="R$ 0,00"
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Opcional — usado para calcular o limite máximo (70% do saldo)
+                </p>
+                <FieldError message={errors.contrato_saldo?.message} />
               </div>
               <div className="mb-3.5">
                 <label

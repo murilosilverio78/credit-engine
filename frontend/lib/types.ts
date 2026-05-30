@@ -66,6 +66,7 @@ export interface PropostaInput {
   cnpj: string;
   valor_solicitado?: number;
   contrato_id?: string;
+  contrato_saldo?: number;
   prazo_dias?: number;
   source?: string;
 }
