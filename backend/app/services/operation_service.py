@@ -16,6 +16,7 @@ class OperationService:
         cnpj: str,
         valor_solicitado: Optional[float] = None,
         contrato_id: Optional[str] = None,
+        contrato_saldo: Optional[float] = None,
         prazo_dias: Optional[int] = None,
         source: str = "frontend_mvp",
     ) -> dict:
@@ -29,6 +30,8 @@ class OperationService:
             data["valor_solicitado"] = valor_solicitado
         if contrato_id:
             data["contrato_id"] = contrato_id
+        if contrato_saldo:
+            data["contrato_saldo"] = contrato_saldo
         if prazo_dias:
             data["prazo_dias"] = prazo_dias
 

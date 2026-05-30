@@ -15,6 +15,7 @@ class PropostaInput(BaseModel):
     cnpj: str
     valor_solicitado: Optional[float] = None
     contrato_id: Optional[str] = None
+    contrato_saldo: Optional[float] = None
     prazo_dias: Optional[int] = None
     source: str = "frontend_mvp"
 
@@ -85,14 +86,32 @@ async def create_operation(payload: PropostaInput, background_tasks: BackgroundT
     Cria uma nova operação de crédito e inicia o pipeline de análise.
     Retorna imediatamente com o operation_id; análise roda em background.
     """
+    from app.services.eligibility_service import check_eligibility
     from app.services.operation_service import OperationService
     from app.workers.tasks.orchestrator import start_analysis
+
+    eligibility = check_eligibility(
+        cnpj=payload.cnpj,
+        valor_solicitado=payload.valor_solicitado,
+        contrato_saldo=payload.contrato_saldo,
+        prazo_dias=payload.prazo_dias,
+    )
+    if not eligibility.elegivel:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "ELIGIBILITY_FAILED",
+                "message": eligibility.motivo,
+                "campo": eligibility.campo,
+            },
+        )
 
     svc = OperationService()
     operation = await svc.create(
         cnpj=payload.cnpj,
         valor_solicitado=payload.valor_solicitado,
         contrato_id=payload.contrato_id,
+        contrato_saldo=payload.contrato_saldo,
         prazo_dias=payload.prazo_dias,
         source=payload.source,
     )
