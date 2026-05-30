@@ -110,6 +110,12 @@ async def update_pricing_matrix(
     if current_user.get("role") != "diretor":
         raise HTTPException(status_code=403, detail="Somente diretor pode alterar precificação")
 
+    if rating == "E":
+        raise HTTPException(
+            status_code=422,
+            detail="O rating E é uma regra de recusa estrutural e não pode ser editado.",
+        )
+
     previous = supabase.table("pricing_rating_matrix")\
         .select("*")\
         .eq("rating", rating)\
