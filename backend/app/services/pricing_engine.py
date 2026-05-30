@@ -26,7 +26,7 @@ TAXA_ADM_AA = 0.01
 BANCARIZACAO = 0.035
 CUSTO_ORIG_ANALISE = 0.005
 CUSTO_PLATAFORMA_PERF = 0.005
-MARGEM_AM = 0.025
+SUB_AM = 0.025  # custo de capital do tranche subordinado (team) = margem alvo
 
 
 def _fee_serpro(valor: float) -> float:
@@ -40,7 +40,14 @@ def _fee_serpro(valor: float) -> float:
 
 
 def compute_taxa(rating: str, valor: float, prazo_meses: int) -> dict:
-    """Calcula taxa a.m. e breakdown financeiro por rating, valor e prazo."""
+    """
+    Calcula taxa a.m. e breakdown financeiro por rating, valor e prazo.
+
+    Nota: o simulador Excel usa Solver para determinar a taxa via Goal Seek
+    (IRR do caixa residual = margem alvo). Esta função usa soma direta dos
+    componentes, resultando em taxa ~0.3-0.5pp menor que o simulador para
+    prazos de 6 meses. Para prazos mais longos a diferença é menor.
+    """
     rating = (rating or "").upper()
     if rating not in RATING_MATRIX or RATING_MATRIX[rating] is None:
         raise ValueError("Rating recusado ou inválido para precificação")
@@ -57,6 +64,7 @@ def compute_taxa(rating: str, valor: float, prazo_meses: int) -> dict:
     funding_ponderado_am = (
         custo_senior_am * PCT_SENIOR
         + custo_mez_am * PCT_MEZZANINO
+        + SUB_AM * PCT_SUBORDINADO
     )
 
     pd = PD_BASE * matrix["pd_mult"]
@@ -80,7 +88,6 @@ def compute_taxa(rating: str, valor: float, prazo_meses: int) -> dict:
         + bancarizacao_am
         + orig_am
         + serpro_am
-        + MARGEM_AM
     )
 
     custo_operacional_am = taxa_adm_am + bancarizacao_am + orig_am + serpro_am
@@ -96,7 +103,7 @@ def compute_taxa(rating: str, valor: float, prazo_meses: int) -> dict:
         "bancarizacao_am": bancarizacao_am,
         "orig_am": orig_am,
         "serpro_am": serpro_am,
-        "margem_am": MARGEM_AM,
+        "sub_am": SUB_AM,
         "pd": pd,
         "lgd": lgd,
         "el": el,
@@ -105,7 +112,7 @@ def compute_taxa(rating: str, valor: float, prazo_meses: int) -> dict:
             "custo_risco_rs": valor * el,
             "custo_bond_rs": valor * custo_bond_am * prazo_meses,
             "custo_operacional_rs": valor * custo_operacional_am * prazo_meses,
-            "margem_rs": valor * MARGEM_AM * prazo_meses,
+            "custo_sub_rs": valor * SUB_AM * PCT_SUBORDINADO * prazo_meses,
             "total_receita_rs": total_receita_rs,
         },
     }
