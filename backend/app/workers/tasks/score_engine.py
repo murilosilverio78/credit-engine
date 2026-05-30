@@ -10,6 +10,7 @@ import re
 import anthropic
 from app.workers.celery_app import celery_app
 from app.workers.base import BaseComponentTask
+from app.services.pricing_engine import compute_taxa
 from app.utils.encoding import fix_dict_encoding
 import structlog
 
@@ -68,8 +69,16 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
 
     # Busca todos os snapshots completados da operação
     snapshots = {}
+    operacao = {}
     if operation_id:
         try:
+            operation_result = supabase.table("operations")\
+                .select("valor_solicitado,prazo_dias")\
+                .eq("id", operation_id)\
+                .single()\
+                .execute()
+            operacao = operation_result.data or {}
+
             result = supabase.table("component_snapshots")\
                 .select("component, parsed_result, status")\
                 .eq("operation_id", operation_id)\
@@ -109,9 +118,9 @@ Produza a análise completa conforme o scorecard 5D e retorne o JSON estruturado
 
     try:
         clean = re.sub(r"```json|```", "", result_text).strip()
-        return fix_dict_encoding(json.loads(clean))
+        result = fix_dict_encoding(json.loads(clean))
     except Exception:
-        return fix_dict_encoding({
+        result = fix_dict_encoding({
             "score": 0,
             "rating": "E",
             "taxa_sugerida_am": 0.035,
@@ -123,6 +132,19 @@ Produza a análise completa conforme o scorecard 5D e retorne o JSON estruturado
             "parecer": "Não foi possível processar a análise.",
             "raw_response": result_text,
         })
+
+    try:
+        pricing = compute_taxa(
+            rating=result["rating"],
+            valor=operacao.get("valor_solicitado") or 500_000,
+            prazo_meses=round((operacao.get("prazo_dias") or 180) / 30),
+        )
+        result["taxa_sugerida_am"] = pricing["taxa_sugerida_am"]
+        result["taxa_breakdown"] = pricing
+    except Exception as exc:
+        logger.error("score_engine.pricing_error", operation_id=operation_id, error=str(exc))
+
+    return result
 
 
 @celery_app.task(
