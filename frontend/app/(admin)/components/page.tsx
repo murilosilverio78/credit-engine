@@ -129,7 +129,12 @@ function ComponentTable({
             const roadmap = type === "roadmap";
 
             return (
-              <tr className={cn(roadmap && "pointer-events-none opacity-40")} key={component.component}>
+              <tr
+                className={cn(roadmap && "pointer-events-none opacity-40")}
+                data-component={component.component}
+                data-testid="component-row"
+                key={component.component}
+              >
                 <td className="border-b-[0.5px] border-border px-2.5 py-2 font-mono text-[11px] text-foreground">
                   {component.component}
                 </td>
@@ -156,6 +161,7 @@ function ComponentTable({
                   <Switch
                     aria-label={`${component.enabled ? "Desabilitar" : "Habilitar"} ${component.component}`}
                     checked={component.enabled}
+                    data-testid="component-toggle"
                     disabled={roadmap || pendingComponent === component.component}
                     onCheckedChange={(checked) => onToggle(component, checked)}
                   />

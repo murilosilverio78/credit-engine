@@ -87,6 +87,7 @@ function EscaladaCard({ item }: { item: EscaladaPendente }) {
         "mb-2.5 rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5",
         cardBorder(item.requested_role),
       )}
+      data-testid="escalada-row"
     >
       <div className="mb-3 flex items-start justify-between gap-4">
         <div>

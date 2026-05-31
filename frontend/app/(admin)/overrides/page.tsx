@@ -131,6 +131,7 @@ function PendingOverrideCard({ override, onReviewed }: PendingCardProps) {
         "relative mb-2.5 rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5",
         cardBorder(override.alcada_required),
       )}
+      data-testid="override-row"
     >
       <div className="mb-2.5 flex items-start justify-between gap-4">
         <div>

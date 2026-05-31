@@ -58,7 +58,10 @@ function ConfirmEmailContent() {
         </p>
       </header>
       <main className="flex flex-1 items-center justify-center px-5 py-10">
-        <div className="w-full max-w-sm rounded-lg border-[0.5px] border-border bg-background p-5">
+        <div
+          className="w-full max-w-sm rounded-lg border-[0.5px] border-border bg-background p-5"
+          data-testid="confirm-status"
+        >
           <p className="mb-1 text-[15px] font-medium text-foreground">{title}</p>
           <p className="text-xs leading-5 text-muted-foreground">{description}</p>
           {state === "loading" ? (
@@ -69,6 +72,7 @@ function ConfirmEmailContent() {
           ) : (
             <button
               className="mt-4 flex h-10 w-full items-center justify-center gap-1.5 rounded-md border-[0.5px] border-foreground bg-background text-[13px] font-medium text-foreground transition-colors hover:bg-muted"
+              data-testid="confirm-goto-login"
               onClick={() => router.push("/login")}
               type="button"
             >

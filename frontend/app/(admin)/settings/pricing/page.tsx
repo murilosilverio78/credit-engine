@@ -100,7 +100,11 @@ function ParameterCard({ parameter }: { parameter: PricingParameter }) {
   }
 
   return (
-    <article className="rounded-lg border-[0.5px] border-border bg-background p-4">
+    <article
+      className="rounded-lg border-[0.5px] border-border bg-background p-4"
+      data-key={parameter.key}
+      data-testid="pricing-param"
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[13px] font-medium text-foreground">{parameter.label}</p>
@@ -137,6 +141,7 @@ function ParameterCard({ parameter }: { parameter: PricingParameter }) {
             <span className="mb-1 block">Justificativa</span>
             <textarea
               className="h-16 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring"
+              data-testid="pricing-justificativa"
               onChange={(event) => setJustificativa(event.target.value)}
               placeholder="Motivo da alteração..."
               value={justificativa}
@@ -148,6 +153,7 @@ function ParameterCard({ parameter }: { parameter: PricingParameter }) {
           ) : null}
           <button
             className="mt-3 flex h-10 items-center justify-center gap-1.5 rounded-md border-[0.5px] border-foreground bg-background px-4 text-[13px] font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+            data-testid="pricing-save"
             disabled={mutation.isPending}
             type="submit"
           >
@@ -203,7 +209,11 @@ function MatrixEditor({ row }: { row: PricingMatrixRow }) {
 
   return (
     <>
-      <tr className={row.recusa ? "bg-muted/50 text-muted-foreground" : ""}>
+      <tr
+        className={row.recusa ? "bg-muted/50 text-muted-foreground" : ""}
+        data-rating={row.rating}
+        data-testid="pricing-matrix-row"
+      >
         <td className="border-b-[0.5px] border-border px-3 py-2 font-mono font-medium">
           {row.rating}
           {row.recusa ? (
@@ -257,6 +267,7 @@ function MatrixEditor({ row }: { row: PricingMatrixRow }) {
                 <span className="mb-1 block">Justificativa</span>
                 <textarea
                   className="h-16 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring"
+                  data-testid="pricing-justificativa"
                   onChange={(event) => setForm((value) => ({ ...value, justificativa: event.target.value }))}
                   placeholder="Motivo da alteração..."
                   value={form.justificativa}
@@ -265,6 +276,7 @@ function MatrixEditor({ row }: { row: PricingMatrixRow }) {
               {error ? <p className="text-[11px] text-red-700 md:col-span-3">{error}</p> : null}
               <button
                 className="flex h-10 items-center justify-center gap-1.5 rounded-md border-[0.5px] border-foreground bg-background px-4 text-[13px] font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                data-testid="pricing-save"
                 disabled={mutation.isPending}
                 type="submit"
               >

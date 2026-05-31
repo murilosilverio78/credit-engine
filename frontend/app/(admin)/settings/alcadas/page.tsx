@@ -80,7 +80,11 @@ function AlcadaCard({ config }: { config: AlcadaConfig }) {
   }
 
   return (
-    <article className="rounded-lg border-[0.5px] border-border bg-background p-4">
+    <article
+      className="rounded-lg border-[0.5px] border-border bg-background p-4"
+      data-role={config.role}
+      data-testid="alcada-row"
+    >
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <p className="text-[13px] font-medium text-foreground">
@@ -196,6 +200,7 @@ function AlcadaCard({ config }: { config: AlcadaConfig }) {
             <span className="mb-1 block">Justificativa</span>
             <textarea
               className="h-16 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring"
+              data-testid="alcada-justificativa"
               onChange={(event) => setForm((value) => ({ ...value, justificativa: event.target.value }))}
               placeholder="Motivo da alteração..."
               value={form.justificativa}
@@ -207,6 +212,7 @@ function AlcadaCard({ config }: { config: AlcadaConfig }) {
           ) : null}
           <button
             className="mt-3 flex h-10 items-center justify-center gap-1.5 rounded-md border-[0.5px] border-foreground bg-background px-4 text-[13px] font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+            data-testid="alcada-save"
             disabled={mutation.isPending}
             type="submit"
           >

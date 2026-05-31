@@ -101,6 +101,7 @@ function LoginForm() {
             <span className="mb-1 block">Email</span>
             <input
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring"
+              data-testid="login-email"
               onChange={(event) => setEmail(event.target.value)}
               placeholder="voce@empresa.com"
               type="email"
@@ -111,6 +112,7 @@ function LoginForm() {
             <span className="mb-1 block">Senha</span>
             <input
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring"
+              data-testid="login-password"
               onChange={(event) => setPassword(event.target.value)}
               placeholder="Sua senha"
               type="password"
@@ -118,12 +120,13 @@ function LoginForm() {
             />
           </label>
           {error ? (
-            <p className="mt-3 text-xs text-red-700" role="alert">
+            <p className="mt-3 text-xs text-red-700" data-testid="login-error" role="alert">
               {error}
             </p>
           ) : null}
           <button
             className="mt-4 flex h-10 w-full items-center justify-center gap-1.5 rounded-md border-[0.5px] border-foreground bg-background text-[13px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            data-testid="login-submit"
             disabled={submitting || !email.trim() || !password}
             type="submit"
           >
@@ -135,6 +138,7 @@ function LoginForm() {
           {showResend && !resendSent ? (
             <button
               className="mt-3 w-full text-center text-xs font-medium text-foreground underline-offset-4 hover:underline"
+              data-testid="login-resend"
               onClick={resendVerification}
               type="button"
             >

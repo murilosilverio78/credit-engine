@@ -79,6 +79,11 @@ function isActivePath(pathname: string, href: string) {
   return pathname === href;
 }
 
+function navTestId(href: string) {
+  const route = href.split("/").filter(Boolean).at(-1) || "home";
+  return `nav-${route}`;
+}
+
 export function AdminSidebar() {
   const pathname = usePathname();
   const { session } = useSession();
@@ -156,6 +161,7 @@ export function AdminSidebar() {
                       ? "bg-muted font-medium text-foreground"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground",
                   )}
+                  data-testid={navTestId(item.href)}
                   href={item.href}
                 >
                   <Icon aria-hidden="true" className="h-4 w-4 shrink-0" />

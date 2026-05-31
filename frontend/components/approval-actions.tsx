@@ -79,6 +79,7 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
         {canApprove ? (
           <button
             className={buttonClassName}
+            data-testid="action-approve"
             disabled={pending}
             onClick={() => approveMutation.mutate()}
             type="button"
@@ -89,6 +90,7 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
         ) : null}
         <button
           className={buttonClassName}
+          data-testid="action-reject"
           disabled={pending}
           onClick={() => setMode("reject")}
           type="button"
@@ -99,6 +101,7 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
         {mustEscalate ? (
           <button
             className={buttonClassName}
+            data-testid="action-escalate"
             disabled={pending}
             onClick={() => setMode("escalate")}
             type="button"
@@ -108,7 +111,10 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
           </button>
         ) : null}
         {message === "Escalada pendente." ? (
-          <span className="rounded bg-amber-100 px-2 py-1 text-[11px] font-medium text-amber-800">
+          <span
+            className="rounded bg-amber-100 px-2 py-1 text-[11px] font-medium text-amber-800"
+            data-testid="action-message"
+          >
             Escalada pendente
           </span>
         ) : null}
@@ -121,6 +127,7 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
             </span>
             <textarea
               className="h-16 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring"
+              data-testid="action-justificativa"
               onChange={(event) => setJustificativa(event.target.value)}
               placeholder="Descreva o motivo..."
               value={justificativa}
@@ -146,12 +153,12 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
         </div>
       ) : null}
       {message && message !== "Escalada pendente." ? (
-        <p className="mt-3 text-xs text-muted-foreground" role="status">
+        <p className="mt-3 text-xs text-muted-foreground" data-testid="action-message" role="status">
           {message}
         </p>
       ) : null}
       {(approveMutation.isError || rejectMutation.isError || escalateMutation.isError) ? (
-        <p className="mt-3 text-xs text-red-700" role="alert">
+        <p className="mt-3 text-xs text-red-700" data-testid="action-message" role="alert">
           Não foi possível concluir a ação.
         </p>
       ) : null}

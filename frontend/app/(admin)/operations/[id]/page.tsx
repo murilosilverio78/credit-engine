@@ -296,6 +296,7 @@ function Topbar({
               ? "bg-red-100 text-red-800"
               : "bg-emerald-100 text-emerald-800",
         )}
+        data-testid="detail-status"
       >
         {manualReview ? "aguardando certidões" : operation.status}
       </span>
@@ -362,6 +363,8 @@ function ProcessingView({
                 running && "rounded-l-none border-l-2 border-l-blue-500",
                 !done && !running && "opacity-50",
               )}
+              data-component={component.name}
+              data-testid="snapshot-row"
               key={component.name}
             >
               <p className="w-[150px] font-mono text-xs font-medium text-foreground">
@@ -771,6 +774,7 @@ function CompletedView({
                   "rounded px-3.5 py-1 text-[13px] font-medium",
                   ratingColors[operation.rating],
                 )}
+                data-testid="detail-rating"
               >
                 {operation.rating}
               </span>
@@ -780,6 +784,7 @@ function CompletedView({
         <div className="grid grid-cols-4 gap-2">
           <DetailMetric
             label="Score"
+            testId="detail-score"
             value={
               <>
                 {operation.score ?? "—"}
@@ -791,6 +796,7 @@ function CompletedView({
           />
           <DetailMetric
             label="Taxa sugerida"
+            testId="detail-taxa"
             value={
               <>
                 {operation.taxa_sugerida?.toLocaleString("pt-BR", {
@@ -800,6 +806,19 @@ function CompletedView({
                   % a.m.
                 </span>
               </>
+            }
+          />
+          <DetailMetric
+            label="Limite aprovado"
+            testId="detail-limite"
+            value={
+              operation.limite_aprovado === null ||
+              operation.limite_aprovado === undefined
+                ? "—"
+                : operation.limite_aprovado.toLocaleString("pt-BR", {
+                    currency: "BRL",
+                    style: "currency",
+                  })
             }
           />
           <DetailMetric label="Fonte" small value={operation.source} />
@@ -852,6 +871,8 @@ function CompletedView({
                 manual && !certificate && "rounded-l-none border-l-2 border-l-amber-500",
                 roadmap && "opacity-50",
               )}
+              data-component={component.name}
+              data-testid="snapshot-row"
               key={component.name}
             >
               <p className="mb-1 text-[11px] font-medium text-foreground">
@@ -1034,14 +1055,16 @@ function CompletedView({
 function DetailMetric({
   label,
   small,
+  testId,
   value,
 }: {
   label: string;
   small?: boolean;
+  testId?: string;
   value: ReactNode;
 }) {
   return (
-    <div className="rounded-md bg-muted px-2.5 py-2">
+    <div className="rounded-md bg-muted px-2.5 py-2" data-testid={testId}>
       <p className="mb-1 text-[10px] text-muted-foreground">{label}</p>
       <p
         className={cn(

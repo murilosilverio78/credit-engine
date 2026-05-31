@@ -85,6 +85,7 @@ export default function UsersSettingsPage() {
               <span className="mb-1 block">Nome</span>
               <input
                 className={inputClassName}
+                data-testid="user-name"
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Nome completo"
                 value={name}
@@ -94,6 +95,7 @@ export default function UsersSettingsPage() {
               <span className="mb-1 block">Email</span>
               <input
                 className={inputClassName}
+                data-testid="user-email"
                 onChange={(event) => setEmail(event.target.value)}
                 placeholder="voce@empresa.com"
                 type="email"
@@ -104,6 +106,7 @@ export default function UsersSettingsPage() {
               <span className="mb-1 block">Role</span>
               <select
                 className={inputClassName}
+                data-testid="user-role"
                 onChange={(event) => setRole(event.target.value as UserRole)}
                 value={role}
               >
@@ -116,6 +119,7 @@ export default function UsersSettingsPage() {
               <span className="mb-1 block">Senha temporária</span>
               <input
                 className={inputClassName}
+                data-testid="user-password"
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="Senha temporária"
                 type="password"
@@ -125,18 +129,19 @@ export default function UsersSettingsPage() {
           </div>
 
           {error ? (
-            <p className="mt-3 text-xs text-red-700" role="alert">
+            <p className="mt-3 text-xs text-red-700" data-testid="user-message" role="alert">
               {error}
             </p>
           ) : null}
           {success ? (
-            <p className="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+            <p className="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700" data-testid="user-message">
               {success}
             </p>
           ) : null}
 
           <button
             className="mt-4 flex h-10 items-center justify-center gap-1.5 rounded-md border-[0.5px] border-foreground bg-background px-4 text-[13px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            data-testid="user-submit"
             disabled={submitting || !name.trim() || !email.trim() || !password}
             type="submit"
           >

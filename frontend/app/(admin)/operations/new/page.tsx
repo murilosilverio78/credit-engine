@@ -139,7 +139,7 @@ function FieldError({ message }: { message?: string }) {
   }
 
   return (
-    <p className="mt-1 text-[11px] text-red-700" role="alert">
+    <p className="mt-1 text-[11px] text-red-700" data-testid="op-error" role="alert">
       {message}
     </p>
   );
@@ -285,6 +285,7 @@ export default function NewOperationPage() {
                 aria-invalid={Boolean(errors.cnpj)}
                 autoComplete="off"
                 className={cn(inputClassName, "font-mono text-sm")}
+                data-testid="op-cnpj"
                 id="cnpj"
                 inputMode="numeric"
                 onChange={(event) => {
@@ -329,6 +330,7 @@ export default function NewOperationPage() {
                   {...register("valor_solicitado")}
                   aria-invalid={Boolean(errors.valor_solicitado)}
                   className={inputClassName}
+                  data-testid="op-valor"
                   id="valor_solicitado"
                   inputMode="numeric"
                   onChange={(event) => {
@@ -352,6 +354,7 @@ export default function NewOperationPage() {
                   {...register("contrato_saldo")}
                   aria-invalid={Boolean(errors.contrato_saldo)}
                   className={inputClassName}
+                  data-testid="op-saldo"
                   id="contrato_saldo"
                   inputMode="numeric"
                   onChange={(event) => {
@@ -378,6 +381,7 @@ export default function NewOperationPage() {
                   {...register("prazo_dias")}
                   aria-invalid={Boolean(errors.prazo_dias)}
                   className={cn(inputClassName, "font-mono")}
+                  data-testid="op-prazo"
                   id="prazo_dias"
                   inputMode="numeric"
                   onChange={(event) => {
@@ -404,6 +408,7 @@ export default function NewOperationPage() {
                 {...register("contrato_id")}
                 aria-invalid={Boolean(errors.contrato_id)}
                 className={cn(inputClassName, "font-mono")}
+                data-testid="op-contrato-id"
                 id="contrato_id"
                 placeholder="Ex: 00123/2024"
               />
@@ -418,7 +423,7 @@ export default function NewOperationPage() {
             {createOperationMutation.isError &&
             createOperationMutation.error instanceof ApiError &&
             createOperationMutation.error.status >= 500 ? (
-              <p className="mb-3 text-xs text-red-700" role="alert">
+              <p className="mb-3 text-xs text-red-700" data-testid="op-error" role="alert">
                 Erro interno. Tente novamente.
               </p>
             ) : null}
@@ -433,6 +438,7 @@ export default function NewOperationPage() {
 
             <button
               className="flex h-10 w-full items-center justify-center gap-1.5 rounded-md border-[0.5px] border-foreground bg-background text-[13px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid="op-submit"
               disabled={createOperationMutation.isPending}
               type="submit"
             >

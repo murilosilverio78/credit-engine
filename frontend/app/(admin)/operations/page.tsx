@@ -109,6 +109,7 @@ function StatusBadge({ status }: { status: OperationStatus }) {
         "inline-flex rounded px-2 py-0.5 text-[10px] font-medium",
         statusColors[status],
       )}
+      data-testid="op-status-badge"
     >
       {status}
     </span>
@@ -242,6 +243,7 @@ export default function OperationsPage() {
           </label>
           <input
             className="h-8 w-[180px] rounded-md border border-input bg-background px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring"
+            data-testid="filter-cnpj"
             id="cnpj-search"
             onChange={(event) => {
               setCnpjSearch(event.target.value);
@@ -256,6 +258,7 @@ export default function OperationsPage() {
           </label>
           <select
             className="h-8 rounded-md border border-input bg-background px-2.5 text-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+            data-testid="filter-status"
             id="status-filter"
             onChange={(event) => {
               setStatus(event.target.value as OperationStatus | "");
@@ -275,6 +278,7 @@ export default function OperationsPage() {
           </label>
           <select
             className="h-8 rounded-md border border-input bg-background px-2.5 text-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+            data-testid="filter-rating"
             id="rating-filter"
             onChange={(event) => {
               setRating(event.target.value as Rating | "");
@@ -351,6 +355,8 @@ export default function OperationsPage() {
                   <tr
                     aria-label={`Abrir operação ${formatCnpj(operation.cnpj)}`}
                     className="cursor-pointer focus-within:bg-muted/80 hover:bg-muted/80 focus:bg-muted/80 focus:outline-none"
+                    data-op-id={operation.id}
+                    data-testid="op-row"
                     key={operation.id}
                     onClick={() => openOperation(operation)}
                     onKeyDown={(event) => openOperation(operation, event)}
