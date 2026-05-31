@@ -28,7 +28,7 @@ test.describe("Módulo 2 - Controle de acesso por papel (RBAC)", () => {
   test("2.4 - criação de usuário só por diretor (backend)", async ({ apiAnalista }, testInfo) => {
     skipIfNoCredentials(testInfo, "analista");
     const response = await apiPost(apiAnalista, "/api/v1/auth/register", {
-      email: `rbac.${Date.now()}@example.test`,
+      email: `rbac.${Date.now()}@example.com`,
       name: "RBAC E2E",
       password: "Temp123456!",
       role: "analista",
