@@ -1,7 +1,6 @@
 """
 CacheService: evita consultas duplicadas por CNPJ.
 Persiste no PostgreSQL (tabela cnpj_cache) com TTL configurável por componente.
-Redis pode ser adicionado como cache L1 no futuro.
 """
 from typing import Optional
 from datetime import datetime, timezone, timedelta
@@ -93,7 +92,7 @@ class CacheService:
         logger.info("cache.invalidated", cnpj=cnpj, component=component or "all")
 
     def cleanup_expired(self):
-        """Remove entradas expiradas. Chamar via task Celery periódica."""
+        """Remove entradas expiradas."""
         now = datetime.now(timezone.utc).isoformat()
         supabase.table("cnpj_cache").delete().lt("expires_at", now).execute()
         logger.info("cache.cleanup_done")

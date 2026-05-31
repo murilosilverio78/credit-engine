@@ -117,7 +117,7 @@ async def create_operation(payload: PropostaInput, background_tasks: BackgroundT
     )
 
     # Dispara pipeline assíncrono
-    start_analysis.delay(str(operation["id"]))
+    background_tasks.add_task(start_analysis, str(operation["id"]))
 
     return {
         "operation_id": operation["id"],

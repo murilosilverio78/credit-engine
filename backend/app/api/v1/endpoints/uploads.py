@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 import structlog
 
 router = APIRouter()
@@ -19,7 +19,7 @@ async def list_pending_uploads(operation_id: Optional[str] = None):
 
 
 @router.post("/operations/{operation_id}/resume")
-async def resume_operation(operation_id: str):
+async def resume_operation(operation_id: str, background_tasks: BackgroundTasks):
     """Resume the pipeline only after every manual certificate is uploaded."""
     from app.services.upload_service import UploadService
     from app.workers.tasks.orchestrator import resume_after_upload
@@ -36,7 +36,7 @@ async def resume_operation(operation_id: str):
             detail=f"Certidões pendentes: {pending}",
         )
 
-    resume_after_upload.delay(operation_id)
+    background_tasks.add_task(resume_after_upload, operation_id)
     return {"operation_id": operation_id, "status": "resume_requested"}
 
 

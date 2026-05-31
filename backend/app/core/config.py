@@ -17,9 +17,6 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: str          # service role key (backend only)
     DATABASE_URL: str                  # postgresql+asyncpg://...
 
-    # Redis (Upstash)
-    REDIS_URL: str                     # rediss://...
-
     # Cloudflare R2
     R2_ACCOUNT_ID: str = ""
     R2_ACCESS_KEY_ID: str = ""
@@ -42,10 +39,6 @@ class Settings(BaseSettings):
     SMTP_USER: str
     SMTP_PASS: str
     EMAIL_FROM: str = "credito@antecipagov.com.br"
-
-    # Celery
-    CELERY_BROKER_URL: str             # mesmo REDIS_URL
-    CELERY_RESULT_BACKEND: str         # mesmo REDIS_URL
 
     # Upload task SLA
     UPLOAD_TASK_EXPIRY_HOURS: int = 48

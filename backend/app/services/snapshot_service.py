@@ -12,7 +12,7 @@ logger = structlog.get_logger()
 class SnapshotService:
 
     def get_cnpj(self, operation_id: str) -> str:
-        """Retorna CNPJ da operação (síncrono — chamado dentro de workers Celery)."""
+        """Retorna CNPJ da operação."""
         result = supabase.table("operations")\
             .select("cnpj")\
             .eq("id", operation_id)\

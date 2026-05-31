@@ -123,5 +123,5 @@ class BaseComponentTask:
                 payload={"component": component, "error": str(exc)},
             )
 
-            # Em vez de Celery retry, apenas propaga; o orquestrador trata falha por componente
+            # Propaga; o orquestrador trata falha por componente.
             raise
