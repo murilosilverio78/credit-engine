@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import aiosmtplib
 import bcrypt
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Response
 from jose import jwt
 from pydantic import BaseModel, EmailStr
@@ -15,6 +16,7 @@ from app.core.database import supabase
 
 
 router = APIRouter()
+logger = structlog.get_logger()
 
 
 class RegisterInput(BaseModel):
@@ -63,6 +65,21 @@ async def _send_email(
     )
 
 
+async def _send_email_safe(
+    to_email: str,
+    link: str,
+    subject: str = "Acesso ao Credit Engine",
+    body: str | None = None,
+) -> bool:
+    """Tenta enviar email; loga falha sem propagar. Retorna True se enviou."""
+    try:
+        await _send_email(to_email, link, subject=subject, body=body)
+        return True
+    except Exception as exc:
+        logger.error("email.send_failed", to=to_email, error=str(exc))
+        return False
+
+
 @router.post("/register", status_code=201)
 async def register_user(
     payload: RegisterInput,
@@ -96,7 +113,7 @@ async def register_user(
     token = token_result.data[0]["token"]
 
     verify_link = f"{settings.FRONTEND_URL}/auth/confirm-email?token={token}"
-    await _send_email(
+    email_sent = await _send_email_safe(
         user["email"],
         verify_link,
         subject="Confirme seu email — Credit Engine AntecipaGov",
@@ -108,7 +125,12 @@ async def register_user(
             f"Após confirmar, use seu email e a senha definida pelo administrador para entrar."
         ),
     )
-    return {"ok": True, "user_id": user["id"], "email": user["email"]}
+    return {
+        "ok": True,
+        "user_id": user["id"],
+        "email": user["email"],
+        "email_sent": email_sent,
+    }
 
 
 @router.post("/login")
@@ -218,7 +240,7 @@ async def resend_verification(payload: ResendInput):
     token = token_result.data[0]["token"]
     verify_link = f"{settings.FRONTEND_URL}/auth/confirm-email?token={token}"
 
-    await _send_email(
+    await _send_email_safe(
         user["email"],
         verify_link,
         subject="Novo link de confirmação — Credit Engine",
