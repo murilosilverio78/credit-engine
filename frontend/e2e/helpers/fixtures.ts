@@ -2,6 +2,7 @@ import { test as base, type APIRequestContext, type Page } from "@playwright/tes
 
 import { apiContext } from "./api";
 import { storageStateFor } from "./auth";
+import { env } from "./env";
 
 type E2EFixtures = {
   analistaPage: Page;
@@ -14,6 +15,7 @@ type E2EFixtures = {
 export const test = base.extend<E2EFixtures>({
   analistaPage: async ({ browser }, use) => {
     const context = await browser.newContext({
+      baseURL: env("E2E_BASE_URL", "http://localhost:3000"),
       storageState: await storageStateFor("analista"),
     });
     const page = await context.newPage();
@@ -32,6 +34,7 @@ export const test = base.extend<E2EFixtures>({
   },
   diretorPage: async ({ browser }, use) => {
     const context = await browser.newContext({
+      baseURL: env("E2E_BASE_URL", "http://localhost:3000"),
       storageState: await storageStateFor("diretor"),
     });
     const page = await context.newPage();
@@ -40,6 +43,7 @@ export const test = base.extend<E2EFixtures>({
   },
   gerentePage: async ({ browser }, use) => {
     const context = await browser.newContext({
+      baseURL: env("E2E_BASE_URL", "http://localhost:3000"),
       storageState: await storageStateFor("gerente"),
     });
     const page = await context.newPage();

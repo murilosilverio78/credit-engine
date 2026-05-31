@@ -49,6 +49,17 @@ export function env(name: string, fallback?: string) {
 
 export type E2ERole = "diretor" | "analista" | "gerente";
 
+export function optionalEnv(name: string) {
+  loadE2EEnv();
+  const value = process.env[name];
+  return value && value !== "..." ? value : undefined;
+}
+
+export function hasCredentials(role: E2ERole) {
+  const prefix = `E2E_${role.toUpperCase()}`;
+  return Boolean(optionalEnv(`${prefix}_EMAIL`) && optionalEnv(`${prefix}_PASSWORD`));
+}
+
 export function credentialsFor(role: E2ERole) {
   const prefix = `E2E_${role.toUpperCase()}`;
   return {
