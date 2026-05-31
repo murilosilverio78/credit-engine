@@ -63,13 +63,8 @@ function LoginForm() {
   }
 
   async function resendVerification() {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-    if (!apiUrl) {
-      return;
-    }
-
     try {
-      await fetch(`${apiUrl}/api/v1/auth/resend-verification`, {
+      await fetch("/api/auth/resend-verification", {
         body: JSON.stringify({ email }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
