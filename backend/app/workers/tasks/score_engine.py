@@ -8,7 +8,6 @@ Tipo: LLM | Fila: llm | Cache: nunca (sempre recalcula)
 import json
 import re
 import anthropic
-from app.workers.celery_app import celery_app
 from app.workers.base import BaseComponentTask
 from app.services.pricing_engine import compute_taxa
 from app.utils.encoding import fix_dict_encoding
@@ -259,13 +258,8 @@ Produza a análise completa conforme o scorecard 5D e retorne o JSON estruturado
     return result
 
 
-@celery_app.task(
-    bind=True,
-    base=BaseComponentTask,
-    queue="llm",
-    name="score_engine.run",
-    max_retries=1,
-    default_retry_delay=60,
-)
-def run_score_engine(self, operation_id: str):
-    return self.execute(operation_id, component="score_engine", handler=_fetch)
+_task = BaseComponentTask()
+
+
+def run_score_engine(operation_id: str):
+    return _task.execute(operation_id, component="score_engine", handler=_fetch)

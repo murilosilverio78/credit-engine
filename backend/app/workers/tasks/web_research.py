@@ -8,7 +8,6 @@ Tipo: LLM | Fila: llm | Cache: 48h
 import anthropic
 import json
 import re
-from app.workers.celery_app import celery_app
 from app.workers.base import BaseComponentTask
 from app.utils.encoding import fix_dict_encoding
 import structlog
@@ -128,13 +127,8 @@ Retorne apenas o JSON estruturado conforme instruído."""
         })
 
 
-@celery_app.task(
-    bind=True,
-    base=BaseComponentTask,
-    queue="llm",
-    name="web_research.run",
-    max_retries=1,
-    default_retry_delay=30,
-)
-def run_web_research(self, operation_id: str):
-    return self.execute(operation_id, component="web_research", handler=_fetch)
+_task = BaseComponentTask()
+
+
+def run_web_research(operation_id: str):
+    return _task.execute(operation_id, component="web_research", handler=_fetch)

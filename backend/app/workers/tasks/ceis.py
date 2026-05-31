@@ -6,7 +6,6 @@ Executado apenas se pessoa_juridica.sancionado_ceis = True.
 Tipo: automatizado | Fila: fast | Cache: 24h
 """
 import httpx
-from app.workers.celery_app import celery_app
 from app.workers.base import BaseComponentTask
 import structlog
 
@@ -47,13 +46,8 @@ def _fetch(cnpj: str, token: str = None) -> dict:
     }
 
 
-@celery_app.task(
-    bind=True,
-    base=BaseComponentTask,
-    queue="fast",
-    name="ceis.run",
-    max_retries=3,
-    default_retry_delay=10,
-)
-def run_ceis(self, operation_id: str):
-    return self.execute(operation_id, component="ceis", handler=_fetch)
+_task = BaseComponentTask()
+
+
+def run_ceis(operation_id: str):
+    return _task.execute(operation_id, component="ceis", handler=_fetch)

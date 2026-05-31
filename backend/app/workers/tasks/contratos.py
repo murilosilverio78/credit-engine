@@ -7,7 +7,6 @@ Tipo: automatizado | Fila: fast | Cache: 12h
 """
 import httpx
 from datetime import date
-from app.workers.celery_app import celery_app
 from app.workers.base import BaseComponentTask
 import structlog
 
@@ -87,13 +86,8 @@ def _fetch(cnpj: str, token: str = None) -> dict:
     }
 
 
-@celery_app.task(
-    bind=True,
-    base=BaseComponentTask,
-    queue="fast",
-    name="contratos.run",
-    max_retries=3,
-    default_retry_delay=10,
-)
-def run_contratos(self, operation_id: str):
-    return self.execute(operation_id, component="contratos", handler=_fetch)
+_task = BaseComponentTask()
+
+
+def run_contratos(operation_id: str):
+    return _task.execute(operation_id, component="contratos", handler=_fetch)

@@ -8,7 +8,6 @@ Nota: verify=False necessário por limitação de certificados SSL em alguns amb
 """
 import httpx
 import os
-from app.workers.celery_app import celery_app
 from app.workers.base import BaseComponentTask
 import structlog
 
@@ -18,17 +17,12 @@ BRASIL_API_URL = "https://brasilapi.com.br/api/cnpj/v1/{cnpj}"
 SSL_VERIFY = os.getenv("SSL_VERIFY", "true").lower() != "false"
 
 
-@celery_app.task(
-    bind=True,
-    base=BaseComponentTask,
-    queue="fast",
-    name="brasil_api.run",
-    max_retries=3,
-    default_retry_delay=10,
-)
-def run_brasil_api(self, operation_id: str):
+_task = BaseComponentTask()
+
+
+def run_brasil_api(operation_id: str):
     """Consulta dados cadastrais via BrasilAPI."""
-    return self.execute(operation_id, component="brasil_api", handler=_fetch)
+    return _task.execute(operation_id, component="brasil_api", handler=_fetch)
 
 
 def _fetch(cnpj: str) -> dict:

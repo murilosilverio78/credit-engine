@@ -6,7 +6,6 @@ Retorna flags que controlam quais componentes downstream serão executados.
 Tipo: automatizado | Fila: fast | Cache: 12h
 """
 import httpx
-from app.workers.celery_app import celery_app
 from app.workers.base import BaseComponentTask
 import structlog
 
@@ -67,13 +66,8 @@ def _fetch(cnpj: str, token: str = None) -> dict:
     return result
 
 
-@celery_app.task(
-    bind=True,
-    base=BaseComponentTask,
-    queue="fast",
-    name="pessoa_juridica.run",
-    max_retries=3,
-    default_retry_delay=10,
-)
-def run_pessoa_juridica(self, operation_id: str):
-    return self.execute(operation_id, component="pessoa_juridica", handler=_fetch)
+_task = BaseComponentTask()
+
+
+def run_pessoa_juridica(operation_id: str):
+    return _task.execute(operation_id, component="pessoa_juridica", handler=_fetch)

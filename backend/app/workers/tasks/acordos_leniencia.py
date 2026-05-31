@@ -6,7 +6,6 @@ Sempre executado — independente das flags do pessoa_juridica.
 Tipo: automatizado | Fila: fast | Cache: 24h
 """
 import httpx
-from app.workers.celery_app import celery_app
 from app.workers.base import BaseComponentTask
 import structlog
 
@@ -57,13 +56,8 @@ def _fetch(cnpj: str, token: str = None) -> dict:
     }
 
 
-@celery_app.task(
-    bind=True,
-    base=BaseComponentTask,
-    queue="fast",
-    name="acordos_leniencia.run",
-    max_retries=3,
-    default_retry_delay=10,
-)
-def run_acordos_leniencia(self, operation_id: str):
-    return self.execute(operation_id, component="acordos_leniencia", handler=_fetch)
+_task = BaseComponentTask()
+
+
+def run_acordos_leniencia(operation_id: str):
+    return _task.execute(operation_id, component="acordos_leniencia", handler=_fetch)

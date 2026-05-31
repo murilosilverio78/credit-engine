@@ -3,7 +3,6 @@ BaseComponentTask: classe base para todos os workers de consulta.
 Gerencia: snapshot lifecycle, cache, auditoria, erro handling.
 """
 import time
-from celery import Task
 from typing import Callable
 from app.core.config import settings
 from app.utils.encoding import fix_dict_encoding
@@ -12,7 +11,7 @@ import structlog
 logger = structlog.get_logger()
 
 
-class BaseComponentTask(Task):
+class BaseComponentTask:
     """
     Herdar desta classe garante que todo componente:
     - Marca snapshot como 'running' ao iniciar
@@ -22,8 +21,6 @@ class BaseComponentTask(Task):
     - Verifica cache antes de executar
     - Registra no audit trail
     """
-    abstract = True
-
     def execute(self, operation_id: str, component: str, handler: Callable) -> dict:
         from app.services.snapshot_service import SnapshotService
         from app.services.cache_service import CacheService
@@ -126,4 +123,5 @@ class BaseComponentTask(Task):
                 payload={"component": component, "error": str(exc)},
             )
 
-            raise self.retry(exc=exc)
+            # Em vez de Celery retry, apenas propaga; o orquestrador trata falha por componente
+            raise
