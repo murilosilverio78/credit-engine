@@ -1,3 +1,8 @@
 .env.local
+.env
 .next/
+e2e/.auth/
+e2e/.env
 node_modules/
+playwright-report/
+test-results/
