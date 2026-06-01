@@ -68,10 +68,10 @@ class OperationService:
         result = supabase.table("operations")\
             .select("*")\
             .eq("id", operation_id)\
-            .single()\
+            .maybe_single()\
             .execute()
 
-        if not result.data:
+        if not result or not result.data:
             return None
 
         operation = result.data
@@ -116,11 +116,13 @@ class OperationService:
             .eq("id", operation_id)\
             .execute()
 
-    async def get_cnpj(self, operation_id: str) -> str:
+    async def get_cnpj(self, operation_id: str) -> Optional[str]:
         """Retorna apenas o CNPJ de uma operação."""
         result = supabase.table("operations")\
             .select("cnpj")\
             .eq("id", operation_id)\
-            .single()\
+            .maybe_single()\
             .execute()
+        if not result or not result.data:
+            return None
         return result.data["cnpj"]
