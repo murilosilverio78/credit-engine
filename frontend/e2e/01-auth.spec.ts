@@ -57,6 +57,7 @@ test.describe("Módulo 1 - Autenticação", () => {
     await page.getByTestId("login-email").fill(email);
     await page.getByTestId("login-password").fill(password);
     await page.getByTestId("login-submit").click();
+    await expect(page.getByTestId("login-resend")).toBeVisible();
     await page.getByTestId("login-resend").click();
     await expect(page.getByText("Novo link enviado")).toBeVisible();
   });
