@@ -2,7 +2,7 @@ import { expect, test } from "./helpers/fixtures";
 import { ensureCompletedOperation } from "./helpers/seed";
 import { skipIfNoCredentials } from "./helpers/test-data";
 
-test.describe("Módulo 10 - Overrides", () => {
+test.describe("Módulo 10 - Overrides @slow", () => {
   let operationId: string;
 
   test.beforeAll(async ({ apiDiretor }, testInfo) => {

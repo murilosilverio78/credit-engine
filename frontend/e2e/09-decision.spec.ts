@@ -3,7 +3,7 @@ import { restoreManualComponents } from "./helpers/api";
 import { ensureCompletedOperation } from "./helpers/seed";
 import { skipIfNoCredentials } from "./helpers/test-data";
 
-test.describe("Módulo 9 - Detalhe da operação e decisão", () => {
+test.describe("Módulo 9 - Detalhe da operação e decisão @slow", () => {
   let operationId: string;
 
   test.afterAll(async ({ apiDiretor }) => {

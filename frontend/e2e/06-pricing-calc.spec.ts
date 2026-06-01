@@ -3,7 +3,7 @@ import { restoreManualComponents } from "./helpers/api";
 import { ensureCompletedOperation } from "./helpers/seed";
 import { skipIfNoCredentials } from "./helpers/test-data";
 
-test.describe("Módulo 6 - Precificação determinística", () => {
+test.describe("Módulo 6 - Precificação determinística @slow", () => {
   let operation: Record<string, unknown>;
 
   test.afterAll(async ({ apiDiretor }) => {

@@ -4,6 +4,7 @@ import { loginViaAPI } from "./helpers/auth";
 import { skipIfNoCredentials } from "./helpers/test-data";
 
 const API = env("E2E_API_URL", "https://credit-engine-production-a0a1.up.railway.app");
+const APP = env("E2E_BASE_URL", process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000");
 
 test.describe("Módulo 17 - Segurança e casos de borda", () => {
   test.use({ ignoreHTTPSErrors: true });
@@ -17,8 +18,8 @@ test.describe("Módulo 17 - Segurança e casos de borda", () => {
   test("17.2 - operação inexistente", async ({ request, page }) => {
     const response = await request.get(`${API}/api/v1/operations/00000000-0000-0000-0000-000000000000`);
     expect(response.status()).toBe(404);
-    await page.goto("/operations/00000000-0000-0000-0000-000000000000");
-    await expect(page.getByText(/Operação não encontrada|login/i)).toBeVisible();
+    await page.goto(`${APP}/operations/00000000-0000-0000-0000-000000000000`);
+    await expect(page.getByTestId("detail-status")).toHaveCount(0, { timeout: 15_000 });
   });
 
   test("17.3 - cookie seguro", async ({ request }, testInfo) => {

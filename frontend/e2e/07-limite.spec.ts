@@ -3,7 +3,7 @@ import { restoreManualComponents } from "./helpers/api";
 import { ensureCompletedOperation } from "./helpers/seed";
 import { skipIfNoCredentials } from "./helpers/test-data";
 
-test.describe("Módulo 7 - Limite aprovado", () => {
+test.describe("Módulo 7 - Limite aprovado @slow", () => {
   test.afterAll(async ({ apiDiretor }) => {
     await restoreManualComponents(apiDiretor);
   });

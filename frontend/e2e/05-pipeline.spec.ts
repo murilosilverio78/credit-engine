@@ -4,7 +4,7 @@ import { env } from "./helpers/env";
 import { ensureCompletedOperation } from "./helpers/seed";
 import { skipIfNoCredentials } from "./helpers/test-data";
 
-test.describe("Módulo 5 - Pipeline de análise e processamento", () => {
+test.describe("Módulo 5 - Pipeline de análise e processamento @slow", () => {
   test.afterAll(async ({ apiDiretor }) => {
     await restoreManualComponents(apiDiretor);
   });

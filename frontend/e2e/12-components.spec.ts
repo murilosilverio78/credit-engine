@@ -3,7 +3,7 @@ import { createOperation, waitForStatus } from "./helpers/api";
 import { env } from "./helpers/env";
 import { skipIfNoCredentials } from "./helpers/test-data";
 
-test.describe("Módulo 12 - Componentes", () => {
+test.describe("Módulo 12 - Componentes @slow", () => {
   test("12.1 - listagem de componentes", async ({ diretorPage }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
     await diretorPage.goto("/components");

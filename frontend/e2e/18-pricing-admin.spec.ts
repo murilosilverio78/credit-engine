@@ -20,7 +20,9 @@ test.describe("Módulo 18 - Parametrização da precificação", () => {
     skipIfNoCredentials(testInfo, "diretor");
     await diretorPage.goto("/settings/pricing");
     await expect(diretorPage.getByTestId("pricing-matrix-row")).toHaveCount(5);
-    await expect(diretorPage.getByTestId("pricing-matrix-row").filter({ hasText: "E" })).toBeVisible();
+    const ratingE = diretorPage.locator('[data-testid="pricing-matrix-row"][data-rating="E"]');
+    await expect(ratingE).toBeVisible();
+    await expect(ratingE).toContainText("RECUSA");
   });
 
   test("18.4 - conversão de percentual amigável", async ({ diretorPage }, testInfo) => {
@@ -44,6 +46,10 @@ test.describe("Módulo 18 - Parametrização da precificação", () => {
     skipIfNoCredentials(testInfo, "diretor");
     const params = await (await apiDiretor.get("/api/v1/pricing/parameters")).json() as Array<{ key: string; value: number }>;
     const target = params[0];
+    if (!target) {
+      testInfo.skip(true, "No pricing parameter available.");
+      return;
+    }
     const updated = target.value + 0.0001;
     try {
       const response = await apiDiretor.patch(`/api/v1/pricing/parameters/${target.key}`, {

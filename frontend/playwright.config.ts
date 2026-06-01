@@ -24,4 +24,5 @@ export default defineConfig({
     screenshot: "only-on-failure",
     trace: "on-first-retry",
   },
+  workers: process.env.CI ? 2 : 1,
 });

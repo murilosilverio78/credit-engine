@@ -2,7 +2,7 @@ import { expect, test } from "./helpers/fixtures";
 import { ensureCompletedOperation } from "./helpers/seed";
 import { skipIfNoCredentials } from "./helpers/test-data";
 
-test.describe("Módulo 16 - Auditoria e governança", () => {
+test.describe("Módulo 16 - Auditoria e governança @slow", () => {
   test("16.1 - trilha de auditoria registra decisões", async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
     const id = (await ensureCompletedOperation(apiDiretor)).operation_id;
