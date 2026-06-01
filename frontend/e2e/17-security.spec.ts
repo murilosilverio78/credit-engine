@@ -1,17 +1,21 @@
 import { expect, test } from "./helpers/fixtures";
-import { credentialsFor } from "./helpers/env";
+import { credentialsFor, env } from "./helpers/env";
 import { loginViaAPI } from "./helpers/auth";
 import { skipIfNoCredentials } from "./helpers/test-data";
 
+const API = env("E2E_API_URL", "https://credit-engine-production-a0a1.up.railway.app");
+
 test.describe("Módulo 17 - Segurança e casos de borda", () => {
+  test.use({ ignoreHTTPSErrors: true });
+
   test("17.1 - endpoint protegido sem token", async ({ request }) => {
-    const response = await request.get("/api/v1/auth/me");
+    const response = await request.get(`${API}/api/v1/auth/me`);
     expect(response.status()).toBe(401);
     expect(await response.text()).toMatch(/Não autenticado|Not authenticated/i);
   });
 
   test("17.2 - operação inexistente", async ({ request, page }) => {
-    const response = await request.get("/api/v1/operations/00000000-0000-0000-0000-000000000000");
+    const response = await request.get(`${API}/api/v1/operations/00000000-0000-0000-0000-000000000000`);
     expect(response.status()).toBe(404);
     await page.goto("/operations/00000000-0000-0000-0000-000000000000");
     await expect(page.getByText(/Operação não encontrada|login/i)).toBeVisible();
@@ -25,7 +29,7 @@ test.describe("Módulo 17 - Segurança e casos de borda", () => {
   });
 
   test("17.4 - CORS entre Vercel e Railway", async ({ request }) => {
-    const response = await request.get("/health");
+    const response = await request.get(`${API}/health`);
     expect([200, 404]).toContain(response.status());
   });
 
