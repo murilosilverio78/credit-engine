@@ -23,15 +23,8 @@ export default function UsersSettingsPage() {
     setError("");
     setSuccess("");
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-    if (!apiUrl) {
-      setError("API não configurada.");
-      setSubmitting(false);
-      return;
-    }
-
     try {
-      const response = await fetch(`${apiUrl}/api/v1/auth/register`, {
+      const response = await fetch("/api/auth/register", {
         body: JSON.stringify({ email, name, password, role }),
         credentials: "include",
         headers: { "Content-Type": "application/json" },

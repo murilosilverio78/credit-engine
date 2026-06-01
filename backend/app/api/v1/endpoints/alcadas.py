@@ -2,6 +2,7 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+import structlog
 
 from app.core.auth import get_current_user
 from app.core.database import supabase
@@ -10,6 +11,7 @@ from app.services.audit_service import AuditService
 
 router = APIRouter()
 audit = AuditService()
+logger = structlog.get_logger()
 
 
 class AlcadaUpdate(BaseModel):
@@ -33,13 +35,17 @@ async def list_alcadas():
 
 @router.get("/audit")
 async def list_alcada_audit():
-    result = supabase.table("audit_trail")\
-        .select("id, action, actor_id, actor_type, override_reason, previous_value, new_value, created_at")\
-        .eq("action", "alcada_config_updated")\
-        .order("created_at", desc=True)\
-        .limit(20)\
-        .execute()
-    return result.data
+    try:
+        result = supabase.table("audit_trail")\
+            .select("*")\
+            .eq("action", "alcada_config_updated")\
+            .order("created_at", desc=True)\
+            .limit(20)\
+            .execute()
+        return result.data or []
+    except Exception as exc:
+        logger.error("alcada_audit.error", error=str(exc))
+        return []
 
 
 @router.patch("/{role}")
