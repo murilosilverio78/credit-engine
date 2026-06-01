@@ -122,12 +122,12 @@ export default function UsersSettingsPage() {
           </div>
 
           {error ? (
-            <p className="mt-3 text-xs text-red-700" data-testid="user-message" role="alert">
+            <p className="mt-3 text-xs text-red-700" data-testid="user-message-error" role="alert">
               {error}
             </p>
           ) : null}
           {success ? (
-            <p className="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700" data-testid="user-message">
+            <p className="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700" data-testid="user-message-success">
               {success}
             </p>
           ) : null}

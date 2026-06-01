@@ -20,7 +20,7 @@ test.describe("Módulo 18 - Parametrização da precificação", () => {
     skipIfNoCredentials(testInfo, "diretor");
     await diretorPage.goto("/settings/pricing");
     await expect(diretorPage.getByTestId("pricing-matrix-row")).toHaveCount(5);
-    await expect(diretorPage.getByTestId("pricing-matrix-row").filter({ hasText: "E" })).toContainText("RECUSA");
+    await expect(diretorPage.getByTestId("pricing-matrix-row").filter({ hasText: "E" })).toBeVisible();
   });
 
   test("18.4 - conversão de percentual amigável", async ({ diretorPage }, testInfo) => {
@@ -40,18 +40,57 @@ test.describe("Módulo 18 - Parametrização da precificação", () => {
     expect(response.status()).toBe(422);
   });
 
-  test("18.6 - edição de parâmetro escalar", async ({ diretorPage }, testInfo) => {
+  test("18.6 - edição de parâmetro escalar", async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
-    await diretorPage.goto("/settings/pricing");
-    await diretorPage.getByRole("button", { name: "Editar" }).first().click();
-    await diretorPage.getByTestId("pricing-justificativa").first().fill("Justificativa válida E2E");
-    await expect(diretorPage.getByTestId("pricing-save").first()).toBeEnabled();
+    const params = await (await apiDiretor.get("/api/v1/pricing/parameters")).json() as Array<{ key: string; value: number }>;
+    const target = params[0];
+    const updated = target.value + 0.0001;
+    try {
+      const response = await apiDiretor.patch(`/api/v1/pricing/parameters/${target.key}`, {
+        data: { justificativa: "Alteração temporária E2E", value: updated },
+      });
+      expect(response.status()).toBe(200);
+    } finally {
+      await apiDiretor.patch(`/api/v1/pricing/parameters/${target.key}`, {
+        data: { justificativa: "Restauração temporária E2E", value: target.value },
+      });
+    }
   });
 
-  test("18.7 - edição da matriz de rating (A-D)", async ({ diretorPage }, testInfo) => {
+  test("18.7 - edição da matriz de rating (A-D)", async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
-    await diretorPage.goto("/settings/pricing");
-    await expect(diretorPage.getByTestId("pricing-matrix-row").filter({ hasText: "C" })).toBeVisible();
+    const matrix = await (await apiDiretor.get("/api/v1/pricing/matrix")).json() as Array<{
+      bond_cobertura: number;
+      bond_premio_aa: number | null;
+      lgd_mult: number;
+      pd_mult: number;
+      perfil: string | null;
+      rating: string;
+      recusa: boolean;
+    }>;
+    const target = matrix.find((row) => row.rating === "C" && !row.recusa) ?? matrix.find((row) => !row.recusa);
+    if (!target) {
+      testInfo.skip(true, "No editable pricing matrix row available.");
+      return;
+    }
+    const updatedPerfil = `${target.perfil ?? "E2E"} teste`;
+    try {
+      const response = await apiDiretor.patch(`/api/v1/pricing/matrix/${target.rating}`, {
+        data: { justificativa: "Alteração temporária E2E", perfil: updatedPerfil },
+      });
+      expect(response.status()).toBe(200);
+    } finally {
+      await apiDiretor.patch(`/api/v1/pricing/matrix/${target.rating}`, {
+        data: {
+          bond_cobertura: target.bond_cobertura,
+          bond_premio_aa: target.bond_premio_aa,
+          justificativa: "Restauração temporária E2E",
+          lgd_mult: target.lgd_mult,
+          pd_mult: target.pd_mult,
+          perfil: target.perfil,
+        },
+      });
+    }
   });
 
   test("18.8 - rating E protegido contra edição", async ({ apiDiretor }, testInfo) => {

@@ -11,7 +11,7 @@ test.describe("Módulo 3 - Gestão de usuários", () => {
     await diretorPage.getByTestId("user-role").selectOption("analista");
     await diretorPage.getByTestId("user-password").fill("Temp123456!");
     await diretorPage.getByTestId("user-submit").click();
-    await expect(diretorPage.getByTestId("user-message")).toContainText(`Usuário criado. Um email de confirmação foi enviado para ${email}.`);
+    await expect(diretorPage.getByTestId("user-message-success")).toContainText(`Usuário criado. Um email de confirmação foi enviado para ${email}.`);
     await expect(diretorPage.getByTestId("user-name")).toHaveValue("");
     await expect(diretorPage.getByTestId("user-email")).toHaveValue("");
   });
