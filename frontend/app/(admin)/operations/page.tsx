@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useMemo, useState } from "react";
 
 import { getAdminOperations, getPendingOverrides } from "@/lib/api";
+import { formatTaxaAm } from "@/lib/format";
 import {
   type Operation,
   type OperationStatus,
@@ -66,12 +67,6 @@ function formatCnpj(cnpj: string) {
 
 function formatScore(score: number | null) {
   return score === null ? "—" : score.toLocaleString("pt-BR");
-}
-
-function formatRate(rate: number | null) {
-  return rate === null
-    ? "—"
-    : `${rate.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}% a.m.`;
 }
 
 function formatDate(date: string) {
@@ -376,7 +371,7 @@ export default function OperationsPage() {
                       {formatScore(operation.score)}
                     </td>
                     <td className="border-b-[0.5px] border-border px-2.5 py-2 font-mono text-[11px]">
-                      {formatRate(operation.taxa_sugerida)}
+                      {formatTaxaAm(operation.taxa_sugerida)}
                     </td>
                     <td className="border-b-[0.5px] border-border px-2.5 py-2">
                       <StatusBadge status={operation.status} />

@@ -24,6 +24,7 @@ import {
 } from "recharts";
 
 import { ApiError, getOperation } from "@/lib/api";
+import { formatTaxaAm } from "@/lib/format";
 import type { ComponentSnapshot, OperationDetails, Rating } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -1232,11 +1233,6 @@ function Report({ operation }: { operation: OperationDetails }) {
   const selected = snapshots.get(selectedName);
   const status = conclusion(operation.rating);
   const rawRate = operation.taxa_sugerida ?? numberValue(engine.taxa_sugerida_am);
-  const rate = rawRate < 1 ? rawRate * 100 : rawRate;
-  const formattedRate = new Intl.NumberFormat("pt-BR", {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 1,
-  }).format(rate);
 
   async function handleDownloadPdf() {
     setSelectedName("recursos_recebidos");
@@ -1313,10 +1309,7 @@ function Report({ operation }: { operation: OperationDetails }) {
               </span>
             </Metric>
             <Metric label="Taxa sugerida">
-              {formattedRate}
-              <span className="ml-0.5 text-[11px] font-normal text-muted-foreground">
-                % a.m.
-              </span>
+              {formatTaxaAm(rawRate)}
             </Metric>
             <Metric label="Limite sugerido">
               {formatPercent(engine.limite_sugerido_pct_contrato)}

@@ -34,6 +34,7 @@ import {
   resumeAfterUploads,
   uploadCertificate,
 } from "@/lib/api";
+import { formatTaxaAm } from "@/lib/format";
 import type {
   Component,
   ComponentSnapshot,
@@ -696,8 +697,6 @@ function CompletedView({
   const newValue = watch("new_value");
   const requestedBy = watch("requested_by");
   const operationValue = operation.valor_solicitado ?? operation.limite_aprovado ?? null;
-  const rawRate = operation.taxa_sugerida ?? 0;
-  const displayRate = rawRate < 1 ? rawRate * 100 : rawRate;
   const newRating =
     overrideType === "rating" && ["A", "B", "C", "D", "E"].includes(newValue.toUpperCase())
       ? (newValue.toUpperCase() as Rating)
@@ -801,15 +800,7 @@ function CompletedView({
             testId="detail-taxa"
             value={
               <>
-                {operation.taxa_sugerida === null || operation.taxa_sugerida === undefined
-                  ? "—"
-                  : displayRate.toLocaleString("pt-BR", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                <span className="ml-0.5 text-[11px] font-normal text-muted-foreground">
-                  % a.m.
-                </span>
+                {formatTaxaAm(operation.taxa_sugerida)}
               </>
             }
           />

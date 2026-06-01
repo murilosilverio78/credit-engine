@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { getPendingEscaladas, resolveEscalation } from "@/lib/api";
+import { formatTaxaAm } from "@/lib/format";
 import type { EscaladaPendente, Rating, UserRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -115,7 +116,7 @@ function EscaladaCard({ item }: { item: EscaladaPendente }) {
         </div>
         <div className="rounded-md bg-muted px-2.5 py-2">
           <p className="text-[10px] text-muted-foreground">Taxa</p>
-          <p className="font-mono text-[13px] text-foreground">{item.taxa_sugerida ?? "—"}</p>
+          <p className="font-mono text-[13px] text-foreground">{formatTaxaAm(item.taxa_sugerida)}</p>
         </div>
         <div className="rounded-md bg-muted px-2.5 py-2">
           <p className="text-[10px] text-muted-foreground">Solicitante</p>
