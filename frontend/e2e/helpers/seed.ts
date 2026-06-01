@@ -1,19 +1,38 @@
 import type { APIRequestContext } from "@playwright/test";
 
-import { createOperation, waitForStatus } from "./api";
+import {
+  createOperation,
+  disableManualComponents,
+  getManualComponentsState,
+  type OperationPayload,
+  restoreManualComponents,
+  waitForStatus,
+} from "./api";
 import { env } from "./env";
 
-export async function ensureCompletedOperation(requestContext: APIRequestContext) {
-  const { operation_id } = await createOperation(requestContext, {
-    cnpj: env("E2E_CNPJ_VALIDO", "03012610000101"),
-  });
+type CompletedOperation = {
+  operation_id: string;
+  status?: string;
+  [key: string]: unknown;
+};
 
-  await waitForStatus(
-    requestContext,
-    operation_id,
-    ["completed", "manual_review", "approved", "rejected", "escalated"],
-    360_000,
-  );
-
-  return operation_id;
+export async function ensureCompletedOperation(
+  requestContext: APIRequestContext,
+  overrides: Partial<OperationPayload> = {},
+) {
+  const original = await getManualComponentsState(requestContext);
+  try {
+    await disableManualComponents(requestContext);
+    const { operation_id } = await createOperation(requestContext, {
+      cnpj: env("E2E_CNPJ_VALIDO", "03012610000101"),
+      valor_solicitado: 500_000,
+      contrato_saldo: 800_000,
+      prazo_dias: 180,
+      ...overrides,
+    });
+    const operation = await waitForStatus(requestContext, operation_id, ["completed"], 360_000) as CompletedOperation;
+    return { ...operation, operation_id };
+  } finally {
+    await restoreManualComponents(requestContext, original);
+  }
 }

@@ -7,7 +7,7 @@ test.describe("Módulo 10 - Overrides", () => {
 
   test.beforeAll(async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
-    operationId = await ensureCompletedOperation(apiDiretor);
+    operationId = (await ensureCompletedOperation(apiDiretor)).operation_id;
   });
 
   test("10.1 - solicitar override de rating", async ({ diretorPage }, testInfo) => {

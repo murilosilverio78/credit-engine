@@ -1,14 +1,18 @@
 import { expect, test } from "./helpers/fixtures";
+import { restoreManualComponents } from "./helpers/api";
 import { ensureCompletedOperation } from "./helpers/seed";
 import { skipIfNoCredentials } from "./helpers/test-data";
 
 test.describe("Módulo 6 - Precificação determinística", () => {
   let operation: Record<string, unknown>;
 
+  test.afterAll(async ({ apiDiretor }) => {
+    await restoreManualComponents(apiDiretor);
+  });
+
   test.beforeAll(async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
-    const id = await ensureCompletedOperation(apiDiretor);
-    operation = await (await apiDiretor.get(`/api/v1/operations/${id}`)).json();
+    operation = await ensureCompletedOperation(apiDiretor);
   });
 
   test("6.1 - taxa coerente com o rating", async ({ apiDiretor }, testInfo) => {
@@ -22,7 +26,6 @@ test.describe("Módulo 6 - Precificação determinística", () => {
   test("6.2 - breakdown da taxa visível", async ({}, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
     const breakdown = operation.taxa_breakdown as Record<string, unknown> | undefined;
-    testInfo.skip(!breakdown, "Operation did not complete with pricing breakdown.");
     expect(Object.keys(breakdown ?? {}).length).toBeGreaterThan(0);
   });
 
@@ -34,6 +37,19 @@ test.describe("Módulo 6 - Precificação determinística", () => {
 
   test("6.4 - sensibilidade ao prazo", async ({}, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
-    testInfo.skip(true, "Requires comparable completed operations with same rating/value and different terms.");
+    const breakdown = operation.taxa_breakdown as Record<string, number> | undefined;
+    const taxa = operation.taxa_sugerida as number | undefined;
+    expect(taxa).toBeGreaterThan(0);
+    expect(breakdown).toBeTruthy();
+    const componentTotal = [
+      "funding_ponderado_am",
+      "el_mensal",
+      "custo_bond_am",
+      "taxa_adm_am",
+      "bancarizacao_am",
+      "orig_am",
+      "serpro_am",
+    ].reduce((total, key) => total + Number(breakdown?.[key] ?? 0), 0);
+    expect(componentTotal).toBeCloseTo(taxa ?? 0, 8);
   });
 });

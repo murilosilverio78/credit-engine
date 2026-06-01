@@ -1,13 +1,18 @@
 import { expect, test } from "./helpers/fixtures";
+import { restoreManualComponents } from "./helpers/api";
 import { ensureCompletedOperation } from "./helpers/seed";
 import { skipIfNoCredentials } from "./helpers/test-data";
 
 test.describe("Módulo 9 - Detalhe da operação e decisão", () => {
   let operationId: string;
 
+  test.afterAll(async ({ apiDiretor }) => {
+    await restoreManualComponents(apiDiretor);
+  });
+
   test.beforeAll(async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
-    operationId = await ensureCompletedOperation(apiDiretor);
+    operationId = (await ensureCompletedOperation(apiDiretor)).operation_id;
   });
 
   test("9.1 - visão completa", async ({ diretorPage }, testInfo) => {
@@ -28,7 +33,7 @@ test.describe("Módulo 9 - Detalhe da operação e decisão", () => {
 
   test("9.3 - aprovar operação", async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
-    const id = await ensureCompletedOperation(apiDiretor);
+    const id = (await ensureCompletedOperation(apiDiretor)).operation_id;
     const response = await apiDiretor.post(`/api/v1/operations/${id}/approve`, { data: {} });
     expect(response.status()).toBe(200);
     const operation = await (await apiDiretor.get(`/api/v1/operations/${id}`)).json() as { status: string };
@@ -37,14 +42,14 @@ test.describe("Módulo 9 - Detalhe da operação e decisão", () => {
 
   test("9.4 - rejeitar exige justificativa", async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
-    const id = await ensureCompletedOperation(apiDiretor);
+    const id = (await ensureCompletedOperation(apiDiretor)).operation_id;
     const response = await apiDiretor.post(`/api/v1/operations/${id}/reject`, { data: { justificativa: "curta" } });
     expect(response.status()).toBe(400);
   });
 
   test("9.5 - rejeitar com justificativa", async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
-    const id = await ensureCompletedOperation(apiDiretor);
+    const id = (await ensureCompletedOperation(apiDiretor)).operation_id;
     const response = await apiDiretor.post(`/api/v1/operations/${id}/reject`, { data: { justificativa: "Justificativa válida E2E" } });
     expect(response.status()).toBe(200);
     const operation = await (await apiDiretor.get(`/api/v1/operations/${id}`)).json() as { status: string };

@@ -1,13 +1,18 @@
 import { expect, test } from "./helpers/fixtures";
+import { restoreManualComponents } from "./helpers/api";
 import { ensureCompletedOperation } from "./helpers/seed";
 import { skipIfNoCredentials } from "./helpers/test-data";
 
 test.describe("Módulo 14 - Relatório de crédito", () => {
   let operationId: string;
 
+  test.afterAll(async ({ apiDiretor }) => {
+    await restoreManualComponents(apiDiretor);
+  });
+
   test.beforeAll(async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
-    operationId = await ensureCompletedOperation(apiDiretor);
+    operationId = (await ensureCompletedOperation(apiDiretor)).operation_id;
   });
 
   test("14.1 - renderização do relatório", async ({ diretorPage }, testInfo) => {

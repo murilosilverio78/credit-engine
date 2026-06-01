@@ -1,9 +1,14 @@
 import { expect, test } from "./helpers/fixtures";
-import { createOperation, getOperation, waitForStatus } from "./helpers/api";
+import { createOperation, getOperation, restoreManualComponents, waitForStatus } from "./helpers/api";
 import { env } from "./helpers/env";
+import { ensureCompletedOperation } from "./helpers/seed";
 import { skipIfNoCredentials } from "./helpers/test-data";
 
 test.describe("Módulo 5 - Pipeline de análise e processamento", () => {
+  test.afterAll(async ({ apiDiretor }) => {
+    await restoreManualComponents(apiDiretor);
+  });
+
   test("5.1 - acompanhamento em tempo real @slow", async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
     const { operation_id } = await createOperation(apiDiretor, { cnpj: env("E2E_CNPJ_VALIDO", "03012610000101") });
@@ -37,13 +42,11 @@ test.describe("Módulo 5 - Pipeline de análise e processamento", () => {
 
   test("5.4 - score e rating gerados @slow", async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
-    const { operation_id } = await createOperation(apiDiretor, { cnpj: env("E2E_CNPJ_VALIDO", "03012610000101") });
-    const operation = await waitForStatus(apiDiretor, operation_id, ["completed", "manual_review"], 360_000) as { status: string; score?: number; rating?: string; taxa_sugerida?: number };
-    if (operation.status === "completed") {
-      expect(operation.score).toBeGreaterThanOrEqual(0);
-      expect(operation.rating).toMatch(/[A-E]/);
-      expect(operation.taxa_sugerida).not.toBeUndefined();
-    }
+    const operation = await ensureCompletedOperation(apiDiretor) as { status: string; score?: number; rating?: string; taxa_sugerida?: number };
+    expect(operation.status).toBe("completed");
+    expect(operation.score).toBeGreaterThanOrEqual(0);
+    expect(operation.rating).toMatch(/[A-E]/);
+    expect(operation.taxa_sugerida).not.toBeUndefined();
   });
 
   test("5.5 - bloqueio automático → rating E @slow", async ({ apiDiretor }, testInfo) => {
