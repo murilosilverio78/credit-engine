@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { verifySessionJwt } from "@/lib/auth-jwt";
 
+const DIRETOR_ONLY_PREFIXES = [
+  "/settings/alcadas",
+  "/settings/pricing",
+  "/settings/users",
+];
+
 export const config = {
   matcher: [
     "/operations/:path*",
@@ -22,7 +28,7 @@ export async function middleware(req: NextRequest) {
   }
 
   if (
-    req.nextUrl.pathname.startsWith("/settings/alcadas") &&
+    DIRETOR_ONLY_PREFIXES.some((prefix) => req.nextUrl.pathname.startsWith(prefix)) &&
     session.role !== "diretor"
   ) {
     return NextResponse.redirect(new URL("/forbidden", req.url));
