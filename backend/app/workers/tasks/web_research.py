@@ -61,6 +61,24 @@ Inclua no JSON de saída:
   "raciocinio_reputacao": "<...>",
   "fatores_reputacao": [...],
   "flags_reputacao": [...]
+
+Retorne APENAS o objeto JSON, sem nenhum texto antes ou depois, sem blocos de
+markdown, sem ```json. A primeira linha da resposta deve ser { e a ultima }.
+O JSON deve conter OBRIGATORIAMENTE estes campos:
+{
+  "nivel": "<Excepcional|Forte|Adequado|Atencao|Fraco|Critico>",
+  "raciocinio_reputacao": "<...>",
+  "fatores_reputacao": [...],
+  "flags_reputacao": [...],
+  "score_reputacao": <0-100>,
+  "nivel_risco": "<baixo|medio|alto>",
+  "noticias_negativas": <bool>,
+  "processos_relevantes": <bool>,
+  "reclamacoes_graves": <bool>,
+  "problemas_governo": <bool>,
+  "resumo": "<...>",
+  "fontes_consultadas": [...]
+}
 """
 
 
@@ -72,6 +90,39 @@ def _format_cnpj(cnpj: str) -> str:
         f"{digits[:2]}.{digits[2:5]}.{digits[5:8]}/"
         f"{digits[8:12]}-{digits[12:]}"
     )
+
+
+def _extract_json_object(text: str) -> str:
+    clean = re.sub(r"```(?:json)?", "", text, flags=re.IGNORECASE)
+    clean = clean.replace("```", "").strip()
+    start = clean.find("{")
+    if start == -1:
+        raise ValueError("JSON object start not found")
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(clean)):
+        char = clean[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return clean[start:index + 1]
+
+    raise ValueError("JSON object end not found")
 
 
 def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
@@ -136,21 +187,21 @@ Retorne apenas o JSON estruturado conforme instruído."""
             break
 
     try:
-        clean = re.sub(r"```json|```", "", result_text).strip()
+        clean = _extract_json_object(result_text)
         return fix_dict_encoding(json.loads(clean))
     except Exception:
         return fix_dict_encoding({
-            "score_reputacao": 50,
-            "nivel_risco": "medio",
+            "score_reputacao": 70,
+            "nivel_risco": "baixo",
             "nivel": "Adequado",
-            "raciocinio_reputacao": "Nao foi possivel isolar sinais reputacionais confiaveis.",
+            "raciocinio_reputacao": "Nao foi possivel interpretar o JSON retornado pela pesquisa de reputacao.",
             "fatores_reputacao": [],
-            "flags_reputacao": ["reputacao_nao_isolada"],
+            "flags_reputacao": ["reputacao_parse_falhou"],
             "noticias_negativas": False,
             "processos_relevantes": False,
             "reclamacoes_graves": False,
             "problemas_governo": False,
-            "resumo": "Nao foi possivel processar a pesquisa de reputacao.",
+            "resumo": "Fallback aplicado porque a resposta do LLM nao continha JSON parseavel isolado.",
             "alertas": [],
             "fontes_consultadas": [],
             "raw_response": result_text,
