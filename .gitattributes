@@ -1,0 +1,6 @@
+*.ts text eol=lf working-tree-encoding=UTF-8
+*.tsx text eol=lf working-tree-encoding=UTF-8
+*.js text eol=lf working-tree-encoding=UTF-8
+*.jsx text eol=lf working-tree-encoding=UTF-8
+*.json text eol=lf working-tree-encoding=UTF-8
+*.py text eol=lf working-tree-encoding=UTF-8

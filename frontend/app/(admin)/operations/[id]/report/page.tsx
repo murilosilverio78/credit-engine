@@ -493,7 +493,7 @@ function ScorecardPanel({ dimensions }: { dimensions: [string, Dimension][] }) {
               {open ? (
                 <span className="mt-2 block rounded-md bg-muted/50 px-3 py-2 text-[11px] leading-[1.55] text-muted-foreground">
                   <span className="mb-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] text-foreground">
-                    <span>NÃ­vel {stringValue(dimension.nivel)}</span>
+                    <span>Nível {stringValue(dimension.nivel)}</span>
                     <span>Nota {score.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}</span>
                     <span>Contrib. {numberValue(dimension.score_contrib).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}</span>
                     <span>Fonte {stringValue(dimension.fonte)}</span>
@@ -503,7 +503,7 @@ function ScorecardPanel({ dimensions }: { dimensions: [string, Dimension][] }) {
                   </span>
                   <span className="mt-1.5 block">
                     <span className="font-medium text-foreground">Fatores: </span>
-                    {fatores.length ? fatores.map((item) => stringValue(item)).join("; ") : "â€”"}
+                    {fatores.length ? fatores.map((item) => stringValue(item)).join("; ") : "—"}
                   </span>
                   {flags.length ? (
                     <span className="mt-1.5 flex flex-wrap gap-1">
@@ -545,22 +545,22 @@ function RegularityPanel({
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-foreground">
-            Regularidade fiscal â€” fator multiplicador
+            Regularidade fiscal — fator multiplicador
           </h3>
           <p className="mt-1 max-w-[72ch] text-[11px] leading-5 text-muted-foreground">
-            Regularidade nÃ£o Ã© eixo do radar nem nota de 0 a 100. Ela modula o
-            resultado final apÃ³s o mÃ©rito.
+            Regularidade não é eixo do radar nem nota de 0 a 100. Ela modula o
+            resultado final após o mérito.
           </p>
         </div>
         <div className="rounded-md bg-muted px-3 py-2 text-right">
           <p className="text-[10px] text-muted-foreground">Fator</p>
           <p className="font-mono text-xl font-medium text-foreground">
-            Ã— {fator.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            × {fator.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
         </div>
       </div>
       <p className="mb-3 rounded-md bg-muted/60 px-3 py-2 font-mono text-xs text-foreground">
-        MÃ©rito {meritValue.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} Ã—
+        Mérito {meritValue.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} ×
         {" "}
         {fator.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} =
         {" "}
@@ -573,7 +573,7 @@ function RegularityPanel({
               {stringValue(item.certidao)}
             </p>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              {stringValue(item.estado)} Â· haircut{" "}
+              {stringValue(item.estado)} · haircut{" "}
               {numberValue(item.haircut).toLocaleString("pt-BR", {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
@@ -603,7 +603,7 @@ function StructuredParecerPanel({
   if (!Object.keys(parecer).length) {
     return (
       <p className="max-w-[95ch] whitespace-pre-line text-[13px] leading-6 text-foreground">
-        {stringValue(fallback, "Parecer nÃ£o disponÃ­vel.")}
+        {stringValue(fallback, "Parecer não disponível.")}
       </p>
     );
   }
@@ -612,13 +612,13 @@ function StructuredParecerPanel({
     <div className="space-y-4 text-[12px] leading-6 text-foreground">
       <section>
         <h3 className="mb-1 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
-          ConclusÃ£o
+          Conclusão
         </h3>
         <p>{stringValue(conclusao.texto)}</p>
       </section>
       <section className="space-y-3">
         <h3 className="text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
-          DimensÃµes de mÃ©rito
+          Dimensões de mérito
         </h3>
         {dimensoes.map((dimension) => {
           const fatores = asArray(dimension.fatores);
@@ -628,13 +628,13 @@ function StructuredParecerPanel({
               <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
                 <p className="font-medium">{stringValue(dimension.label ?? dimension.chave)}</p>
                 <p className="font-mono text-[11px] text-muted-foreground">
-                  {stringValue(dimension.nivel)} Â· {numberValue(dimension.score).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}
+                  {stringValue(dimension.nivel)} · {numberValue(dimension.score).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}
                 </p>
               </div>
               <p className="text-muted-foreground">{stringValue(dimension.relatorio)}</p>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 <span className="font-medium text-foreground">Fatores: </span>
-                {fatores.length ? fatores.map((item) => stringValue(item)).join("; ") : "â€”"}
+                {fatores.length ? fatores.map((item) => stringValue(item)).join("; ") : "—"}
               </p>
               {flagsDim.length ? (
                 <p className="mt-1 font-mono text-[10px] text-muted-foreground">
@@ -657,15 +657,15 @@ function StructuredParecerPanel({
             Pontos positivos
           </h3>
           <p className="text-muted-foreground">
-            {pontosPositivos.length ? pontosPositivos.map((item) => stringValue(item)).join("; ") : "â€”"}
+            {pontosPositivos.length ? pontosPositivos.map((item) => stringValue(item)).join("; ") : "—"}
           </p>
         </div>
         <div>
           <h3 className="mb-1 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
-            Pontos de atenÃ§Ã£o
+            Pontos de atenção
           </h3>
           <p className="text-muted-foreground">
-            {pontosAtencao.length ? pontosAtencao.map((item) => stringValue(item)).join("; ") : "â€”"}
+            {pontosAtencao.length ? pontosAtencao.map((item) => stringValue(item)).join("; ") : "—"}
           </p>
         </div>
       </section>
