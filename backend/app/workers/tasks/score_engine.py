@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import anthropic
@@ -56,6 +56,18 @@ SUBPESOS_RELAC = {
 LIMITE_PCT_CONTRATO = 0.70
 PISO_FATOR_REG = 0.75
 CERTIDOES_REGULARIDADE = ("cnd_federal", "cndt_tst", "fgts")
+ESSENTIAL_COMPONENTS = (
+    "brasil_api",
+    "pessoa_juridica",
+    "contratos",
+    "recursos_recebidos",
+    "ceis",
+    "cnep",
+    "cepim",
+    "acordos_leniencia",
+    "web_research",
+)
+RUNNING_STALE_MINUTES = 15
 
 COMPONENT_DIMENSION_MAP = {
     "brasil_api": "saude_cadastral",
@@ -64,6 +76,10 @@ COMPONENT_DIMENSION_MAP = {
     "web_research": "reputacao_mercado",
     "recursos_recebidos": "porte_operacionalidade",
 }
+
+
+class PipelineIncompleteError(RuntimeError):
+    """Raised when score inputs are not fully completed."""
 
 PORTE_SYSTEM_PROMPT = """Você avalia UMA dimensão de risco de crédito: Porte e Operacionalidade — a capacidade
 real de a empresa EXECUTAR seus contratos sem falha operacional. Neste produto
@@ -135,6 +151,90 @@ def rating_de(score: float) -> str:
     if score >= 40:
         return "D"
     return "E"
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        text = value.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _snapshot_status_label(component: str, snapshot: dict[str, Any] | None, now: datetime) -> str | None:
+    if not snapshot:
+        return f"{component}(missing)"
+    status = snapshot.get("status") or "missing"
+    if status == "completed":
+        return None
+    started_at = _parse_datetime(snapshot.get("started_at"))
+    if status == "running" and started_at:
+        age = now - started_at
+        if age > timedelta(minutes=RUNNING_STALE_MINUTES):
+            return f"{component}(running_stale>{RUNNING_STALE_MINUTES}m)"
+    return f"{component}({status})"
+
+
+def _mark_stale_running_failed(supabase, operation_id: str, components: list[str]) -> None:
+    if not components:
+        return
+    message = f"snapshot running ha mais de {RUNNING_STALE_MINUTES} minutos"
+    try:
+        supabase.table("component_snapshots")\
+            .update({"status": "failed", "error_message": message})\
+            .eq("operation_id", operation_id)\
+            .in_("component", components)\
+            .execute()
+    except Exception as exc:
+        logger.error(
+            "score_engine.stale_mark_failed_error",
+            operation_id=operation_id,
+            components=components,
+            error=str(exc),
+        )
+
+
+def validate_score_preconditions(operation_id: str, supabase) -> None:
+    """Abort score consolidation unless every essential input is completed."""
+    now = datetime.now(timezone.utc)
+    result = supabase.table("component_snapshots")\
+        .select("component,status,started_at,error_message")\
+        .eq("operation_id", operation_id)\
+        .in_("component", list(ESSENTIAL_COMPONENTS))\
+        .execute()
+
+    snapshots = {row.get("component"): row for row in (result.data or [])}
+    incomplete = []
+    stale_running = []
+    for component in ESSENTIAL_COMPONENTS:
+        snapshot = snapshots.get(component)
+        label = _snapshot_status_label(component, snapshot, now)
+        if label:
+            incomplete.append(label)
+            if label.startswith(f"{component}(running_stale"):
+                stale_running.append(component)
+
+    if incomplete:
+        _mark_stale_running_failed(supabase, operation_id, stale_running)
+        logger.error(
+            "score_engine.precondition_failed",
+            operation_id=operation_id,
+            incomplete_components=incomplete,
+        )
+        raise PipelineIncompleteError(
+            "score_engine abortado: componentes nao concluidos: "
+            + ", ".join(incomplete)
+        )
 
 
 def _as_float(value: Any) -> float | None:
@@ -926,6 +1026,8 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
     operacao: dict[str, Any] = {}
     if operation_id:
         try:
+            validate_score_preconditions(operation_id, supabase)
+
             operation_result = supabase.table("operations")\
                 .select("valor_solicitado,prazo_dias,contrato_saldo")\
                 .eq("id", operation_id)\
@@ -949,8 +1051,11 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
                 operation_id=operation_id,
                 components=list(snapshots.keys()),
             )
+        except PipelineIncompleteError:
+            raise
         except Exception as exc:
             logger.error("score_engine.snapshots_error", error=str(exc), operation_id=operation_id)
+            raise RuntimeError(f"score_engine abortado: falha ao validar snapshots: {exc}") from exc
 
     result = consolidar_score(cnpj, snapshots, operacao)
 

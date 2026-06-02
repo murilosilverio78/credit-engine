@@ -6,6 +6,7 @@ Executado apenas se pessoa_juridica.favorecido_despesas = True.
 Tipo: automatizado | Fila: fast | Cache: 12h
 """
 import httpx
+import time
 from datetime import date
 from app.workers.base import BaseComponentTask
 import structlog
@@ -13,6 +14,8 @@ import structlog
 logger = structlog.get_logger()
 
 BASE_URL = "https://api.portaldatransparencia.gov.br/api-de-dados"
+MAX_PAGES = 300
+MAX_SECONDS = 180
 
 
 def _mes_ano(d: date) -> str:
@@ -31,8 +34,17 @@ def _fetch(cnpj: str, token: str = None) -> dict:
 
     recursos = []
 
+    started = time.monotonic()
     pagina = 1
     while True:
+        elapsed = time.monotonic() - started
+        if elapsed > MAX_SECONDS:
+            raise TimeoutError(
+                f"recursos_recebidos excedeu timeout de {MAX_SECONDS}s na pagina {pagina}"
+            )
+        if pagina > MAX_PAGES:
+            raise TimeoutError(f"recursos_recebidos excedeu limite de {MAX_PAGES} paginas")
+
         # URL montada como string para evitar encoding do "/" pelo httpx
         url = (
             f"{BASE_URL}/despesas/recursos-recebidos"

@@ -6,6 +6,7 @@ Executado apenas se pessoa_juridica.possui_contratacao = True.
 Tipo: automatizado | Fila: fast | Cache: 12h
 """
 import httpx
+import time
 from datetime import date
 from app.workers.base import BaseComponentTask
 import structlog
@@ -13,6 +14,8 @@ import structlog
 logger = structlog.get_logger()
 
 BASE_URL = "https://api.portaldatransparencia.gov.br/api-de-dados"
+MAX_PAGES = 200
+MAX_SECONDS = 180
 
 
 def _is_ativo(c: dict) -> bool:
@@ -53,8 +56,15 @@ def _fetch(cnpj: str, token: str = None) -> dict:
     headers = {"chave-api-dados": api_token}
     contratos = []
 
+    started = time.monotonic()
     pagina = 1
     while True:
+        elapsed = time.monotonic() - started
+        if elapsed > MAX_SECONDS:
+            raise TimeoutError(f"contratos excedeu timeout de {MAX_SECONDS}s na pagina {pagina}")
+        if pagina > MAX_PAGES:
+            raise TimeoutError(f"contratos excedeu limite de {MAX_PAGES} paginas")
+
         with httpx.Client(timeout=20, verify=False) as client:
             resp = client.get(
                 f"{BASE_URL}/contratos/cpf-cnpj",
