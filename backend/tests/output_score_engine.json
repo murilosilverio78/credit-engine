@@ -1,50 +1,100 @@
 {
-  "score": 82,
+  "score": 74.6,
   "rating": "B",
-  "taxa_sugerida_am": 0.13,
-  "limite_sugerido_pct_contrato": 0.6,
+  "merit": 74.6,
+  "fator_regularidade": 1.0,
+  "limite_sugerido_pct_contrato": 0.7,
+  "limite_aprovado_rs": 500000.0,
   "dimensoes": {
-    "saude_cadastral": {
-      "score": 90,
-      "peso": 0.25,
-      "justificativa": "Empresa ativa desde março/1999 (26 anos de mercado), situação cadastral ATIVA, capital social de R$ 500 mil compatível com porte EPP, regime tributário Lucro Presumido estável nos últimos 3 anos. Estrutura societária simplificada com único sócio-administrador desde 2023."
-    },
-    "regularidade_fiscal": {
-      "score": 95,
-      "peso": 0.35,
-      "justificativa": "Nenhuma sanção identificada nos cadastros CEIS, CNEP, CEPIM e CEAF. Sem acordo de leniência ativo. Empresa apta a contratar com a administração pública conforme registros consultados. Regularidade plena nas bases federais."
-    },
     "relacionamento_governamental": {
-      "score": 78,
-      "peso": 0.15,
-      "justificativa": "Carteira robusta com 9 contratos ativos totalizando R$ 15,4 milhões, diversificada em 6 ministérios distintos (Comunicações, Agricultura, Saúde, Cultura, Meio Ambiente, Educação). Histórico de 13 contratos demonstra capacidade de execução. Contratos de longo prazo (até 5 anos) indicam confiança dos contratantes."
-    },
-    "reputacao_mercado": {
-      "score": 75,
-      "peso": 0.15,
-      "justificativa": "Score de reputação web de 75 com risco baixo. Sem notícias negativas, processos relevantes ou reclamações graves identificadas. Ausência de problemas com governo nos últimos 2 anos. Fontes múltiplas consultadas sem alertas."
+      "score": 87.8,
+      "nivel": "Forte",
+      "peso": 0.3,
+      "fatores": [
+        "9 contratos ativos",
+        "6 orgaos distintos",
+        "13 contratos no historico",
+        "Maturidade maxima: 5.0 anos"
+      ],
+      "relatorio": "Relacionamento governamental calculado por volume, diversificacao, historico e maturidade dos contratos.",
+      "flags": [],
+      "fonte": "python",
+      "score_contrib": 26.34
     },
     "porte_operacionalidade": {
-      "score": 62,
-      "peso": 0.1,
-      "justificativa": "EPP com capital social de R$ 500 mil gerindo contratos de R$ 15,4 milhões ativos representa alavancagem operacional significativa. Atividade principal (teleatendimento) diverge parcialmente dos contratos atuais (facilities, limpeza, motoristas). Múltiplas atividades secundárias demonstram flexibilidade mas também dispersão de foco."
+      "score": 55,
+      "nivel": "Atencao",
+      "peso": 0.28,
+      "fatores": [
+        "Porte pequeno com contratos relevantes em servicos intensivos em mao de obra."
+      ],
+      "relatorio": "Porte/Operacionalidade fixado em Atencao para harness de calibracao MASF.",
+      "flags": [
+        "stub_llm_calibracao"
+      ],
+      "fonte": "llm",
+      "score_contrib": 15.4
+    },
+    "saude_cadastral": {
+      "score": 84.5,
+      "nivel": "Forte",
+      "peso": 0.24,
+      "fatores": [
+        "Situacao cadastral: ATIVA",
+        "Idade empresarial: 27.2 anos",
+        "Capital social: R$ 500,000.00",
+        "Porte declarado: EMPRESA DE PEQUENO PORTE"
+      ],
+      "relatorio": "Saude cadastral calculada por idade, capital, porte e estabilidade societaria.",
+      "flags": [],
+      "fonte": "python",
+      "score_contrib": 20.28
+    },
+    "reputacao_mercado": {
+      "score": 70,
+      "nivel": "Adequado",
+      "peso": 0.18,
+      "fatores": [
+        "Empresa ativa desde 1999 com contratos recentes e significativos com órgãos federais como INCRA e DPU. Possui situação cadastral regular sem identificação de sanções, penalidades ou problemas reputacionais nos últimos 2 anos."
+      ],
+      "relatorio": "Empresa ativa desde 1999 com contratos recentes e significativos com órgãos federais como INCRA e DPU. Possui situação cadastral regular sem identificação de sanções, penalidades ou problemas reputacionais nos últimos 2 anos.",
+      "flags": [
+        "reputacao_indisponivel"
+      ],
+      "fonte": "llm",
+      "score_contrib": 12.6
     }
+  },
+  "regularidade": {
+    "fator": 1.0,
+    "haircuts": [
+      {
+        "certidao": "cnd_federal",
+        "estado": "indisponivel",
+        "haircut": 0.0
+      },
+      {
+        "certidao": "cndt_tst",
+        "estado": "indisponivel",
+        "haircut": 0.0
+      },
+      {
+        "certidao": "fgts",
+        "estado": "indisponivel",
+        "haircut": 0.0
+      }
+    ],
+    "flags": [
+      "certidao_indisponivel"
+    ]
   },
   "bloqueios": [],
   "pontos_positivos": [
-    "Empresa consolidada com 26 anos de operação e situação cadastral ativa",
-    "Zero sanções em todas as bases consultadas (CEIS, CNEP, CEPIM, CEAF)",
-    "Carteira diversificada em 6 ministérios diferentes, reduzindo risco de concentração",
-    "Volume expressivo de R$ 15,4 milhões em contratos ativos demonstra capacidade operacional",
-    "Contratos de longo prazo (até 5 anos) indicam relacionamento sólido com contratantes",
-    "Reputação de mercado favorável sem alertas ou problemas identificados"
+    "relacionamento_governamental: Forte",
+    "saude_cadastral: Forte"
   ],
   "pontos_atencao": [
-    "Capital social de R$ 500 mil relativamente baixo frente ao volume de contratos geridos",
-    "Troca recente de sócio-administrador (outubro/2023) requer monitoramento da nova gestão",
-    "Atividade principal (teleatendimento) difere dos serviços contratados (facilities/limpeza)",
-    "Concentração de contratos no setor cultural (4 contratos com MinC/IPHAN/IBRAM)",
-    "Alguns contratos apresentam divergência entre valor inicial e final, sugerindo aditivos"
+    "porte_operacionalidade: Atencao"
   ],
-  "parecer": "MASF Serviços apresenta perfil de crédito FAVORÁVEL (Rating B), sustentado por 26 anos de operação, regularidade fiscal plena e carteira diversificada de R$ 15,4 milhões em contratos federais ativos. A ausência total de sanções e o histórico consistente de execução contratual com múltiplos órgãos federais conferem segurança à operação. Recomenda-se limite de até 60% do saldo contratual com taxa CDI+2,0% a.m., com monitoramento trimestral da execução contratual e da nova gestão societária estabelecida em 2023."
+  "parecer": "Score final 74.6, rating B, calculado por agregacao deterministica de merito e fator de regularidade 1.00. A dimensao mais forte foi relacionamento_governamental (Forte), e a mais fraca foi porte_operacionalidade (Atencao). Flags relevantes: certidao_indisponivel, reputacao_indisponivel, stub_llm_calibracao."
 }

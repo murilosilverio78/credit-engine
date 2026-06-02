@@ -1,0 +1,126 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.pg{background:hsl(210,40%,96.1%);min-height:560px;font-family:system-ui,-apple-system,sans-serif}
+.header{border-bottom:0.5px solid hsl(214.3,31.8%,91.4%);background:hsl(0,0%,100%);padding:14px 20px}
+.header h1{font-size:15px;font-weight:500;color:hsl(222.2,84%,4.9%)}
+.header p{font-size:12px;color:hsl(215.4,16.3%,46.9%);margin-top:2px}
+.body{padding:20px;display:flex;flex-direction:column;gap:8px}
+.card{background:hsl(0,0%,100%);border:0.5px solid hsl(214.3,31.8%,91.4%);border-radius:0.5rem;padding:14px 16px;transition:opacity .3s}
+.card.dismissed{opacity:.35;pointer-events:none}
+.card-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
+.cnpj{font-size:11px;font-family:monospace;color:hsl(215.4,16.3%,46.9%);margin-bottom:2px}
+.razao{font-size:13px;font-weight:500;color:hsl(222.2,84%,4.9%)}
+.badge{display:inline-flex;border-radius:calc(0.5rem - 4px);padding:2px 7px;font-size:10px;font-weight:500}
+.rb{background:hsl(210,40%,96.1%);color:hsl(215.4,16.3%,46.9%)}
+.ra{background:#EAF3DE;color:#27500A}
+.rbb{background:#E6F1FB;color:#0C447C}
+.rc{background:#FAEEDA;color:#633806}
+.rd{background:#FAECE7;color:#712B13}
+.alcada-committee{background:rgba(245,185,0,.12);color:#854F0B}
+.alcada-manager{background:rgba(59,130,246,.1);color:#1d4ed8}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}
+.kpi{background:hsl(210,40%,96.1%);border-radius:calc(0.5rem - 4px);padding:8px 10px}
+.kpi-l{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:hsl(215.4,16.3%,46.9%);margin-bottom:3px}
+.kpi-v{font-size:13px;font-weight:500;font-family:monospace;color:hsl(222.2,84%,4.9%)}
+.card-foot{display:flex;align-items:center;justify-content:space-between}
+.solicitante{font-size:11px;color:hsl(215.4,16.3%,46.9%);display:flex;align-items:center;gap:6px}
+.actions{display:flex;gap:6px}
+.btn-r{height:30px;padding:0 12px;font-size:12px;border-radius:calc(0.5rem - 4px);border:0.5px solid hsl(214.3,31.8%,91.4%);background:hsl(0,0%,100%);color:hsl(215.4,16.3%,46.9%);cursor:pointer;display:flex;align-items:center;gap:4px}
+.btn-r:hover{background:hsl(210,40%,96.1%)}
+.btn-a{height:30px;padding:0 12px;font-size:12px;border-radius:calc(0.5rem - 4px);border:0.5px solid hsl(222.2,84%,4.9%);background:hsl(0,0%,100%);color:hsl(222.2,84%,4.9%);font-weight:500;cursor:pointer;display:flex;align-items:center;gap:4px}
+.btn-a:hover{background:hsl(210,40%,96.1%)}
+.empty{text-align:center;padding:3rem 1rem;color:hsl(215.4,16.3%,46.9%);font-size:13px;display:none;background:hsl(0,0%,100%);border:0.5px solid hsl(214.3,31.8%,91.4%);border-radius:0.5rem}
+.border-l-committee{border-left:2px solid #d97706;border-radius:0 0.5rem 0.5rem 0}
+.border-l-manager{border-left:2px solid #3b82f6;border-radius:0 0.5rem 0.5rem 0}
+</style>
+<div class="pg">
+  <div class="header">
+    <h1>Escaladas pendentes <span style="background:#FAEEDA;color:#633806;font-size:10px;font-weight:500;padding:2px 7px;border-radius:4px;margin-left:4px" id="cnt">2</span></h1>
+    <p>Operações fora da sua alçada aguardando decisão</p>
+  </div>
+  <div class="body">
+
+    <div class="card border-l-committee" id="c1">
+      <div class="card-top">
+        <div>
+          <div class="cnpj">03.012.610/0001-01</div>
+          <div class="razao">MASF Serviços e Facilities Ltda</div>
+        </div>
+        <div style="display:flex;gap:4px;align-items:center">
+          <span class="badge rbb">Rating B</span>
+          <span class="badge alcada-committee">comitê</span>
+        </div>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><div class="kpi-l">Valor</div><div class="kpi-v">R$ 750.000</div></div>
+        <div class="kpi"><div class="kpi-l">Score</div><div class="kpi-v">78/100</div></div>
+        <div class="kpi"><div class="kpi-l">Taxa</div><div class="kpi-v">2,0% a.m.</div></div>
+      </div>
+      <div class="card-foot">
+        <div class="solicitante">
+          <span style="width:18px;height:18px;border-radius:50%;background:hsl(210,40%,96.1%);border:0.5px solid hsl(214.3,31.8%,91.4%);display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:500">JS</span>
+          João Silva (gerente) · há 14 min
+        </div>
+        <div class="actions">
+          <button class="btn-r" onclick="dismiss('c1')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Rejeitar
+          </button>
+          <button class="btn-a" onclick="dismiss('c1')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            Aprovar
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card border-l-manager" id="c2">
+      <div class="card-top">
+        <div>
+          <div class="cnpj">12.345.678/0001-99</div>
+          <div class="razao">TechBuild Construções e Serviços Ltda</div>
+        </div>
+        <div style="display:flex;gap:4px;align-items:center">
+          <span class="badge rc">Rating C</span>
+          <span class="badge alcada-manager">gerente</span>
+        </div>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><div class="kpi-l">Valor</div><div class="kpi-v">R$ 1.200.000</div></div>
+        <div class="kpi"><div class="kpi-l">Score</div><div class="kpi-v">61/100</div></div>
+        <div class="kpi"><div class="kpi-l">Taxa</div><div class="kpi-v">3,2% a.m.</div></div>
+      </div>
+      <div class="card-foot">
+        <div class="solicitante">
+          <span style="width:18px;height:18px;border-radius:50%;background:hsl(210,40%,96.1%);border:0.5px solid hsl(214.3,31.8%,91.4%);display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:500">AM</span>
+          Ana Melo (analista) · há 1h
+        </div>
+        <div class="actions">
+          <button class="btn-r" onclick="dismiss('c2')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Rejeitar
+          </button>
+          <button class="btn-a" onclick="dismiss('c2')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            Aprovar
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="empty" id="empty">Nenhuma escalada pendente.</div>
+  </div>
+</div>
+<script>
+let count=2;
+function dismiss(id){
+  document.getElementById(id).classList.add('dismissed');
+  count--;
+  document.getElementById('cnt').textContent=count;
+  if(count===0){
+    document.getElementById('empty').style.display='block';
+    document.getElementById('cnt').style.display='none';
+  }
+}
+</script>

@@ -1,0 +1,163 @@
+
+<h2 class="sr-only">Tela 8 — relatório de crédito completo com parecer do score engine, dimensões do scorecard, componentes clicáveis e botão de download PDF.</h2>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.wrap{padding:0}
+.rpt-header{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:20px 24px;margin-bottom:14px}
+.rpt-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px}
+.rpt-id{font-size:10px;color:var(--color-text-secondary);font-family:var(--font-mono);margin-bottom:4px}
+.rpt-name{font-size:18px;font-weight:500;color:var(--color-text-primary)}
+.rpt-cnpj{font-size:12px;color:var(--color-text-secondary);font-family:var(--font-mono);margin-top:2px}
+.rpt-right{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.rating-box{width:52px;height:52px;border-radius:var(--border-radius-md);background:#E6F1FB;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:500;color:#0C447C}
+.btn-dl{display:flex;align-items:center;gap:6px;padding:7px 14px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);font-size:12px;cursor:pointer;background:var(--color-background-primary);color:var(--color-text-primary);font-family:var(--font-sans)}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.mc{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px 12px}
+.mc-label{font-size:10px;color:var(--color-text-secondary);margin-bottom:4px}
+.mc-val{font-size:20px;font-weight:500;font-family:var(--font-mono);color:var(--color-text-primary)}
+.mc-sub{font-size:10px;color:var(--color-text-secondary);margin-top:2px}
+.section-title{font-size:11px;font-weight:500;color:var(--color-text-secondary);letter-spacing:.06em;margin-bottom:10px;margin-top:14px}
+.parecer-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-left:3px solid var(--color-border-success);border-radius:0 var(--border-radius-lg) var(--border-radius-lg) 0;padding:14px 16px;margin-bottom:14px}
+.parecer-label{font-size:10px;font-weight:500;color:var(--color-text-success);letter-spacing:.06em;margin-bottom:6px}
+.parecer-text{font-size:13px;color:var(--color-text-primary);line-height:1.6}
+.dim-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.dim-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:12px 14px}
+.dim-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.dim-name{font-size:12px;font-weight:500;color:var(--color-text-primary)}
+.dim-score{font-size:18px;font-weight:500;font-family:var(--font-mono)}
+.dim-score.high{color:var(--color-text-success)}
+.dim-score.mid{color:var(--color-text-warning)}
+.dim-peso{font-size:10px;color:var(--color-text-secondary);margin-bottom:6px}
+.bar{height:4px;background:var(--color-background-secondary);border-radius:2px;overflow:hidden;margin-bottom:8px}
+.bar-fill{height:100%;border-radius:2px}
+.bar-fill.high{background:var(--color-background-success)}
+.bar-fill.mid{background:var(--color-background-warning)}
+.dim-just{font-size:11px;color:var(--color-text-secondary);line-height:1.5}
+.pts-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.pts-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:12px 14px}
+.pts-title{font-size:11px;font-weight:500;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.pts-title.pos{color:var(--color-text-success)}
+.pts-title.neg{color:var(--color-text-warning)}
+.pt-item{display:flex;align-items:flex-start;gap:6px;font-size:11px;color:var(--color-text-secondary);padding:5px 0;border-bottom:0.5px solid var(--color-border-tertiary);line-height:1.4}
+.pt-item:last-child{border-bottom:none}
+.pt-dot{width:5px;height:5px;border-radius:50%;margin-top:4px;flex-shrink:0}
+.pt-dot.pos{background:var(--color-background-success)}
+.pt-dot.neg{background:var(--color-background-warning)}
+.comp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.comp-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:10px;cursor:pointer}
+.comp-card:hover{background:var(--color-background-secondary)}
+.comp-card.active{border-color:var(--color-border-info);background:var(--color-background-info)}
+.comp-name{font-size:11px;font-weight:500;color:var(--color-text-primary);margin-bottom:3px}
+.comp-status{font-size:10px;color:var(--color-text-success);display:flex;align-items:center;gap:3px}
+.comp-status.manual{color:var(--color-text-warning)}
+.comp-time{font-size:10px;color:var(--color-text-secondary);margin-top:2px;font-family:var(--font-mono)}
+.detail-panel{background:var(--color-background-primary);border:0.5px solid var(--color-border-info);border-radius:var(--border-radius-lg);padding:14px 16px;margin-bottom:14px}
+.detail-title{font-size:12px;font-weight:500;color:var(--color-text-info);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.detail-row{display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;border-bottom:0.5px solid var(--color-border-tertiary);font-size:12px}
+.detail-row:last-child{border-bottom:none}
+.detail-key{color:var(--color-text-secondary)}
+.detail-val{color:var(--color-text-primary);font-family:var(--font-mono);font-size:11px}
+.badge{display:inline-block;font-size:10px;font-weight:500;padding:2px 8px;border-radius:4px}
+.badge-ok{background:var(--color-background-success);color:var(--color-text-success)}
+</style>
+<div class="wrap">
+  <div class="rpt-header">
+    <div class="rpt-top">
+      <div>
+        <div class="rpt-id">Relatório de crédito — 61791208-6c88</div>
+        <div class="rpt-name">MASF Serviços e Facilities Ltda</div>
+        <div class="rpt-cnpj">03.012.610/0001-01 · EPP · Brasília/DF · ativa desde 1999</div>
+      </div>
+      <div class="rpt-right">
+        <div class="rating-box">B</div>
+        <button class="btn-dl"><i class="ti ti-download" style="font-size:13px" aria-hidden="true"></i>Baixar PDF</button>
+      </div>
+    </div>
+    <div class="metrics">
+      <div class="mc"><div class="mc-label">Score</div><div class="mc-val">78<span style="font-size:11px;font-weight:400;color:var(--color-text-secondary)">/100</span></div></div>
+      <div class="mc"><div class="mc-label">Taxa sugerida</div><div class="mc-val">2%<span style="font-size:11px;font-weight:400;color:var(--color-text-secondary)"> a.m.</span></div></div>
+      <div class="mc"><div class="mc-label">Limite sugerido</div><div class="mc-val">60%<span style="font-size:11px;font-weight:400;color:var(--color-text-secondary)"> contrato</span></div></div>
+      <div class="mc"><div class="mc-label">Contratos ativos</div><div class="mc-val">9<span style="font-size:11px;font-weight:400;color:var(--color-text-secondary)"> / R$15,4M</span></div></div>
+    </div>
+  </div>
+  <div class="section-title">Parecer do agente de IA</div>
+  <div class="parecer-card">
+    <div class="parecer-label"><i class="ti ti-robot" style="font-size:11px;vertical-align:-1px;margin-right:4px" aria-hidden="true"></i>Conclusão — perfil favorável</div>
+    <div class="parecer-text">A MASF Serviços e Facilities apresenta perfil de crédito favorável para antecipação de recebíveis governamentais. Empresa com 26 anos de operação, situação cadastral regular e sem qualquer sanção nos cadastros restritivos federais. Possui carteira sólida de 9 contratos ativos totalizando R$ 15,4 milhões, com boa diversificação entre 6 ministérios distintos. Recomenda-se operação com taxa CDI + 2,0% a.m. e limite de até 60% do valor dos contratos.</div>
+  </div>
+  <div class="section-title">Scorecard — 5 dimensões</div>
+  <div class="dim-grid">
+    <div class="dim-card">
+      <div class="dim-head"><span class="dim-name">Regularidade fiscal</span><span class="dim-score high">90</span></div>
+      <div class="dim-peso">Peso 35%</div>
+      <div class="bar"><div class="bar-fill high" style="width:90%"></div></div>
+      <div class="dim-just">Sem sanções em CEIS, CNEP, CEPIM ou CEAF. Certidões CND, CNDT e FGTS anexadas. Ausência total de restrições governamentais.</div>
+    </div>
+    <div class="dim-card">
+      <div class="dim-head"><span class="dim-name">Saúde cadastral</span><span class="dim-score high">85</span></div>
+      <div class="dim-peso">Peso 25%</div>
+      <div class="bar"><div class="bar-fill high" style="width:85%"></div></div>
+      <div class="dim-just">Empresa ativa desde 1999 (26 anos), capital social R$ 500 mil, EPP com Lucro Presumido. Natureza jurídica Ltda com sócio-administrador único.</div>
+    </div>
+    <div class="dim-card">
+      <div class="dim-head"><span class="dim-name">Relacionamento gov.</span><span class="dim-score high">82</span></div>
+      <div class="dim-peso">Peso 15%</div>
+      <div class="bar"><div class="bar-fill high" style="width:82%"></div></div>
+      <div class="dim-just">13 contratos históricos, 9 ativos. Diversificação com 6 ministérios. Contratos de longo prazo até 2029 indicam confiança dos contratantes.</div>
+    </div>
+    <div class="dim-card">
+      <div class="dim-head"><span class="dim-name">Porte / operacionalidade</span><span class="dim-score high">75</span></div>
+      <div class="dim-peso">Peso 10%</div>
+      <div class="bar"><div class="bar-fill high" style="width:75%"></div></div>
+      <div class="dim-just">R$ 7,6M recebidos em 12 meses via 7 órgãos pagadores. 137 registros de pagamento. Fluxo consistente e regular.</div>
+    </div>
+    <div class="dim-card" style="grid-column:1/-1">
+      <div class="dim-head"><span class="dim-name">Reputação de mercado</span><span class="dim-score mid">50</span></div>
+      <div class="dim-peso">Peso 15%</div>
+      <div class="bar"><div class="bar-fill mid" style="width:50%"></div></div>
+      <div class="dim-just">Pesquisa web inconclusiva — empresa não identificada claramente nas buscas. Ausência de notícias negativas específicas. Score neutro aplicado por falta de dados conclusivos.</div>
+    </div>
+  </div>
+  <div class="pts-grid">
+    <div class="pts-card">
+      <div class="pts-title pos"><i class="ti ti-circle-check" style="font-size:13px" aria-hidden="true"></i>Pontos positivos</div>
+      <div class="pt-item"><span class="pt-dot pos"></span>26 anos de mercado, situação cadastral ativa</div>
+      <div class="pt-item"><span class="pt-dot pos"></span>Ausência total de sanções governamentais</div>
+      <div class="pt-item"><span class="pt-dot pos"></span>9 contratos ativos em 6 ministérios — R$ 15,4M</div>
+      <div class="pt-item"><span class="pt-dot pos"></span>Fluxo de R$ 7,6M em 12 meses com 7 órgãos</div>
+      <div class="pt-item"><span class="pt-dot pos"></span>Contratos de longo prazo (até 2029)</div>
+    </div>
+    <div class="pts-card">
+      <div class="pts-title neg"><i class="ti ti-alert-triangle" style="font-size:13px" aria-hidden="true"></i>Pontos de atenção</div>
+      <div class="pt-item"><span class="pt-dot neg"></span>Reputação web inconclusiva</div>
+      <div class="pt-item"><span class="pt-dot neg"></span>Concentração em serviços de mão de obra (margens reduzidas)</div>
+      <div class="pt-item"><span class="pt-dot neg"></span>Sócio-administrador único — risco de pessoa-chave</div>
+      <div class="pt-item"><span class="pt-dot neg"></span>Capital social R$ 500K baixo vs. volume de contratos</div>
+    </div>
+  </div>
+  <div class="section-title">Componentes consultados — clique para ver detalhes</div>
+  <div class="comp-grid">
+    <div class="comp-card active"><div class="comp-name">contratos</div><div class="comp-status"><i class="ti ti-check" style="font-size:10px" aria-hidden="true"></i> ok</div><div class="comp-time">cache</div></div>
+    <div class="comp-card"><div class="comp-name">brasil_api</div><div class="comp-status"><i class="ti ti-check" style="font-size:10px" aria-hidden="true"></i> ok</div><div class="comp-time">cache</div></div>
+    <div class="comp-card"><div class="comp-name">pessoa_juridica</div><div class="comp-status"><i class="ti ti-check" style="font-size:10px" aria-hidden="true"></i> ok</div><div class="comp-time">127ms</div></div>
+    <div class="comp-card"><div class="comp-name">recursos_recebidos</div><div class="comp-status"><i class="ti ti-check" style="font-size:10px" aria-hidden="true"></i> ok</div><div class="comp-time">108ms</div></div>
+    <div class="comp-card"><div class="comp-name">ceis</div><div class="comp-status"><i class="ti ti-check" style="font-size:10px" aria-hidden="true"></i> ok</div><div class="comp-time">13ms</div></div>
+    <div class="comp-card"><div class="comp-name">cnep</div><div class="comp-status"><i class="ti ti-check" style="font-size:10px" aria-hidden="true"></i> ok</div><div class="comp-time">10ms</div></div>
+    <div class="comp-card"><div class="comp-name">cepim</div><div class="comp-status"><i class="ti ti-check" style="font-size:10px" aria-hidden="true"></i> ok</div><div class="comp-time">14ms</div></div>
+    <div class="comp-card"><div class="comp-name">acordos_leniencia</div><div class="comp-status"><i class="ti ti-check" style="font-size:10px" aria-hidden="true"></i> ok</div><div class="comp-time">11ms</div></div>
+    <div class="comp-card"><div class="comp-name">cnd_federal</div><div class="comp-status manual"><i class="ti ti-upload" style="font-size:10px" aria-hidden="true"></i> manual</div><div class="comp-time">upload</div></div>
+    <div class="comp-card"><div class="comp-name">cndt_tst</div><div class="comp-status manual"><i class="ti ti-upload" style="font-size:10px" aria-hidden="true"></i> manual</div><div class="comp-time">upload</div></div>
+    <div class="comp-card"><div class="comp-name">fgts</div><div class="comp-status manual"><i class="ti ti-upload" style="font-size:10px" aria-hidden="true"></i> manual</div><div class="comp-time">upload</div></div>
+    <div class="comp-card"><div class="comp-name">web_research</div><div class="comp-status"><i class="ti ti-check" style="font-size:10px" aria-hidden="true"></i> ok</div><div class="comp-time">cache</div></div>
+  </div>
+  <div class="detail-panel">
+    <div class="detail-title"><i class="ti ti-building" style="font-size:14px" aria-hidden="true"></i>contratos — 13 contratos, 9 ativos</div>
+    <div class="detail-row"><span class="detail-key">Total de contratos</span><span class="detail-val">13</span></div>
+    <div class="detail-row"><span class="detail-key">Contratos ativos</span><span class="detail-val">9</span></div>
+    <div class="detail-row"><span class="detail-key">Valor total ativo</span><span class="detail-val">R$ 15.415.847</span></div>
+    <div class="detail-row"><span class="detail-key">Valor histórico total</span><span class="detail-val">R$ 17.800.331</span></div>
+    <div class="detail-row"><span class="detail-key">Órgãos contratantes</span><span class="detail-val">MEC, MinC, MS, MDA, MMA, MCom</span></div>
+    <div class="detail-row"><span class="detail-key">Maior contrato ativo</span><span class="detail-val">INCRA — R$ 3.129.424</span></div>
+    <div class="detail-row"><span class="detail-key">Sanção identificada</span><span class="detail-val"><span class="badge badge-ok">Nenhuma</span></span></div>
+  </div>
+</div>

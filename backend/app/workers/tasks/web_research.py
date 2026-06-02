@@ -1,7 +1,7 @@
 """
 Componente: web_research
-Pesquisa de reputação da empresa via Claude Sonnet + WebSearch.
-Busca razão social no snapshot brasil_api para contextualizar a pesquisa.
+Pesquisa de reputacao da empresa via Claude Sonnet + WebSearch.
+Busca razao social no snapshot brasil_api para contextualizar a pesquisa.
 
 Tipo: LLM | Fila: llm | Cache: 48h
 """
@@ -28,6 +28,10 @@ Retorne APENAS um JSON válido com esta estrutura:
 {
   "score_reputacao": <0-100>,
   "nivel_risco": "<baixo|medio|alto|critico>",
+  "nivel": "<Excepcional|Forte|Adequado|Atencao|Fraco|Critico>",
+  "raciocinio_reputacao": "<raciocinio antes da escolha do nivel>",
+  "fatores_reputacao": ["<fator1>", "<fator2>"],
+  "flags_reputacao": ["<flag1>", "<flag2>"],
   "noticias_negativas": <true|false>,
   "processos_relevantes": <true|false>,
   "reclamacoes_graves": <true|false>,
@@ -35,7 +39,29 @@ Retorne APENAS um JSON válido com esta estrutura:
   "resumo": "<2-3 frases objetivas>",
   "alertas": ["<alerta1>", "<alerta2>"],
   "fontes_consultadas": ["<fonte1>", "<fonte2>"]
-}"""
+}
+
+Ao final da pesquisa, classifique a REPUTAÇÃO da empresa em um nível, com raciocínio
+ANTES da escolha. Âncoras:
+- Excepcional: reputação setorial forte, reconhecimento/prêmios, presença positiva ativa.
+- Forte: presença positiva e zero alertas.
+- Adequado: NADA negativo encontrado — mera ausência de negativos. (DEFAULT: "limpo" cai
+  aqui, NUNCA em Forte.)
+- Atencao: reclamações relevantes, processos trabalhistas em volume, alertas em sócios.
+- Fraco: notícias negativas materiais, processos graves.
+- Critico: fraude, envolvimento em escândalo com órgão público, sócio com restrição grave.
+
+REGRA: "nada encontrado" = Adequado, jamais Forte. Forte/Excepcional exige sinal
+POSITIVO ativo e verificado.
+Se a busca não conseguir isolar o CNPJ correto, retorne "Adequado" com a flag
+"reputacao_nao_isolada" — não invente.
+
+Inclua no JSON de saída:
+  "nivel": "<Excepcional|Forte|Adequado|Atencao|Fraco|Critico>",
+  "raciocinio_reputacao": "<...>",
+  "fatores_reputacao": [...],
+  "flags_reputacao": [...]
+"""
 
 
 def _format_cnpj(cnpj: str) -> str:
@@ -52,7 +78,6 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
     from app.core.config import settings
     from app.core.database import supabase
 
-    # Busca a identificação cadastral para restringir a pesquisa à empresa correta.
     razao_social = ""
     cnae = ""
     socios = []
@@ -98,6 +123,7 @@ Retorne apenas o JSON estruturado conforme instruído."""
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=1000,
+        temperature=0,
         system=SYSTEM_PROMPT,
         tools=[{"type": "web_search_20250305", "name": "web_search"}],
         messages=[{"role": "user", "content": prompt}],
@@ -116,11 +142,15 @@ Retorne apenas o JSON estruturado conforme instruído."""
         return fix_dict_encoding({
             "score_reputacao": 50,
             "nivel_risco": "medio",
+            "nivel": "Adequado",
+            "raciocinio_reputacao": "Nao foi possivel isolar sinais reputacionais confiaveis.",
+            "fatores_reputacao": [],
+            "flags_reputacao": ["reputacao_nao_isolada"],
             "noticias_negativas": False,
             "processos_relevantes": False,
             "reclamacoes_graves": False,
             "problemas_governo": False,
-            "resumo": "Não foi possível processar a pesquisa de reputação.",
+            "resumo": "Nao foi possivel processar a pesquisa de reputacao.",
             "alertas": [],
             "fontes_consultadas": [],
             "raw_response": result_text,

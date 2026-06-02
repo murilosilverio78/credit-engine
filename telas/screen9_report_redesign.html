@@ -1,0 +1,149 @@
+
+<h2 class="sr-only">Tela 9 — relatório de crédito redesenhado com gráfico radar do scorecard de 5 dimensões e layout aprimorado.</h2>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.wrap{padding:0;font-family:var(--font-sans)}
+.rpt-header{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:20px 24px;margin-bottom:12px}
+.rpt-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px}
+.rpt-meta{font-size:10px;color:var(--color-text-secondary);font-family:var(--font-mono);margin-bottom:3px}
+.rpt-name{font-size:17px;font-weight:500;color:var(--color-text-primary)}
+.rpt-sub{font-size:12px;color:var(--color-text-secondary);margin-top:2px}
+.rating-badge{width:56px;height:56px;border-radius:var(--border-radius-md);background:#E6F1FB;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:500;color:#0C447C}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:0}
+.mc{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px 12px}
+.mc-label{font-size:10px;color:var(--color-text-secondary);margin-bottom:4px}
+.mc-val{font-size:19px;font-weight:500;font-family:var(--font-mono);color:var(--color-text-primary)}
+.mc-sub{font-size:10px;color:var(--color-text-secondary);margin-top:1px}
+.section-title{font-size:11px;font-weight:500;color:var(--color-text-secondary);letter-spacing:.06em;margin-bottom:10px;margin-top:12px}
+.scorecard-wrap{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:16px;margin-bottom:12px;display:grid;grid-template-columns:260px 1fr;gap:20px;align-items:center}
+.radar-wrap{display:flex;justify-content:center;align-items:center}
+.dims-list{display:flex;flex-direction:column;gap:10px}
+.dim-item{display:flex;flex-direction:column;gap:4px}
+.dim-head{display:flex;justify-content:space-between;align-items:center}
+.dim-name{font-size:12px;font-weight:500;color:var(--color-text-primary)}
+.dim-score-wrap{display:flex;align-items:center;gap:8px}
+.dim-score{font-size:14px;font-weight:500;font-family:var(--font-mono)}
+.dim-peso{font-size:10px;color:var(--color-text-secondary)}
+.bar{height:5px;background:var(--color-background-secondary);border-radius:2px;overflow:hidden}
+.bar-fill{height:100%;border-radius:2px}
+.green{color:#27500A;background:#EAF3DE}.bar-green{background:#639922}
+.amber{color:#633806;background:#FAEEDA}.bar-amber{background:#BA7517}
+.parecer-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-left:3px solid #639922;border-radius:0 var(--border-radius-lg) var(--border-radius-lg) 0;padding:14px 16px;margin-bottom:12px}
+.parecer-label{font-size:10px;font-weight:500;color:#3B6D11;letter-spacing:.06em;margin-bottom:6px;display:flex;align-items:center;gap:5px}
+.parecer-text{font-size:13px;color:var(--color-text-primary);line-height:1.6}
+.pts-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.pts-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:12px 14px}
+.pts-title{font-size:11px;font-weight:500;margin-bottom:8px;display:flex;align-items:center;gap:5px}
+.pts-title.pos{color:#3B6D11}.pts-title.neg{color:#854F0B}
+.pt-item{display:flex;align-items:flex-start;gap:6px;font-size:11px;color:var(--color-text-secondary);padding:5px 0;border-bottom:0.5px solid var(--color-border-tertiary);line-height:1.4}
+.pt-item:last-child{border-bottom:none}
+.pt-dot{width:5px;height:5px;border-radius:50%;margin-top:4px;flex-shrink:0}
+.dot-pos{background:#639922}.dot-neg{background:#BA7517}
+</style>
+<div class="wrap">
+  <div class="rpt-header">
+    <div class="rpt-top">
+      <div>
+        <div class="rpt-meta">Relatório de crédito · 27/05/2026</div>
+        <div class="rpt-name">MASF Serviços e Facilities Ltda</div>
+        <div class="rpt-sub">03.012.610/0001-01 · EPP · Brasília/DF · ativa desde 1999</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+        <div class="rating-badge">B</div>
+        <button style="font-size:11px;display:flex;align-items:center;gap:5px;padding:5px 12px"><i class="ti ti-download" style="font-size:12px" aria-hidden="true"></i>Baixar PDF</button>
+      </div>
+    </div>
+    <div class="metrics">
+      <div class="mc"><div class="mc-label">Score</div><div class="mc-val">78<span style="font-size:11px;font-weight:400;color:var(--color-text-secondary)">/100</span></div></div>
+      <div class="mc"><div class="mc-label">Taxa sugerida</div><div class="mc-val">2,0<span style="font-size:11px;font-weight:400;color:var(--color-text-secondary)">% a.m.</span></div></div>
+      <div class="mc"><div class="mc-label">Limite sugerido</div><div class="mc-val">60<span style="font-size:11px;font-weight:400;color:var(--color-text-secondary)">% contrato</span></div></div>
+      <div class="mc"><div class="mc-label">Contratos ativos</div><div class="mc-val">9<span style="font-size:11px;font-weight:400;color:var(--color-text-secondary)"> · R$15,4M</span></div></div>
+    </div>
+  </div>
+  <div class="section-title">Scorecard — 5 dimensões</div>
+  <div class="scorecard-wrap">
+    <div class="radar-wrap">
+      <canvas id="radar" width="240" height="240" role="img" aria-label="Gráfico radar do scorecard de crédito com 5 dimensões: regularidade fiscal 95, saúde cadastral 85, relacionamento governamental 82, porte 70, reputação 55.">Scorecard: Regularidade fiscal 95, Saúde cadastral 85, Relacionamento gov. 82, Porte 70, Reputação 55.</canvas>
+    </div>
+    <div class="dims-list">
+      <div class="dim-item">
+        <div class="dim-head"><span class="dim-name">Regularidade fiscal</span><div class="dim-score-wrap"><span class="dim-score" style="color:#27500A">95</span><span class="dim-peso">35%</span></div></div>
+        <div class="bar"><div class="bar-fill bar-green" style="width:95%"></div></div>
+      </div>
+      <div class="dim-item">
+        <div class="dim-head"><span class="dim-name">Saúde cadastral</span><div class="dim-score-wrap"><span class="dim-score" style="color:#27500A">85</span><span class="dim-peso">25%</span></div></div>
+        <div class="bar"><div class="bar-fill bar-green" style="width:85%"></div></div>
+      </div>
+      <div class="dim-item">
+        <div class="dim-head"><span class="dim-name">Relacionamento gov.</span><div class="dim-score-wrap"><span class="dim-score" style="color:#27500A">82</span><span class="dim-peso">15%</span></div></div>
+        <div class="bar"><div class="bar-fill bar-green" style="width:82%"></div></div>
+      </div>
+      <div class="dim-item">
+        <div class="dim-head"><span class="dim-name">Porte / operacionalidade</span><div class="dim-score-wrap"><span class="dim-score" style="color:#27500A">70</span><span class="dim-peso">10%</span></div></div>
+        <div class="bar"><div class="bar-fill bar-green" style="width:70%"></div></div>
+      </div>
+      <div class="dim-item">
+        <div class="dim-head"><span class="dim-name">Reputação de mercado</span><div class="dim-score-wrap"><span class="dim-score" style="color:#633806">55</span><span class="dim-peso">15%</span></div></div>
+        <div class="bar"><div class="bar-fill bar-amber" style="width:55%"></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="section-title">Parecer do agente de IA</div>
+  <div class="parecer-card">
+    <div class="parecer-label"><i class="ti ti-robot" style="font-size:11px" aria-hidden="true"></i>Conclusão — perfil favorável</div>
+    <div class="parecer-text">A MASF Serviços e Facilities apresenta perfil de crédito favorável para antecipação de recebíveis governamentais. Empresa com 27 anos de operação, regularidade fiscal completa e carteira sólida de 9 contratos ativos totalizando R$ 15,4 milhões com diversificação em 6 ministérios. Recomenda-se taxa CDI + 2,0% a.m. e limite de 60% dos contratos elegíveis.</div>
+  </div>
+  <div class="pts-grid">
+    <div class="pts-card">
+      <div class="pts-title pos"><i class="ti ti-circle-check" style="font-size:13px" aria-hidden="true"></i>Pontos positivos</div>
+      <div class="pt-item"><span class="pt-dot dot-pos"></span>27 anos de mercado, situação cadastral ativa</div>
+      <div class="pt-item"><span class="pt-dot dot-pos"></span>Ausência total de sanções governamentais</div>
+      <div class="pt-item"><span class="pt-dot dot-pos"></span>9 contratos ativos em 6 ministérios — R$ 15,4M</div>
+      <div class="pt-item"><span class="pt-dot dot-pos"></span>Fluxo de R$ 7,9M em 13 meses com 7 órgãos</div>
+    </div>
+    <div class="pts-card">
+      <div class="pts-title neg"><i class="ti ti-alert-triangle" style="font-size:13px" aria-hidden="true"></i>Pontos de atenção</div>
+      <div class="pt-item"><span class="pt-dot dot-neg"></span>Reputação web inconclusiva (score 55)</div>
+      <div class="pt-item"><span class="pt-dot dot-neg"></span>CND Federal positiva com efeitos de negativa</div>
+      <div class="pt-item"><span class="pt-dot dot-neg"></span>Sócio-administrador único — risco de pessoa-chave</div>
+      <div class="pt-item"><span class="pt-dot dot-neg"></span>Concentração em mão de obra (margens reduzidas)</div>
+    </div>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+const isDark = matchMedia('(prefers-color-scheme: dark)').matches;
+const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+const labelColor = isDark ? '#B4B2A9' : '#5F5E5A';
+new Chart(document.getElementById('radar'), {
+  type: 'radar',
+  data: {
+    labels: ['Regularidade\nfiscal', 'Saúde\ncadastral', 'Relacionamento\ngov.', 'Porte /\noper.', 'Reputação\nmercado'],
+    datasets: [{
+      data: [95, 85, 82, 70, 55],
+      backgroundColor: 'rgba(99,153,34,0.15)',
+      borderColor: '#639922',
+      borderWidth: 2,
+      pointBackgroundColor: '#639922',
+      pointRadius: 4,
+      pointHoverRadius: 5
+    }]
+  },
+  options: {
+    responsive: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      r: {
+        min: 0, max: 100,
+        ticks: { stepSize: 25, display: false },
+        grid: { color: gridColor },
+        angleLines: { color: gridColor },
+        pointLabels: {
+          font: { size: 10, family: 'sans-serif' },
+          color: labelColor
+        }
+      }
+    }
+  }
+});
+</script>

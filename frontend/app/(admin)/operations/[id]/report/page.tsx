@@ -24,7 +24,6 @@ import {
 } from "recharts";
 
 import { ApiError, getOperation } from "@/lib/api";
-import { formatTaxaAm } from "@/lib/format";
 import type { ComponentSnapshot, OperationDetails, Rating } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -420,7 +419,7 @@ function ScorecardPanel({ dimensions }: { dimensions: [string, Dimension][] }) {
       <div className="flex flex-col justify-center gap-2.5">
         {listedDimensions.map(([key, dimension]) => {
           const score = numberValue(dimension.score);
-          const favorable = score >= 75;
+          const favorable = score >= 70;
           const open = expanded === key;
           return (
             <button
@@ -1232,7 +1231,6 @@ function Report({ operation }: { operation: OperationDetails }) {
   );
   const selected = snapshots.get(selectedName);
   const status = conclusion(operation.rating);
-  const rawRate = operation.taxa_sugerida ?? numberValue(engine.taxa_sugerida_am);
 
   async function handleDownloadPdf() {
     setSelectedName("recursos_recebidos");
@@ -1309,7 +1307,7 @@ function Report({ operation }: { operation: OperationDetails }) {
               </span>
             </Metric>
             <Metric label="Taxa sugerida">
-              {formatTaxaAm(rawRate)}
+              <span className="text-muted-foreground">— (pendente)</span>
             </Metric>
             <Metric label="Limite sugerido">
               {formatPercent(engine.limite_sugerido_pct_contrato)}

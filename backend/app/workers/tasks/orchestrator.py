@@ -156,8 +156,6 @@ async def _complete_analysis(operation_id: str):
         "completed_at": datetime.now(timezone.utc).isoformat(),
         "score": score_result.get("score"),
         "rating": score_result.get("rating"),
-        "taxa_sugerida": score_result.get("taxa_sugerida_am"),
-        "taxa_breakdown": score_result.get("taxa_breakdown"),
         "limite_aprovado": score_result.get("limite_aprovado_rs"),
     }
 
