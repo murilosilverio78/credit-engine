@@ -1,15 +1,23 @@
 import time
 
+import structlog
+
 from app.core.database import supabase
 
 
 _CACHE_TTL = 60
 _cache = {"params": None, "matrix": None, "ts": 0.0}
+logger = structlog.get_logger()
 
 
 def _load_from_db():
-    params_rows = supabase.table("pricing_parameters").select("key,value").execute().data or []
-    matrix_rows = supabase.table("pricing_rating_matrix").select("*").execute().data or []
+    try:
+        params_rows = supabase.table("pricing_parameters").select("key,value").execute().data or []
+        matrix_rows = supabase.table("pricing_rating_matrix").select("*").execute().data or []
+    except Exception as exc:
+        logger.error("pricing_params.load_error", error=str(exc))
+        return None, None
+
     params = {row["key"]: float(row["value"]) for row in params_rows}
     matrix = {}
     for row in matrix_rows:
@@ -36,6 +44,10 @@ def get_pricing_config(force_reload: bool = False):
         or (now - _cache["ts"]) > _CACHE_TTL
     ):
         params, matrix = _load_from_db()
+        if params is None or matrix is None:
+            if _cache["params"] is None or _cache["matrix"] is None:
+                return {}, {}
+            return _cache["params"], _cache["matrix"]
         _cache.update({"params": params, "matrix": matrix, "ts": now})
     return _cache["params"], _cache["matrix"]
 

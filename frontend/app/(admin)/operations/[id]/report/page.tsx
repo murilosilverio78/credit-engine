@@ -24,6 +24,7 @@ import {
 } from "recharts";
 
 import { ApiError, getOperation } from "@/lib/api";
+import { formatTaxaAm } from "@/lib/format";
 import type { ComponentSnapshot, OperationDetails, Rating } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -583,6 +584,73 @@ function RegularityPanel({
         ))}
       </div>
     </section>
+  );
+}
+
+function formatMonthlyPercent(value: unknown) {
+  return `${(numberValue(value) * 100).toLocaleString("pt-BR", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  })}% a.m.`;
+}
+
+function PricingBreakdownPanel({ breakdown }: { breakdown: JsonRecord }) {
+  const detalhes = asRecord(breakdown.detalhes);
+  const operacionalSemSerpro =
+    numberValue(breakdown.taxa_adm_am) +
+    numberValue(breakdown.bancarizacao_am) +
+    numberValue(breakdown.orig_am);
+  const monthlyRows: Array<[string, unknown]> = [
+    ["Funding", breakdown.funding_ponderado_am],
+    ["EL", breakdown.el_mensal],
+    ["Bond", breakdown.custo_bond_am],
+    ["SERPRO", breakdown.serpro_am],
+    ["Operacional", operacionalSemSerpro],
+    ["Margem", breakdown.sub_am],
+  ];
+  const detailRows: Array<[string, unknown]> = [
+    ["Funding", detalhes.custo_funding_rs],
+    ["Risco", detalhes.custo_risco_rs],
+    ["Bond", detalhes.custo_bond_rs],
+    ["Operacional", detalhes.custo_operacional_rs],
+    ["Subordinado", detalhes.custo_sub_rs],
+    ["Receita total", detalhes.total_receita_rs],
+  ];
+
+  return (
+    <details className="report-section rounded-lg border-[0.5px] border-border bg-background px-4 py-3 text-xs">
+      <summary className="cursor-pointer text-[12px] font-medium text-foreground">
+        Detalhamento da taxa sugerida
+      </summary>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <div>
+          <p className="mb-1 text-[10px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+            Componentes mensais
+          </p>
+          <div className="grid gap-1">
+            {monthlyRows.map(([label, value]) => (
+              <div className="flex justify-between gap-3 rounded bg-muted/60 px-2 py-1" key={String(label)}>
+                <span className="text-muted-foreground">{label}</span>
+                <span className="font-mono text-foreground">{formatMonthlyPercent(value)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="mb-1 text-[10px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+            Valores estimados
+          </p>
+          <div className="grid gap-1">
+            {detailRows.map(([label, value]) => (
+              <div className="flex justify-between gap-3 rounded bg-muted/60 px-2 py-1" key={String(label)}>
+                <span className="text-muted-foreground">{label}</span>
+                <span className="font-mono text-foreground">{formatCurrency(value)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </details>
   );
 }
 
@@ -1426,6 +1494,8 @@ function Report({ operation }: { operation: OperationDetails }) {
   const rawDimensions = asRecord(engine.dimensoes);
   const regularidade = asRecord(engine.regularidade);
   const parecerEstruturado = asRecord(engine.parecer_estruturado);
+  const taxa = numberValue(operation.taxa_sugerida);
+  const taxaBreakdown = asRecord(operation.taxa_breakdown);
   const dimensions = [
     ...dimensionOrder
       .filter((name) => rawDimensions[name])
@@ -1523,7 +1593,11 @@ function Report({ operation }: { operation: OperationDetails }) {
               </span>
             </Metric>
             <Metric label="Taxa sugerida">
-              <span className="text-muted-foreground">— (pendente)</span>
+              {taxa > 0 ? (
+                formatTaxaAm(taxa)
+              ) : (
+                <span className="text-muted-foreground">{"\u2014"} (pendente)</span>
+              )}
             </Metric>
             <Metric label="Limite sugerido">
               {formatPercent(engine.limite_sugerido_pct_contrato)}
@@ -1541,6 +1615,9 @@ function Report({ operation }: { operation: OperationDetails }) {
         </section>
 
         <SectionTitle>Scorecard — 4 dimensões de mérito</SectionTitle>
+        {taxa > 0 && Object.keys(taxaBreakdown).length ? (
+          <PricingBreakdownPanel breakdown={taxaBreakdown} />
+        ) : null}
         <ScorecardPanel dimensions={dimensions} />
         <RegularityPanel
           merit={engine.merit}

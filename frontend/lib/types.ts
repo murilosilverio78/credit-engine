@@ -28,6 +28,7 @@ export interface Operation {
   rating: Rating | null;
   score: number | null;
   taxa_sugerida: number | null;
+  taxa_breakdown?: Record<string, unknown> | null;
   valor_solicitado?: number | null;
   source: string;
   created_at: string;

@@ -14,6 +14,25 @@ logger = structlog.get_logger()
 MANUAL_COMPONENTS = ("cndt_tst", "cnd_federal", "fgts")
 
 
+def _as_float(value) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _as_int(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _prazo_meses(prazo_dias: int) -> int:
+    """Converte prazo em dias para meses usando a premissa de 30 dias/mes."""
+    return max(round(prazo_dias / 30), 1)
+
+
 async def _run_component(run_fn, operation_id: str):
     """Executa um worker sincrono em thread separada, capturando excecao."""
     try:
@@ -150,7 +169,14 @@ async def _complete_analysis(operation_id: str):
         .single()\
         .execute()
 
+    operation_result = supabase.table("operations")\
+        .select("valor_solicitado,prazo_dias")\
+        .eq("id", operation_id)\
+        .maybe_single()\
+        .execute()
+
     score_result = (result.data or {}).get("parsed_result") or {}
+    operation = operation_result.data or {}
     data = {
         "status": "completed",
         "completed_at": datetime.now(timezone.utc).isoformat(),
@@ -158,6 +184,34 @@ async def _complete_analysis(operation_id: str):
         "rating": score_result.get("rating"),
         "limite_aprovado": score_result.get("limite_aprovado_rs"),
     }
+    rating = str(data["rating"] or "").upper()
+    valor = _as_float(operation.get("valor_solicitado"))
+    prazo_dias = _as_int(operation.get("prazo_dias"))
+
+    if rating in {"A", "B", "C", "D"} and valor > 0 and prazo_dias > 0:
+        try:
+            from app.services.pricing_engine import compute_taxa
+
+            pricing = compute_taxa(rating, valor, _prazo_meses(prazo_dias))
+            data["taxa_sugerida"] = pricing.get("taxa_sugerida_am")
+            data["taxa_breakdown"] = pricing
+        except Exception as exc:
+            logger.error(
+                "pipeline.pricing_error",
+                operation_id=operation_id,
+                rating=rating,
+                valor=valor,
+                prazo_dias=prazo_dias,
+                error=str(exc),
+            )
+    else:
+        logger.info(
+            "pipeline.pricing_skipped",
+            operation_id=operation_id,
+            rating=rating,
+            valor=valor,
+            prazo_dias=prazo_dias,
+        )
 
     supabase.table("operations")\
         .update(data)\
