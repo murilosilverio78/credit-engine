@@ -668,26 +668,166 @@ def score_porte_llm(cnpj: str, snapshots: dict[str, Any], client: anthropic.Anth
         )
 
 
-def _limite_aprovado(operacao: dict[str, Any]) -> float:
+DIMENSION_LABELS = {
+    "relacionamento_governamental": "Relacionamento governamental",
+    "porte_operacionalidade": "Porte/Operacionalidade",
+    "saude_cadastral": "Saude cadastral",
+    "reputacao_mercado": "Reputacao de mercado",
+}
+
+
+def _limite_aprovado(snapshots: dict[str, Any], operacao: dict[str, Any]) -> tuple[float, list[str]]:
+    contratos = _first_snapshot(snapshots, "contratos")
+    valor_total_ativo = _as_float(contratos.get("valor_total_ativo"))
+    if valor_total_ativo and valor_total_ativo > 0:
+        return round(valor_total_ativo * LIMITE_PCT_CONTRATO, 2), []
+
     contrato_saldo = _as_float(operacao.get("contrato_saldo")) or 0
     valor_solicitado = _as_float(operacao.get("valor_solicitado")) or 0
     base = contrato_saldo if contrato_saldo > 0 else valor_solicitado
+    if base <= 0:
+        return 0.0, ["limite_sem_base_contrato"]
     limite = round(base * LIMITE_PCT_CONTRATO, 2)
-    return min(limite, valor_solicitado) if valor_solicitado > 0 else limite
+    return min(limite, valor_solicitado) if valor_solicitado > 0 else limite, []
 
 
-def _parecer(score: float, rating: str, dimensoes: dict[str, Any], regularidade: dict[str, Any], bloqueios: list[str]) -> str:
+def _flags_relevantes(
+    dimensoes: dict[str, Any],
+    regularidade: dict[str, Any],
+    extras: list[str] | None = None,
+) -> list[str]:
+    flags = {
+        flag
+        for dim in dimensoes.values()
+        for flag in dim.get("flags", [])
+    } | set(regularidade.get("flags", [])) | set(extras or [])
+    return sorted(flag for flag in flags if flag)
+
+
+def _parecer_estruturado(
+    score: float,
+    rating: str,
+    merit: float,
+    dimensoes: dict[str, Any],
+    regularidade: dict[str, Any],
+    pontos_positivos: list[str],
+    pontos_atencao: list[str],
+    flags_extra: list[str] | None = None,
+    bloqueios: list[str] | None = None,
+) -> dict[str, Any]:
+    bloqueios = bloqueios or []
     if bloqueios:
-        return bloqueios[0]
-    strongest = max(dimensoes.items(), key=lambda item: item[1].get("score", 0))
-    weakest = min(dimensoes.items(), key=lambda item: item[1].get("score", 0))
-    flags = sorted({flag for dim in dimensoes.values() for flag in dim.get("flags", [])} | set(regularidade.get("flags", [])))
-    flags_text = f" Flags relevantes: {', '.join(flags)}." if flags else ""
+        return {
+            "conclusao": {
+                "rating": "E",
+                "score": 20,
+                "merit": 20,
+                "fator_regularidade": 1.0,
+                "texto": bloqueios[0],
+            },
+            "dimensoes": [],
+            "regularidade": {"fator": 1.0, "haircuts": [], "flags": []},
+            "pontos_positivos": [],
+            "pontos_atencao": bloqueios,
+            "flags_relevantes": bloqueios,
+        }
+
+    fator = regularidade.get("fator", 1.0)
+    haircuts = regularidade.get("haircuts", [])
+    haircut_textos = [
+        f"{item.get('certidao')}: {item.get('estado')} ({float(item.get('haircut') or 0):.2f})"
+        for item in haircuts
+        if float(item.get("haircut") or 0) > 0
+    ]
+    dimensoes_lista = []
+    for chave in PESOS_MERITO:
+        dim = dimensoes.get(chave, {})
+        dimensoes_lista.append({
+            "chave": chave,
+            "label": DIMENSION_LABELS.get(chave, chave),
+            "nivel": dim.get("nivel", "—"),
+            "score": dim.get("score", 0),
+            "peso": dim.get("peso", PESOS_MERITO[chave]),
+            "score_contrib": dim.get("score_contrib", 0),
+            "relatorio": dim.get("relatorio") or "—",
+            "fatores": dim.get("fatores") or [],
+            "flags": dim.get("flags") or [],
+            "fonte": dim.get("fonte") or "python",
+        })
+
+    return {
+        "conclusao": {
+            "rating": rating,
+            "score": score,
+            "merit": merit,
+            "fator_regularidade": fator,
+            "texto": (
+                f"Rating {rating}, score final {score:.1f}. "
+                f"O resultado combina merito {merit:.1f} com fator de regularidade {fator:.2f} "
+                f"({merit:.1f} x {fator:.2f} = {score:.1f})."
+            ),
+        },
+        "dimensoes": dimensoes_lista,
+        "regularidade": {
+            "fator": fator,
+            "texto": (
+                f"Regularidade aplicada como multiplicador {fator:.2f}. "
+                + (
+                    "Haircuts aplicados: " + "; ".join(haircut_textos) + "."
+                    if haircut_textos
+                    else "Nenhum haircut aplicado."
+                )
+            ),
+            "haircuts": haircuts,
+            "flags": regularidade.get("flags", []),
+        },
+        "pontos_positivos": pontos_positivos,
+        "pontos_atencao": pontos_atencao,
+        "flags_relevantes": _flags_relevantes(dimensoes, regularidade, flags_extra),
+    }
+
+
+def _parecer_texto(parecer: dict[str, Any]) -> str:
+    partes = [f"Conclusao: {parecer.get('conclusao', {}).get('texto', '—')}"]
+    for dim in parecer.get("dimensoes", []):
+        fatores = dim.get("fatores") or []
+        fatores_texto = f" Fatores: {'; '.join(map(str, fatores))}." if fatores else ""
+        partes.append(
+            f"{dim.get('label')}: nivel {dim.get('nivel')}, nota {dim.get('score')}. "
+            f"{dim.get('relatorio')}{fatores_texto}"
+        )
+    regularidade = parecer.get("regularidade", {})
+    partes.append(f"Regularidade: {regularidade.get('texto', '—')}")
+    pontos_positivos = parecer.get("pontos_positivos") or []
+    pontos_atencao = parecer.get("pontos_atencao") or []
+    flags = parecer.get("flags_relevantes") or []
+    if pontos_positivos:
+        partes.append("Pontos positivos: " + "; ".join(map(str, pontos_positivos)) + ".")
+    if pontos_atencao:
+        partes.append("Pontos de atencao: " + "; ".join(map(str, pontos_atencao)) + ".")
+    if flags:
+        partes.append("Flags relevantes: " + "; ".join(map(str, flags)) + ".")
+    return "\n\n".join(partes)
+
+
+def _parecer(score: float, rating: str, merit: float, dimensoes: dict[str, Any], regularidade: dict[str, Any], pontos_positivos: list[str], pontos_atencao: list[str], flags_extra: list[str] | None = None) -> str:
+    estruturado = _parecer_estruturado(
+        score,
+        rating,
+        merit,
+        dimensoes,
+        regularidade,
+        pontos_positivos,
+        pontos_atencao,
+        flags_extra,
+    )
+    return _parecer_texto(estruturado)
+
+
+def _parecer_resumo(score: float, rating: str, merit: float, regularidade: dict[str, Any]) -> str:
     return (
-        f"Score final {score:.1f}, rating {rating}, calculado por agregacao deterministica de merito "
-        f"e fator de regularidade {regularidade.get('fator', 1):.2f}. "
-        f"A dimensao mais forte foi {strongest[0]} ({strongest[1].get('nivel')}), "
-        f"e a mais fraca foi {weakest[0]} ({weakest[1].get('nivel')}).{flags_text}"
+        f"Rating {rating}, score final {score:.1f}. "
+        f"Merito {merit:.1f} x fator de regularidade {regularidade.get('fator', 1):.2f}."
     )
 
 
@@ -701,6 +841,16 @@ def consolidar_score(
     operacao = operacao or {}
     bloqueios = gates_deterministicos(snapshots)
     if bloqueios:
+        parecer_estruturado = _parecer_estruturado(
+            20,
+            "E",
+            20,
+            {},
+            {"fator": 1.00, "haircuts": [], "flags": []},
+            [],
+            bloqueios,
+            bloqueios=bloqueios,
+        )
         return {
             "score": 20,
             "rating": "E",
@@ -713,6 +863,7 @@ def consolidar_score(
             "bloqueios": bloqueios,
             "pontos_positivos": [],
             "pontos_atencao": bloqueios,
+            "parecer_estruturado": parecer_estruturado,
             "parecer": bloqueios[0],
         }
 
@@ -737,6 +888,17 @@ def consolidar_score(
         for dim, value in dimensoes.items()
         if value["score"] < 67
     ]
+    limite_aprovado_rs, limite_flags = _limite_aprovado(snapshots, operacao)
+    parecer_estruturado = _parecer_estruturado(
+        score_final,
+        rating,
+        merit,
+        dimensoes,
+        regularidade,
+        pontos_positivos,
+        pontos_atencao,
+        limite_flags,
+    )
 
     return {
         "score": score_final,
@@ -744,13 +906,16 @@ def consolidar_score(
         "merit": merit,
         "fator_regularidade": regularidade["fator"],
         "limite_sugerido_pct_contrato": LIMITE_PCT_CONTRATO,
-        "limite_aprovado_rs": _limite_aprovado(operacao),
+        "limite_aprovado_rs": limite_aprovado_rs,
         "dimensoes": dimensoes,
         "regularidade": regularidade,
+        "flags": limite_flags,
         "bloqueios": [],
         "pontos_positivos": pontos_positivos,
         "pontos_atencao": pontos_atencao,
-        "parecer": _parecer(score_final, rating, dimensoes, regularidade, []),
+        "parecer_estruturado": parecer_estruturado,
+        "parecer": _parecer_texto(parecer_estruturado),
+        "parecer_resumo": _parecer_resumo(score_final, rating, merit, regularidade),
     }
 
 

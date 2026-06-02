@@ -4,7 +4,7 @@
   "merit": 74.6,
   "fator_regularidade": 1.0,
   "limite_sugerido_pct_contrato": 0.7,
-  "limite_aprovado_rs": 500000.0,
+  "limite_aprovado_rs": 10791093.3,
   "dimensoes": {
     "relacionamento_governamental": {
       "score": 87.8,
@@ -88,6 +88,7 @@
       "certidao_indisponivel"
     ]
   },
+  "flags": [],
   "bloqueios": [],
   "pontos_positivos": [
     "relacionamento_governamental: Forte",
@@ -96,5 +97,119 @@
   "pontos_atencao": [
     "porte_operacionalidade: Atencao"
   ],
-  "parecer": "Score final 74.6, rating B, calculado por agregacao deterministica de merito e fator de regularidade 1.00. A dimensao mais forte foi relacionamento_governamental (Forte), e a mais fraca foi porte_operacionalidade (Atencao). Flags relevantes: certidao_indisponivel, reputacao_indisponivel, stub_llm_calibracao."
+  "parecer_estruturado": {
+    "conclusao": {
+      "rating": "B",
+      "score": 74.6,
+      "merit": 74.6,
+      "fator_regularidade": 1.0,
+      "texto": "Rating B, score final 74.6. O resultado combina merito 74.6 com fator de regularidade 1.00 (74.6 x 1.00 = 74.6)."
+    },
+    "dimensoes": [
+      {
+        "chave": "relacionamento_governamental",
+        "label": "Relacionamento governamental",
+        "nivel": "Forte",
+        "score": 87.8,
+        "peso": 0.3,
+        "score_contrib": 26.34,
+        "relatorio": "Relacionamento governamental calculado por volume, diversificacao, historico e maturidade dos contratos.",
+        "fatores": [
+          "9 contratos ativos",
+          "6 orgaos distintos",
+          "13 contratos no historico",
+          "Maturidade maxima: 5.0 anos"
+        ],
+        "flags": [],
+        "fonte": "python"
+      },
+      {
+        "chave": "porte_operacionalidade",
+        "label": "Porte/Operacionalidade",
+        "nivel": "Atencao",
+        "score": 55,
+        "peso": 0.28,
+        "score_contrib": 15.4,
+        "relatorio": "Porte/Operacionalidade fixado em Atencao para harness de calibracao MASF.",
+        "fatores": [
+          "Porte pequeno com contratos relevantes em servicos intensivos em mao de obra."
+        ],
+        "flags": [
+          "stub_llm_calibracao"
+        ],
+        "fonte": "llm"
+      },
+      {
+        "chave": "saude_cadastral",
+        "label": "Saude cadastral",
+        "nivel": "Forte",
+        "score": 84.5,
+        "peso": 0.24,
+        "score_contrib": 20.28,
+        "relatorio": "Saude cadastral calculada por idade, capital, porte e estabilidade societaria.",
+        "fatores": [
+          "Situacao cadastral: ATIVA",
+          "Idade empresarial: 27.2 anos",
+          "Capital social: R$ 500,000.00",
+          "Porte declarado: EMPRESA DE PEQUENO PORTE"
+        ],
+        "flags": [],
+        "fonte": "python"
+      },
+      {
+        "chave": "reputacao_mercado",
+        "label": "Reputacao de mercado",
+        "nivel": "Adequado",
+        "score": 70,
+        "peso": 0.18,
+        "score_contrib": 12.6,
+        "relatorio": "Empresa ativa desde 1999 com contratos recentes e significativos com órgãos federais como INCRA e DPU. Possui situação cadastral regular sem identificação de sanções, penalidades ou problemas reputacionais nos últimos 2 anos.",
+        "fatores": [
+          "Empresa ativa desde 1999 com contratos recentes e significativos com órgãos federais como INCRA e DPU. Possui situação cadastral regular sem identificação de sanções, penalidades ou problemas reputacionais nos últimos 2 anos."
+        ],
+        "flags": [
+          "reputacao_indisponivel"
+        ],
+        "fonte": "llm"
+      }
+    ],
+    "regularidade": {
+      "fator": 1.0,
+      "texto": "Regularidade aplicada como multiplicador 1.00. Nenhum haircut aplicado.",
+      "haircuts": [
+        {
+          "certidao": "cnd_federal",
+          "estado": "indisponivel",
+          "haircut": 0.0
+        },
+        {
+          "certidao": "cndt_tst",
+          "estado": "indisponivel",
+          "haircut": 0.0
+        },
+        {
+          "certidao": "fgts",
+          "estado": "indisponivel",
+          "haircut": 0.0
+        }
+      ],
+      "flags": [
+        "certidao_indisponivel"
+      ]
+    },
+    "pontos_positivos": [
+      "relacionamento_governamental: Forte",
+      "saude_cadastral: Forte"
+    ],
+    "pontos_atencao": [
+      "porte_operacionalidade: Atencao"
+    ],
+    "flags_relevantes": [
+      "certidao_indisponivel",
+      "reputacao_indisponivel",
+      "stub_llm_calibracao"
+    ]
+  },
+  "parecer": "Conclusao: Rating B, score final 74.6. O resultado combina merito 74.6 com fator de regularidade 1.00 (74.6 x 1.00 = 74.6).\n\nRelacionamento governamental: nivel Forte, nota 87.8. Relacionamento governamental calculado por volume, diversificacao, historico e maturidade dos contratos. Fatores: 9 contratos ativos; 6 orgaos distintos; 13 contratos no historico; Maturidade maxima: 5.0 anos.\n\nPorte/Operacionalidade: nivel Atencao, nota 55. Porte/Operacionalidade fixado em Atencao para harness de calibracao MASF. Fatores: Porte pequeno com contratos relevantes em servicos intensivos em mao de obra..\n\nSaude cadastral: nivel Forte, nota 84.5. Saude cadastral calculada por idade, capital, porte e estabilidade societaria. Fatores: Situacao cadastral: ATIVA; Idade empresarial: 27.2 anos; Capital social: R$ 500,000.00; Porte declarado: EMPRESA DE PEQUENO PORTE.\n\nReputacao de mercado: nivel Adequado, nota 70. Empresa ativa desde 1999 com contratos recentes e significativos com órgãos federais como INCRA e DPU. Possui situação cadastral regular sem identificação de sanções, penalidades ou problemas reputacionais nos últimos 2 anos. Fatores: Empresa ativa desde 1999 com contratos recentes e significativos com órgãos federais como INCRA e DPU. Possui situação cadastral regular sem identificação de sanções, penalidades ou problemas reputacionais nos últimos 2 anos..\n\nRegularidade: Regularidade aplicada como multiplicador 1.00. Nenhum haircut aplicado.\n\nPontos positivos: relacionamento_governamental: Forte; saude_cadastral: Forte.\n\nPontos de atencao: porte_operacionalidade: Atencao.\n\nFlags relevantes: certidao_indisponivel; reputacao_indisponivel; stub_llm_calibracao.",
+  "parecer_resumo": "Rating B, score final 74.6. Merito 74.6 x fator de regularidade 1.00."
 }
