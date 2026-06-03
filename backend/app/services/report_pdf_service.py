@@ -24,9 +24,10 @@ DIMENSION_ORDER = [
 DIMENSION_LABELS = {
     "relacionamento_governamental": "Relacionamento gov.",
     "porte_operacionalidade": "Porte / operacionalidade",
-    "saude_cadastral": "Saude cadastral",
-    "reputacao_mercado": "Reputacao de mercado",
+    "saude_cadastral": "Saúde cadastral",
+    "reputacao_mercado": "Reputação de mercado",
 }
+
 
 def record(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
@@ -40,7 +41,7 @@ def text(value: Any, fallback: str = "-") -> str:
     if value is None or value == "":
         return fallback
     if isinstance(value, bool):
-        return "Sim" if value else "Nao"
+        return "Sim" if value else "Não"
     return str(value)
 
 
@@ -84,6 +85,14 @@ def format_date(value: Any) -> str:
     if not value:
         return "-"
     raw = str(value)
+    iso_date = re.match(r"^(\d{4})-(\d{2})-(\d{2})", raw)
+    if iso_date:
+        year, month, day = iso_date.groups()
+        return f"{day}/{month}/{year}"
+    br_date = re.match(r"^(\d{2})/(\d{2})/(\d{4})", raw)
+    if br_date:
+        day, month, year = br_date.groups()
+        return f"{day}/{month}/{year}"
     try:
         normalized = raw.replace("Z", "+00:00")
         return datetime.fromisoformat(normalized).strftime("%d/%m/%Y")
@@ -142,6 +151,56 @@ def snapshot_map(operation: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return snapshots
 
 
+def as_float(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def is_active_contract(contract: dict[str, Any]) -> bool:
+    if isinstance(contract.get("ativo"), bool):
+        return bool(contract.get("ativo"))
+    status = text(contract.get("status") or contract.get("situacao"), "").casefold()
+    return any(token in status for token in ["ativo", "vigente", "execução", "execucao"])
+
+
+def contract_value_field(contracts_result: dict[str, Any], contracts: list[dict[str, Any]]) -> str:
+    expected = as_float(contracts_result.get("valor_total_ativo"))
+    candidates = ["valor_final", "valor_global", "valor_total", "valor_inicial"]
+    active_contracts = [contract for contract in contracts if is_active_contract(contract)]
+    if expected <= 0 or not active_contracts:
+        return "valor_final"
+
+    def total_for(field: str) -> float:
+        return sum(as_float(contract.get(field)) for contract in active_contracts)
+
+    return min(candidates, key=lambda field: abs(total_for(field) - expected))
+
+
+def normalized_contracts(contracts_result: dict[str, Any]) -> list[dict[str, Any]]:
+    contracts = [record(item) for item in array(contracts_result.get("contratos_detalhe"))]
+    value_field = contract_value_field(contracts_result, contracts)
+    normalized = []
+    for contract in contracts:
+        active = is_active_contract(contract)
+        value = contract.get(value_field)
+        if value is None and value_field != "valor_final":
+            value = contract.get("valor_final")
+        if value is None:
+            value = contract.get("valor_inicial")
+        normalized.append(
+            {
+                **contract,
+                "_pdf_ativo": active,
+                "_pdf_status": "ativo" if active else "encerrado",
+                "_pdf_valor": value,
+                "_pdf_valor_campo": value_field,
+            }
+        )
+    return normalized
+
+
 def metric_card(label: str, value: str, hint: str = "") -> str:
     return f"""
     <div class="metric">
@@ -153,8 +212,8 @@ def metric_card(label: str, value: str, hint: str = "") -> str:
 
 
 def radar_svg(dimensions: dict[str, Any]) -> str:
-    center = 145
-    radius = 88
+    center = 210
+    radius = 100
 
     def point(index: int, score: float = 100) -> tuple[float, float]:
         angle = -math.pi / 2 + (index * 2 * math.pi) / len(DIMENSION_ORDER)
@@ -179,17 +238,24 @@ def radar_svg(dimensions: dict[str, Any]) -> str:
     )
     dots = "\n".join(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.5" />' for x, y in data)
     label_positions = [
-        (center, center - radius - 18, "middle"),
-        (center + radius + 18, center + 4, "start"),
-        (center, center + radius + 28, "middle"),
-        (center - radius - 18, center + 4, "end"),
+        (center, center - radius - 30, "middle", ["Relacionamento", "gov."]),
+        (center + radius + 10, center - 5, "middle", ["Porte /", "operacionalidade"]),
+        (center, center + radius + 34, "middle", ["Saúde", "cadastral"]),
+        (center - radius - 10, center - 5, "middle", ["Reputação", "de mercado"]),
     ]
     labels = "\n".join(
-        f'<text x="{x:.1f}" y="{y:.1f}" text-anchor="{anchor}">{html.escape(DIMENSION_LABELS[key])}</text>'
-        for (x, y, anchor), key in zip(label_positions, DIMENSION_ORDER)
+        (
+            f'<text x="{x:.1f}" y="{y:.1f}" text-anchor="{anchor}">'
+            + "".join(
+                f'<tspan x="{x:.1f}" dy="{0 if index == 0 else 12}">{html.escape(line)}</tspan>'
+                for index, line in enumerate(lines)
+            )
+            + "</text>"
+        )
+        for x, y, anchor, lines in label_positions
     )
     return f"""
-    <svg class="radar" viewBox="0 0 290 290" role="img" aria-label="Radar 4D">
+    <svg class="radar" viewBox="0 0 420 420" role="img" aria-label="Radar 4D">
       <g class="radar-grid">{grid}{axes}</g>
       <polygon class="radar-area" points="{points(data)}" />
       <g class="radar-dots">{dots}</g>
@@ -205,17 +271,17 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
     tax_regimes = array(company.get("regime_tributario"))
     partners = array(company.get("qsa"))
     rows = [
-        ("Razao social", company.get("razao_social") or operation.get("razao_social")),
+        ("Razão social", company.get("razao_social") or operation.get("razao_social")),
         ("CNPJ", format_cnpj(company.get("cnpj") or operation.get("cnpj"))),
         ("Porte", company.get("porte")),
-        ("Natureza juridica", company.get("natureza_juridica")),
+        ("Natureza jurídica", company.get("natureza_juridica")),
         ("Abertura", format_date(company.get("data_abertura"))),
         ("Capital social", money(company.get("capital_social"))),
-        ("Situacao cadastral", company.get("situacao_cadastral")),
-        ("Municipio/UF", f"{text(company.get('municipio'))} / {text(company.get('uf'))}"),
+        ("Situação cadastral", company.get("situacao_cadastral")),
+        ("Município/UF", f"{text(company.get('municipio'))} / {text(company.get('uf'))}"),
         ("Simples Nacional", company.get("opcao_simples")),
         ("MEI", company.get("opcao_mei")),
-        ("Portal Transparencia", "sem registro" if legal.get("erro") == "sem_registro" else "consultado"),
+        ("Portal Transparência", "sem registro" if legal.get("erro") == "sem_registro" else "consultado"),
     ]
     regime_rows = [[item.get("ano"), item.get("forma")] for item in map(record, tax_regimes)]
     partner_rows = [[item.get("nome"), item.get("qualificacao"), format_date(item.get("data_entrada"))] for item in map(record, partners)]
@@ -234,11 +300,11 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
     rating = esc(operation.get("rating") or engine.get("rating"), "-")
     return f"""
     <section class="cover page-section">
-      <div class="eyebrow">Relatorio de credito</div>
+      <div class="eyebrow">Relatório de crédito</div>
       <h1>1. Capa / resumo</h1>
       <div class="cover-head">
         <div>
-          <div class="company-name">{esc(company.get("razao_social") or operation.get("razao_social"), "Empresa nao identificada")}</div>
+          <div class="company-name">{esc(company.get("razao_social") or operation.get("razao_social"), "Empresa não identificada")}</div>
           <p>{format_cnpj(company.get("cnpj") or operation.get("cnpj"))}</p>
         </div>
         <div class="rating">Rating {rating}</div>
@@ -248,12 +314,12 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
       <div class="metrics">{metrics}</div>
       <div class="split">
         <div>
-          <h2>Regime tributario por ano</h2>
+          <h2>Regime tributário por ano</h2>
           {table(["Ano", "Forma"], regime_rows)}
         </div>
         <div>
-          <h2>Socios</h2>
-          {table(["Nome", "Qualificacao", "Entrada"], partner_rows)}
+          <h2>Sócios</h2>
+          {table(["Nome", "Qualificação", "Entrada"], partner_rows)}
         </div>
       </div>
     </section>
@@ -277,7 +343,7 @@ def scorecard_section(engine: dict[str, Any]) -> str:
       <h1>2. Scorecard</h1>
       <div class="scorecard">
         <div>{radar_svg(dimensions)}</div>
-        <div>{table(["Dimensao", "Nota", "Nivel", "Peso", "Contrib."], rows)}</div>
+        <div>{table(["Dimensão", "Nota", "Nível", "Peso", "Contrib."], rows)}</div>
       </div>
     </section>
     """
@@ -300,9 +366,9 @@ def parecer_section(engine: dict[str, Any]) -> str:
                 <span>Peso {pct_from_fraction(item.get("peso"), 0)}</span>
                 <span>Contrib. {number(item.get("score_contrib"), 2)}</span>
               </div>
-              {paragraph(item.get("relatorio") or item.get("justificativa"), "Relatorio nao disponivel.")}
-              <p><strong>Fatores:</strong> {html.escape(fatores)}</p>
-              <p><strong>Flags:</strong> {html.escape(flags)}</p>
+              {paragraph(item.get("relatorio") or item.get("justificativa"), "Relatório não disponível.")}
+              <p class="note"><strong>Fatores:</strong> {html.escape(fatores)}</p>
+              <p class="note"><strong>Flags:</strong> {html.escape(flags)}</p>
             </article>
             """
         )
@@ -368,13 +434,13 @@ def pricing_section(operation: dict[str, Any]) -> str:
 
 def contracts_annex(snapshots: dict[str, dict[str, Any]]) -> str:
     result = record(snapshots.get("contratos", {}).get("parsed_result"))
-    contracts = [record(item) for item in array(result.get("contratos_detalhe"))]
+    contracts = normalized_contracts(result)
     rows = [
         [
             item.get("numero"),
             item.get("orgao"),
-            money(item.get("valor_inicial")),
-            item.get("situacao"),
+            money(item.get("_pdf_valor")),
+            item.get("_pdf_status"),
             f"{format_date(item.get('data_inicio'))} a {format_date(item.get('data_fim'))}",
         ]
         for item in contracts
@@ -385,7 +451,7 @@ def contracts_annex(snapshots: dict[str, dict[str, Any]]) -> str:
             ("Ativos", result.get("contratos_ativos")),
             ("Encerrados", result.get("contratos_encerrados")),
             ("Valor total ativo", money(result.get("valor_total_ativo"))),
-            ("Valor historico", money(result.get("valor_total_historico"))),
+            ("Valor histórico", money(result.get("valor_total_historico"))),
         ],
         5,
     )
@@ -393,7 +459,7 @@ def contracts_annex(snapshots: dict[str, dict[str, Any]]) -> str:
     <section class="page-section">
       <h1>6. Anexo - contratos</h1>
       {totals}
-      {table(["Numero", "Orgao", "Valor", "Status", "Vigencia"], rows, "compact")}
+      {table(["Número", "Órgão", "Valor", "Status", "Vigência"], rows, "compact")}
     </section>
     """
 
@@ -411,13 +477,13 @@ def resources_annex(snapshots: dict[str, dict[str, Any]]) -> str:
       <h1>7. Anexo - recursos recebidos</h1>
       {detail_grid([
           ("Total recebido", money(result.get("valor_total_recebido"))),
-          ("Periodo", f"{text(result.get('periodo_inicio'))} a {text(result.get('periodo_fim'))}"),
+          ("Período", f"{text(result.get('periodo_inicio'))} a {text(result.get('periodo_fim'))}"),
           ("Registros", result.get("total_registros")),
       ], 3)}
       <h2>Por ano</h2>
       {table(["Ano", "Valor"], [[year, money(value)] for year, value in record(result.get("valor_por_ano")).items()])}
-      <h2>Top orgaos pagadores</h2>
-      {table(["Orgao", "Valor"], [[agency, money(value)] for agency, value in top_agencies])}
+      <h2>Top órgãos pagadores</h2>
+      {table(["Órgão", "Valor"], [[agency, money(value)] for agency, value in top_agencies])}
     </section>
     """
 
@@ -457,9 +523,9 @@ def sanctions_and_docs_annex(snapshots: dict[str, dict[str, Any]]) -> str:
             detail_grid(
                 [
                     ("Resultado", result.get("resultado") or result.get("status")),
-                    ("Emissao", format_date(result.get("data_emissao"))),
+                    ("Emissão", format_date(result.get("data_emissao"))),
                     ("Validade", format_date(result.get("data_validade"))),
-                    ("Orgao", result.get("orgao_emissor") or result.get("orgao")),
+                    ("Órgão", result.get("orgao_emissor") or result.get("orgao")),
                 ],
                 4,
             )
@@ -469,9 +535,9 @@ def sanctions_and_docs_annex(snapshots: dict[str, dict[str, Any]]) -> str:
     parts.append(
         detail_grid(
             [
-                ("Nivel de risco", web.get("nivel_risco")),
-                ("Nivel", web.get("nivel")),
-                ("Score reputacao", web.get("score_reputacao")),
+                ("Nível de risco", web.get("nivel_risco")),
+                ("Nível", web.get("nivel")),
+                ("Score reputação", web.get("score_reputacao")),
             ],
             3,
         )
@@ -503,7 +569,7 @@ def styles() -> str:
         text-transform: uppercase;
       }
       p { margin: 0 0 8px; }
-      .justify { text-align: justify; }
+      .justify { text-align: justify; text-align-last: left; }
       .page-section { break-after: page; }
       .page-section:last-child { break-after: auto; }
       .avoid-break, .detail, .metric, .dimension-block, tr { break-inside: avoid; page-break-inside: avoid; }
@@ -547,14 +613,15 @@ def styles() -> str:
       }
       td { border-bottom: 1px solid #e2e8ee; padding: 6px; vertical-align: top; }
       .compact td, .compact th { font-size: 9px; padding: 4px 5px; }
-      .scorecard { align-items: center; display: grid; gap: 20px; grid-template-columns: 300px 1fr; }
-      .radar { height: 290px; width: 290px; }
+      .scorecard { align-items: center; display: grid; gap: 20px; grid-template-columns: 340px 1fr; }
+      .radar { height: 340px; width: 340px; }
       .radar-grid polygon, .radar-grid line { fill: none; stroke: #d5dde3; stroke-width: 1; }
       .radar-area { fill: rgba(99,153,34,.18); stroke: #639922; stroke-linejoin: round; stroke-width: 2.4; }
       .radar-dots circle { fill: #639922; }
       .radar-labels text { fill: #47606f; font-size: 10px; font-weight: 600; }
       .dimension-block { border-left: 3px solid #639922; margin-bottom: 14px; padding: 6px 0 4px 12px; }
       .mini-grid { color: #647481; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 7px; }
+      .note { text-align: left; }
       .calc { background: #eef5e8; border-radius: 6px; color: #244f10; font-size: 15px; font-weight: 700; margin-bottom: 12px; padding: 10px 12px; }
     </style>
     """
@@ -595,7 +662,7 @@ def document_html(operation: dict[str, Any]) -> tuple[str, str, str]:
     <div style="font-family: Arial, sans-serif; font-size: 9px; width: 100%; padding: 0 42px;">
       <div style="border-bottom: 1px solid #cfd8df; color: #172033; display: flex; justify-content: space-between; padding-bottom: 8px;">
         <span><strong>Credit Engine</strong> / AntecipaGov</span>
-        <span>Operacao {html.escape(op_number)} &nbsp;|&nbsp; Confidencial</span>
+        <span>Operação {html.escape(op_number)} &nbsp;|&nbsp; Confidencial</span>
       </div>
     </div>
     """
@@ -603,7 +670,7 @@ def document_html(operation: dict[str, Any]) -> tuple[str, str, str]:
     <div style="font-family: Arial, sans-serif; font-size: 8px; width: 100%; padding: 0 42px;">
       <div style="border-top: 1px solid #cfd8df; color: #647481; display: flex; justify-content: space-between; padding-top: 8px;">
         <span>Gerado em {html.escape(date)}</span>
-        <span>Pagina <span class="pageNumber"></span> de <span class="totalPages"></span> · Credit Engine · Confidencial</span>
+        <span>Página <span class="pageNumber"></span> de <span class="totalPages"></span> · Credit Engine · Confidencial</span>
       </div>
     </div>
     """
@@ -616,7 +683,7 @@ class ReportPdfService:
 
         operation = await OperationService().get_with_snapshots(operation_id)
         if not operation:
-            raise HTTPException(status_code=404, detail="Operacao nao encontrada")
+            raise HTTPException(status_code=404, detail="Operação não encontrada")
         return await run_in_threadpool(self._render_pdf, operation)
 
     def _render_pdf(self, operation: dict[str, Any]) -> bytes:
