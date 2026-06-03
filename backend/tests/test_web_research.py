@@ -1,30 +1,26 @@
 """
-Teste standalone: web_research
-Requer ANTHROPIC_API_KEY no .env
+Teste do componente web_research.
 
-Uso:
-    cd backend
-    python tests/test_web_research.py
+Por padrao, a suite roda offline: apenas o parsing unitario e executado.
+Para exercitar a chamada real ao Anthropic, configure ANTHROPIC_API_KEY.
 """
-import sys, os, json, re
+from __future__ import annotations
+
+import json
+import os
+import re
 from pathlib import Path
+
+import pytest
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-import anthropic
+CNPJ = os.getenv("TEST_CNPJ", "03012610000101")
+MODEL = "claude-sonnet-4-20250514"
 
-API_KEY = os.getenv("ANTHROPIC_API_KEY")
-CNPJ    = os.getenv("TEST_CNPJ", "03012610000101")
-
-if not API_KEY:
-    print("❌ ANTHROPIC_API_KEY não encontrado"); sys.exit(1)
-
-print(f"🔍 Pesquisando reputação — CNPJ: {CNPJ}")
-print(f"🤖 Modelo: claude-sonnet-4-20250514 + WebSearch")
-print("-" * 60)
-
-SYSTEM = """Você é um analista de risco de crédito especializado em fornecedores do governo brasileiro.
-Pesquise a reputação da empresa e retorne APENAS um JSON válido:
+SYSTEM = """Voce e um analista de risco de credito especializado em fornecedores do governo brasileiro.
+Pesquise a reputacao da empresa e retorne APENAS um JSON valido:
 {
   "score_reputacao": <0-100>,
   "nivel_risco": "<baixo|medio|alto|critico>",
@@ -37,19 +33,62 @@ Pesquise a reputação da empresa e retorne APENAS um JSON válido:
   "fontes_consultadas": ["<fonte1>"]
 }"""
 
-try:
-    client = anthropic.Anthropic(api_key=API_KEY)
 
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
-        system=SYSTEM,
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
-        messages=[{"role": "user", "content":
-            f"Pesquise a reputação da empresa CNPJ {CNPJ} (MASF SERVICOS E FACILITIES LTDA) "
-            f"fornecedora do governo federal brasileiro. Foque nos últimos 2 anos."
-        }],
+def parse_web_research_response(result_text: str) -> dict:
+    clean = re.sub(r"```json|```", "", result_text).strip()
+    return json.loads(clean)
+
+
+def test_parse_web_research_response_accepts_json_fence():
+    result = parse_web_research_response(
+        """```json
+        {
+          "score_reputacao": 82,
+          "nivel_risco": "baixo",
+          "noticias_negativas": false,
+          "processos_relevantes": false,
+          "reclamacoes_graves": false,
+          "problemas_governo": false,
+          "resumo": "Sem alertas materiais.",
+          "alertas": [],
+          "fontes_consultadas": ["consulta publica"]
+        }
+        ```"""
     )
+
+    assert result["score_reputacao"] == 82
+    assert result["nivel_risco"] == "baixo"
+    assert result["alertas"] == []
+
+
+@pytest.mark.network
+def test_web_research_anthropic_integration():
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        pytest.skip("ANTHROPIC_API_KEY nao configurado")
+
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=1000,
+            system=SYSTEM,
+            tools=[{"type": "web_search_20250305", "name": "web_search"}],
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Pesquise a reputacao da empresa CNPJ {CNPJ} "
+                        "(MASF SERVICOS E FACILITIES LTDA) fornecedora do "
+                        "governo federal brasileiro. Foque nos ultimos 2 anos."
+                    ),
+                }
+            ],
+        )
+    except Exception as exc:
+        pytest.skip(f"chamada externa indisponivel: {exc}")
 
     result_text = ""
     for block in response.content:
@@ -57,36 +96,9 @@ try:
             result_text = block.text
             break
 
-    print(f"✅ Pesquisa concluída\n")
-
-    clean = re.sub(r"```json|```", "", result_text).strip()
-    r = json.loads(clean)
-
-    print(f"📊 Score reputação:   {r.get('score_reputacao')}/100")
-    print(f"⚠️  Nível de risco:    {r.get('nivel_risco')}")
-    print(f"📰 Notícias negativas: {'Sim' if r.get('noticias_negativas') else 'Não'}")
-    print(f"⚖️  Processos relevantes: {'Sim' if r.get('processos_relevantes') else 'Não'}")
-    print(f"😡 Reclamações graves: {'Sim' if r.get('reclamacoes_graves') else 'Não'}")
-    print(f"🏛️  Problemas governo:  {'Sim' if r.get('problemas_governo') else 'Não'}")
-    print(f"\n📝 Resumo:\n   {r.get('resumo')}")
-
-    if r.get("alertas"):
-        print(f"\n🚨 Alertas:")
-        for a in r["alertas"]:
-            print(f"   • {a}")
-
-    if r.get("fontes_consultadas"):
-        print(f"\n🔗 Fontes consultadas:")
-        for f in r["fontes_consultadas"]:
-            print(f"   • {f}")
+    result = parse_web_research_response(result_text)
+    assert 0 <= result["score_reputacao"] <= 100
+    assert result["nivel_risco"] in {"baixo", "medio", "alto", "critico"}
 
     out = Path(__file__).parent / "output_web_research.json"
-    out.write_text(json.dumps(r, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\n💾 Resultado salvo em: {out}")
-
-except json.JSONDecodeError:
-    print(f"⚠️  Resposta não é JSON válido. Raw response:")
-    print(result_text)
-except Exception as e:
-    print(f"❌ Erro: {e}")
-    import traceback; traceback.print_exc(); sys.exit(1)
+    out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

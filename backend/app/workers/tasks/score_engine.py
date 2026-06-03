@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -361,7 +362,7 @@ def _capital_score(capital: float) -> int:
     return 95
 
 
-def _porte_score(porte: Any) -> int | None:
+def _porte_score_legacy(porte: Any) -> int | None:
     text = str(porte or "").upper()
     if "MEI" in text or "MICROEMPREENDEDOR" in text:
         return 35
@@ -374,6 +375,70 @@ def _porte_score(porte: Any) -> int | None:
     if "GRANDE" in text:
         return 95
     return None
+
+
+NATUREZA_NAO_EMPRESARIAL = (
+    "associa",
+    "fundac",
+    "organiza",
+    "sem fins",
+    "orgao publico",
+    "autarquia",
+    "municipio",
+    "servico social",
+    "sociedade simples",
+    "internacional",
+    "cartorio",
+    "condominio",
+)
+
+
+def _normalize_text(value: Any) -> str:
+    text = str(value or "").lower()
+    return "".join(
+        char
+        for char in unicodedata.normalize("NFKD", text)
+        if not unicodedata.combining(char)
+    )
+
+
+def _is_empresarial(natureza: Any) -> bool:
+    text = _normalize_text(natureza)
+    if not text:
+        return True
+    return not any(token in text for token in NATUREZA_NAO_EMPRESARIAL)
+
+
+def _porte_score(
+    porte: Any,
+    capital: float | None = None,
+    natureza: Any = None,
+) -> tuple[int | None, list[str]]:
+    text = str(porte or "").upper()
+    normalized = _normalize_text(porte).upper()
+    flags: list[str] = []
+    if "MEI" in text or "MICROEMPREENDEDOR" in text:
+        return 35, flags
+    if "EPP" in text or "PEQUENO" in text:
+        return 72, flags
+    if "MEDIO" in normalized:
+        return 85, flags
+    if "MEDIO" in text or "MÃ‰DIO" in text:
+        return 85, flags
+    if "GRANDE" in text:
+        return 95, flags
+    if "MICRO" in text or re.search(r"\bME\b", normalized):
+        return 58, flags
+    if not _is_empresarial(natureza):
+        flags.append("natureza_nao_empresarial")
+        return 55, flags
+    if capital is not None:
+        if capital > 2_000_000:
+            return 95, flags
+        if capital > 500_000:
+            return 85, flags
+        return 58, flags
+    return None, flags
 
 
 def _qsa_estabilidade_score(qsa: Any) -> tuple[int, list[str]]:
@@ -422,12 +487,14 @@ def score_saude_cadastral(snapshots: dict[str, Any]) -> dict[str, Any]:
     data_abertura = brasil.get("data_abertura") or brasil.get("abertura") or pessoa.get("data_abertura")
     capital = _as_float(brasil.get("capital_social") or pessoa.get("capital_social"))
     porte_raw = brasil.get("porte") or pessoa.get("porte")
+    natureza = brasil.get("natureza_juridica") or pessoa.get("natureza_juridica")
 
     idade_anos = _years_since(data_abertura)
     idade = _idade_score(idade_anos) if idade_anos is not None else None
     capital_score = _capital_score(capital) if capital is not None else None
-    porte = _porte_score(porte_raw)
+    porte, porte_flags = _porte_score(porte_raw, capital, natureza)
     estabilidade, estabilidade_flags = _qsa_estabilidade_score(brasil.get("qsa") or pessoa.get("qsa"))
+    flags.extend(porte_flags)
     flags.extend(estabilidade_flags)
 
     material_missing = []

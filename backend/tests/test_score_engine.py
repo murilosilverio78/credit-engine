@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT))
 from app.workers.tasks.score_engine import (  # noqa: E402
     NIVEL_NOTA,
     PESOS_MERITO,
+    _porte_score,
     consolidar_score,
 )
 
@@ -75,6 +76,30 @@ def forced_porte_atencao() -> dict:
         "fonte": "llm",
         "score_contrib": round(score * peso, 2),
     }
+
+
+def test_porte_score_infers_demais_only_for_empresarial_natureza():
+    cases = [
+        ("DEMAIS", 40_000_000, "Sociedade Empresária Limitada", 95, []),
+        ("DEMAIS", 800_000, "Sociedade Empresária Limitada", 85, []),
+        ("DEMAIS", 100_000, "Sociedade Empresária Limitada", 58, []),
+        (
+            "DEMAIS",
+            40_000_000,
+            "Associação Privada",
+            55,
+            ["natureza_nao_empresarial"],
+        ),
+        ("DEMAIS", 40_000_000, "Fundação", 55, ["natureza_nao_empresarial"]),
+        ("EPP", 40_000_000, "Associação Privada", 72, []),
+        ("", None, None, None, []),
+    ]
+
+    for porte, capital, natureza, expected_score, expected_flags in cases:
+        assert _porte_score(porte, capital, natureza) == (
+            expected_score,
+            expected_flags,
+        )
 
 
 def main() -> int:
