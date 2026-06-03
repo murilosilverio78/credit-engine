@@ -182,7 +182,7 @@ async def login(payload: LoginInput, response: Response):
         _secret(),
         algorithm="HS256",
     )
-    response.set_cookie("session", encoded, httponly=True, samesite="lax", secure=True)
+    response.set_cookie("session", encoded, httponly=True, samesite="none", secure=True)
     return {"ok": True}
 
 
@@ -256,5 +256,5 @@ async def me(current_user: dict = Depends(get_current_user)):
 
 @router.post("/logout")
 async def logout(response: Response):
-    response.delete_cookie("session")
+    response.delete_cookie("session", samesite="none", secure=True)
     return {"ok": True}

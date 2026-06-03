@@ -125,7 +125,7 @@ test.describe("Módulo 1 - Autenticação", () => {
       httpOnly: true,
       name: "session",
       path: "/",
-      sameSite: "Lax",
+      sameSite: "None",
       secure: true,
       value: "expired",
     }]);

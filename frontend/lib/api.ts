@@ -39,6 +39,10 @@ class ApiError extends Error {
   }
 }
 
+type ApiRequestInit = RequestInit & {
+  suppressUnauthorizedWarning?: boolean;
+};
+
 function errorMessage(status: number, body: string, statusText: string) {
   if (status === 401) {
     return "Sessao expirada ou sem permissao. Faca login novamente.";
@@ -71,21 +75,22 @@ function notifyUnauthorized() {
   );
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: ApiRequestInit): Promise<T> {
+  const { suppressUnauthorizedWarning = false, ...fetchInit } = init ?? {};
   const headers = new Headers(init?.headers);
   if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
   const response = await fetch(`${BASE}${path}`, {
-    ...init,
+    ...fetchInit,
     credentials: "include",
     headers,
   });
 
   if (!response.ok) {
     const body = await response.text();
-    if (response.status === 401) {
+    if (response.status === 401 && !suppressUnauthorizedWarning) {
       notifyUnauthorized();
     }
     throw new ApiError(
@@ -283,7 +288,9 @@ export function escalateOperation(
 }
 
 export function getPendingEscaladas() {
-  return request<EscaladaPendente[]>("/api/v1/escaladas/pendentes");
+  return request<EscaladaPendente[]>("/api/v1/escaladas/pendentes", {
+    suppressUnauthorizedWarning: true,
+  });
 }
 
 export function resolveEscalation(

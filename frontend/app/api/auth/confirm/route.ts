@@ -104,8 +104,8 @@ export async function POST(req: NextRequest) {
     expires: expiresAt,
     httpOnly: true,
     path: "/",
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    sameSite: "none",
+    secure: true,
   });
   return response;
 }
