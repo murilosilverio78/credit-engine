@@ -35,21 +35,15 @@ test.describe("Módulo 6 - Precificação determinística @slow", () => {
     expect(params.some((param) => param.key.toLowerCase().includes("serpro"))).toBe(true);
   });
 
-  test("6.4 - sensibilidade ao prazo", async ({}, testInfo) => {
+  test("6.4 - waterfall mensal converge por fluxo de caixa", async ({}, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
-    const breakdown = operation.taxa_breakdown as Record<string, number> | undefined;
+    const breakdown = operation.taxa_breakdown as Record<string, unknown> | undefined;
     const taxa = operation.taxa_sugerida as number | undefined;
     expect(taxa).toBeGreaterThan(0);
     expect(breakdown).toBeTruthy();
-    const componentTotal = [
-      "funding_ponderado_am",
-      "el_mensal",
-      "custo_bond_am",
-      "taxa_adm_am",
-      "bancarizacao_am",
-      "orig_am",
-      "serpro_am",
-    ].reduce((total, key) => total + Number(breakdown?.[key] ?? 0), 0);
-    expect(componentTotal).toBeCloseTo(taxa ?? 0, 8);
+    expect(breakdown?.fluxo_caixa).toEqual(expect.any(Array));
+    const detalhes = breakdown?.detalhes as Record<string, number> | undefined;
+    expect(Math.abs(Number(detalhes?.residual_fluxo_rs ?? Number.NaN))).toBeLessThan(1);
+    expect(Number(detalhes?.total_receita_rs ?? 0)).toBeGreaterThan(0);
   });
 });
