@@ -89,9 +89,11 @@ mesmo domínio-pai.
 
 O relatório em PDF é gerado no backend por `GET /api/v1/operations/{id}/report.pdf`.
 A implementação usa HTML/CSS renderizado pelo Playwright/Chromium porque o backend
-já dependia de Playwright para automações, e o Dockerfile instala o Chromium com
-`python -m playwright install --with-deps chromium`. Isso evita as dependências
-nativas de Pango/Cairo exigidas pelo WeasyPrint e remove a geração via DOM da tela.
+já dependia de Playwright para automações. O Dockerfile usa a imagem oficial
+`mcr.microsoft.com/playwright/python:v1.47.0-noble`, casada com
+`playwright==1.47.0`, para trazer Chromium e dependências de sistema já testadas.
+Isso evita as dependências nativas de Pango/Cairo exigidas pelo WeasyPrint e remove
+a geração via DOM da tela.
 
 ## Componentes de consulta
 
