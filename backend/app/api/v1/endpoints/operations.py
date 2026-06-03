@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, Response
 from pydantic import BaseModel, field_validator
 from typing import Literal, Optional
 import re
@@ -6,6 +6,7 @@ import re
 from app.core.auth import get_current_user
 from app.core.database import supabase
 from app.services.audit_service import AuditService
+from app.services.report_pdf_service import ReportPdfService
 
 router = APIRouter()
 audit = AuditService()
@@ -139,6 +140,21 @@ async def get_operation(operation_id: str):
         raise HTTPException(status_code=404, detail="Operação não encontrada")
 
     return operation
+
+
+@router.get("/{operation_id}/report.pdf")
+async def get_operation_report_pdf(
+    operation_id: str,
+    _current_user: dict = Depends(get_current_user),
+):
+    """Gera o relatorio de credito completo em PDF no backend."""
+    pdf = await ReportPdfService().render_operation_pdf(operation_id)
+    filename = f"credit-engine-{operation_id}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/")

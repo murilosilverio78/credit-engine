@@ -127,6 +127,36 @@ export function getOperation(operationId: string) {
   return request<OperationDetails>(`/api/v1/operations/${operationId}`);
 }
 
+export async function downloadOperationReportPdf(operationId: string) {
+  const headers = new Headers();
+  const token = getAuthToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(
+    `${BASE}/api/v1/operations/${encodeURIComponent(operationId)}/report.pdf`,
+    {
+      credentials: "include",
+      headers,
+    },
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    if (response.status === 401) {
+      clearAuthToken();
+      notifyUnauthorized();
+    }
+    throw new ApiError(
+      response.status,
+      errorMessage(response.status, body, response.statusText),
+    );
+  }
+
+  return response.blob();
+}
+
 export function getComponents() {
   return request<Component[]>("/api/v1/components/");
 }

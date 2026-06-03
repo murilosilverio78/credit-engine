@@ -23,7 +23,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { ApiError, getOperation } from "@/lib/api";
+import { ApiError, downloadOperationReportPdf, getOperation } from "@/lib/api";
 import { formatTaxaAm } from "@/lib/format";
 import type { ComponentSnapshot, OperationDetails, Rating } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -1478,6 +1478,8 @@ function PrintableAnnex({ snapshots }: { snapshots: Map<string, ComponentSnapsho
 
 function Report({ operation }: { operation: OperationDetails }) {
   const generatedAt = useMemo(() => new Date(), []);
+  const [downloadError, setDownloadError] = useState("");
+  const [downloading, setDownloading] = useState(false);
   const snapshots = useMemo(
     () =>
       new Map(
@@ -1519,12 +1521,28 @@ function Report({ operation }: { operation: OperationDetails }) {
   const status = conclusion(operation.rating);
 
   async function handleDownloadPdf() {
-    setSelectedName("recursos_recebidos");
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    document.title = `CreditEngine_${operation.cnpj}_${date}`;
-    window.print();
+    setDownloadError("");
+    setDownloading(true);
+    try {
+      const blob = await downloadOperationReportPdf(operation.id);
+      const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `CreditEngine_${operation.cnpj}_${date}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      setDownloadError(
+        error instanceof ApiError
+          ? error.message
+          : "Nao foi possivel gerar o PDF. Tente novamente.",
+      );
+    } finally {
+      setDownloading(false);
+    }
   }
 
   return (
@@ -1577,14 +1595,20 @@ function Report({ operation }: { operation: OperationDetails }) {
               ) : null}
               <button
                 className="no-print flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring print:hidden"
+                disabled={downloading}
                 onClick={handleDownloadPdf}
                 type="button"
               >
                 <Download className="h-3.5 w-3.5" />
-                Baixar PDF
+                {downloading ? "Gerando PDF..." : "Baixar PDF"}
               </button>
             </div>
           </div>
+          {downloadError ? (
+            <p className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 print:hidden">
+              {downloadError}
+            </p>
+          ) : null}
           <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
             <Metric label="Score">
               {operation.score ?? numberValue(engine.score)}

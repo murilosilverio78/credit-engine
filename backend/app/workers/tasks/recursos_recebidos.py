@@ -79,7 +79,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         "valor_total_recebido": valor_total,
         "periodo_inicio": mes_inicio,
         "periodo_fim": mes_fim,
-        "orgaos_pagadores": orgaos[:10],
+        "orgaos_pagadores": orgaos,
         "valor_por_ano": por_ano,
         "recursos_detalhe": [
             {
@@ -88,7 +88,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
                 "orgao": r.get("nomeOrgao"),
                 "acao": r.get("nomeAcao"),
             }
-            for r in recursos[:50]
+            for r in recursos
         ],
     }
 

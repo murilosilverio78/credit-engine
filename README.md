@@ -85,6 +85,14 @@ por JavaScript e deve ser endurecido depois com access token curto + refresh tok
 ou, quando houver domínio próprio compartilhado, cookie `httpOnly` seguro sob o
 mesmo domínio-pai.
 
+## PDF de relatório de crédito
+
+O relatório em PDF é gerado no backend por `GET /api/v1/operations/{id}/report.pdf`.
+A implementação usa HTML/CSS renderizado pelo Playwright/Chromium porque o backend
+já dependia de Playwright para automações, e o Dockerfile instala o Chromium com
+`python -m playwright install --with-deps chromium`. Isso evita as dependências
+nativas de Pango/Cairo exigidas pelo WeasyPrint e remove a geração via DOM da tela.
+
 ## Componentes de consulta
 
 Cada componente é um Celery worker independente:
