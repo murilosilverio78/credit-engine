@@ -2,6 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 
+import { clearAuthToken, getAuthToken } from "@/lib/auth-token";
+import { ApiError, getCurrentUser } from "@/lib/api";
 import type { Alcada, UserRole } from "@/lib/types";
 
 interface Session {
@@ -15,45 +17,45 @@ interface Session {
 }
 
 async function fetchSession() {
-  const response = await fetch("/api/auth/me", { credentials: "include" });
-  if (!response.ok) {
+  if (!getAuthToken()) {
     return null;
   }
-  const data = (await response.json()) as
-    | { session: Session | null }
-    | {
-        id: string;
-        email: string;
-        name: string;
-        role: UserRole;
-      };
-
-  if ("session" in data) {
-    return data.session;
+  let data: Awaited<ReturnType<typeof getCurrentUser>>;
+  try {
+    data = await getCurrentUser();
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      clearAuthToken();
+      return null;
+    }
+    throw error;
   }
+  const user = data.user;
 
   const alcada: Alcada =
-    data.role === "diretor"
+    user.alcada ??
+    (user.role === "diretor"
       ? "committee"
-      : data.role === "gerente"
+      : user.role === "gerente"
         ? "manager"
-        : "analyst";
+        : "analyst");
 
   return {
     user: {
       alcada,
-      email: data.email,
-      id: data.id,
-      name: data.name,
-      role: data.role,
+      email: user.email,
+      id: user.id,
+      name: user.name,
+      role: user.role,
     },
   };
 }
 
 export function useSession(): { session: Session | null; loading: boolean } {
+  const token = getAuthToken();
   const query = useQuery({
     queryFn: fetchSession,
-    queryKey: ["auth", "session"],
+    queryKey: ["auth", "session", token],
     retry: false,
     staleTime: 60_000,
   });

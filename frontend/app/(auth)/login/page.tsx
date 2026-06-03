@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useEffect, useState } from "react";
 
 import { useSession } from "@/hooks/use-session";
+import { setAuthToken } from "@/lib/auth-token";
 
 function LoginForm() {
   const router = useRouter();
@@ -54,6 +55,12 @@ function LoginForm() {
         return;
       }
 
+      if (!data?.access_token) {
+        setError("Login concluido sem token de acesso. Tente novamente.");
+        return;
+      }
+
+      setAuthToken(data.access_token);
       router.replace(searchParams.get("next") || "/operations");
     } catch {
       setError("Erro ao conectar. Tente novamente.");

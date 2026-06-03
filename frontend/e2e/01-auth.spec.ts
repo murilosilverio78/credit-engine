@@ -16,8 +16,9 @@ test.describe("Módulo 1 - Autenticação", () => {
     const { email, password } = credentialsFor("diretor");
     await loginViaUI(page, email, password);
     await expect(page).toHaveURL(/\/operations/);
-    const session = await page.context().cookies();
-    expect(session.some((cookie) => cookie.name === "session" && cookie.httpOnly)).toBe(true);
+    await expect
+      .poll(() => page.evaluate(() => window.localStorage.getItem("auth_token")))
+      .toBeTruthy();
     await expect(page.getByText(email).or(page.getByText(/Credit Engine/))).toBeVisible();
   });
 
@@ -102,7 +103,9 @@ test.describe("Módulo 1 - Autenticação", () => {
     await loginViaUI(page, email, password);
     await page.getByRole("button", { name: "Sair" }).click();
     await expect(page).toHaveURL(/\/login/);
-    expect((await page.context().cookies()).some((cookie) => cookie.name === "session")).toBe(false);
+    await expect
+      .poll(() => page.evaluate(() => window.localStorage.getItem("auth_token")))
+      .toBeNull();
   });
 
   test("1.10 - acesso a rota protegida sem sessão", async ({ page }, testInfo) => {
@@ -119,16 +122,6 @@ test.describe("Módulo 1 - Autenticação", () => {
 
   test("1.11 - sessão expirada", async ({ page }, testInfo) => {
     skipIfNoFrontend(testInfo);
-    await page.context().addCookies([{
-      domain: new URL(test.info().config.projects[0].use.baseURL as string).hostname,
-      expires: Math.floor(Date.now() / 1000) - 60,
-      httpOnly: true,
-      name: "session",
-      path: "/",
-      sameSite: "None",
-      secure: true,
-      value: "expired",
-    }]);
     await page.goto("/operations");
     await expect(page).toHaveURL(/\/login/);
   });

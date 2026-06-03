@@ -12,7 +12,10 @@ function secretKey() {
 }
 
 export async function GET(req: NextRequest) {
-  const token = req.cookies.get("session")?.value;
+  const auth = req.headers.get("authorization") ?? "";
+  const token = auth.toLowerCase().startsWith("bearer ")
+    ? auth.split(" ", 2)[1]?.trim()
+    : req.cookies.get("session")?.value;
 
   if (!token) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

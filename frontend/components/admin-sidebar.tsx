@@ -14,6 +14,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { useSession } from "@/hooks/use-session";
+import { clearAuthToken } from "@/lib/auth-token";
 import { getHealth, getPendingEscaladas, getPendingOverrides } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -90,12 +91,14 @@ export function AdminSidebar() {
   const { data: pendingOverrides = [] } = useQuery({
     queryKey: ["overrides", "pending"],
     queryFn: getPendingOverrides,
+    enabled: Boolean(session),
     refetchInterval: 30_000,
     refetchIntervalInBackground: true,
   });
   const { data: pendingEscaladas = [] } = useQuery({
     queryKey: ["escaladas", "pendentes"],
     queryFn: getPendingEscaladas,
+    enabled: Boolean(session),
     refetchInterval: 30_000,
     refetchIntervalInBackground: true,
   });
@@ -126,6 +129,7 @@ export function AdminSidebar() {
         : "bg-muted-foreground/50";
 
   async function logout() {
+    clearAuthToken();
     await fetch("/api/auth/logout", { method: "POST" });
     window.location.href = "/login";
   }

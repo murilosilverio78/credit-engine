@@ -77,6 +77,14 @@ npm run dev
 
 Ver `backend/.env.example` e `frontend/.env.local.example`.
 
+## Dívida de segurança
+
+A autenticação usa access token JWT em `localStorage` no frontend para viabilizar
+o MVP com frontend e API em domínios-raiz diferentes. `localStorage` é acessível
+por JavaScript e deve ser endurecido depois com access token curto + refresh token
+ou, quando houver domínio próprio compartilhado, cookie `httpOnly` seguro sob o
+mesmo domínio-pai.
+
 ## Componentes de consulta
 
 Cada componente é um Celery worker independente:

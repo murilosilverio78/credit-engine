@@ -22,13 +22,13 @@ export async function apiContext(role: E2ERole) {
   const baseURL = env("E2E_API_URL");
   const unauthenticated = await request.newContext({ baseURL });
   const { email, password } = credentialsFor(role);
-  const cookie = await loginViaAPI(unauthenticated, email, password);
+  const token = await loginViaAPI(unauthenticated, email, password);
   await unauthenticated.dispose();
 
   return request.newContext({
     baseURL,
     extraHTTPHeaders: {
-      Cookie: cookie,
+      Authorization: `Bearer ${token}`,
     },
   });
 }

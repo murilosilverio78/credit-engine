@@ -8,28 +8,15 @@ import { credentialsFor, env, type E2ERole, loadE2EEnv } from "./env";
 const authDir = path.join(process.cwd(), "e2e", ".auth");
 const storageStateCache = new Map<E2ERole, string>();
 
-function cookieHeader(setCookie: string | null) {
-  if (!setCookie) {
-    throw new Error("Login response did not include a session cookie.");
-  }
-
-  const sessionCookie = setCookie
-    .split(/,(?=\s*[^;,]+=)/)
-    .find((cookie) => cookie.trim().startsWith("session="));
-
-  if (!sessionCookie) {
-    throw new Error("Login response did not include the session cookie.");
-  }
-
-  return sessionCookie.split(";")[0].trim();
-}
-
 export async function loginViaUI(page: Page, email: string, password: string) {
   await page.goto("/login");
   await page.getByTestId("login-email").fill(email);
   await page.getByTestId("login-password").fill(password);
   await page.getByTestId("login-submit").click();
   await expect(page).toHaveURL(/\/operations(?:$|[/?#])/, { timeout: 30_000 });
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem("auth_token")))
+    .not.toBeNull();
 }
 
 export async function loginViaAPI(
@@ -46,7 +33,12 @@ export async function loginViaAPI(
     throw new Error(`API login failed with HTTP ${response.status()}: ${await response.text()}`);
   }
 
-  return cookieHeader(response.headers()["set-cookie"] ?? null);
+  const data = (await response.json()) as { access_token?: string };
+  if (!data.access_token) {
+    throw new Error("API login response did not include an access_token.");
+  }
+
+  return data.access_token;
 }
 
 export async function storageStateFor(role: E2ERole) {

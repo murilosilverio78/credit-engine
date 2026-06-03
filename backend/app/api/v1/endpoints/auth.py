@@ -134,7 +134,7 @@ async def register_user(
 
 
 @router.post("/login")
-async def login(payload: LoginInput, response: Response):
+async def login(payload: LoginInput):
     erro_credencial = "Email ou senha inválidos"
 
     try:
@@ -182,8 +182,11 @@ async def login(payload: LoginInput, response: Response):
         _secret(),
         algorithm="HS256",
     )
-    response.set_cookie("session", encoded, httponly=True, samesite="none", secure=True)
-    return {"ok": True}
+    return {
+        "access_token": encoded,
+        "ok": True,
+        "token_type": "bearer",
+    }
 
 
 @router.post("/confirm-email")

@@ -4,6 +4,8 @@ import { LoaderCircle } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 
+import { setAuthToken } from "@/lib/auth-token";
+
 function ConfirmAccess() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -24,7 +26,11 @@ function ConfirmAccess() {
       if (!response.ok) {
         throw new Error(await response.text());
       }
-      const data = (await response.json()) as { next?: string };
+      const data = (await response.json()) as { access_token?: string; next?: string };
+      if (!data.access_token) {
+        throw new Error("missing access token");
+      }
+      setAuthToken(data.access_token);
       router.push(data.next || "/operations");
     } catch {
       setError("Não foi possível confirmar o acesso. Solicite um novo link.");

@@ -99,13 +99,11 @@ export async function POST(req: NextRequest) {
     .sign(secretKey());
 
   const next = body.next?.startsWith("/") ? body.next : "/operations";
-  const response = NextResponse.json({ next, ok: true });
-  response.cookies.set("session", jwt, {
-    expires: expiresAt,
-    httpOnly: true,
-    path: "/",
-    sameSite: "none",
-    secure: true,
+  return NextResponse.json({
+    access_token: jwt,
+    expires_at: expiresAt.toISOString(),
+    next,
+    ok: true,
+    token_type: "bearer",
   });
-  return response;
 }

@@ -22,11 +22,11 @@ test.describe("Módulo 17 - Segurança e casos de borda", () => {
     await expect(page.getByTestId("detail-status")).toHaveCount(0, { timeout: 15_000 });
   });
 
-  test("17.3 - cookie seguro", async ({ request }, testInfo) => {
+  test("17.3 - login retorna bearer token", async ({ request }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
     const { email, password } = credentialsFor("diretor");
-    const cookie = await loginViaAPI(request, email, password);
-    expect(cookie).toMatch(/^session=/);
+    const token = await loginViaAPI(request, email, password);
+    expect(token.split(".")).toHaveLength(3);
   });
 
   test("17.4 - CORS entre Vercel e Railway", async ({ request }) => {

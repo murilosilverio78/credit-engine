@@ -7,6 +7,7 @@ import type {
   ComponentToggleResult,
   EscaladaPendente,
   HealthStatus,
+  Alcada,
   OperationCreated,
   OperationDetails,
   Override,
@@ -21,7 +22,9 @@ import type {
   UploadResumeResult,
   UploadResult,
   UploadTask,
+  UserRole,
 } from "@/lib/types";
+import { clearAuthToken, getAuthToken } from "@/lib/auth-token";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL;
 
@@ -81,6 +84,10 @@ async function request<T>(path: string, init?: ApiRequestInit): Promise<T> {
   if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
+  const token = getAuthToken();
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
 
   const response = await fetch(`${BASE}${path}`, {
     ...fetchInit,
@@ -91,6 +98,7 @@ async function request<T>(path: string, init?: ApiRequestInit): Promise<T> {
   if (!response.ok) {
     const body = await response.text();
     if (response.status === 401 && !suppressUnauthorizedWarning) {
+      clearAuthToken();
       notifyUnauthorized();
     }
     throw new ApiError(
@@ -167,6 +175,20 @@ export function reviewOverride(
 
 export function getHealth() {
   return request<HealthStatus>("/health");
+}
+
+export function getCurrentUser() {
+  return request<{
+    user: {
+      alcada?: Alcada;
+      email: string;
+      id: string;
+      name: string;
+      role: UserRole;
+    };
+  }>("/api/v1/auth/me", {
+    suppressUnauthorizedWarning: true,
+  });
 }
 
 export function getOperationUploads(operationId: string) {

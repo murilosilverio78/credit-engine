@@ -3,6 +3,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 
+import { clearAuthToken } from "@/lib/auth-token";
+
 export function Providers({ children }: { children: ReactNode }) {
   const [authWarning, setAuthWarning] = useState("");
   const [queryClient] = useState(
@@ -20,9 +22,14 @@ export function Providers({ children }: { children: ReactNode }) {
   useEffect(() => {
     function handleUnauthorized(event: Event) {
       const detail = (event as CustomEvent<string>).detail;
+      clearAuthToken();
       setAuthWarning(
         detail || "Sessao expirada ou sem permissao. Faca login novamente.",
       );
+      if (!window.location.pathname.startsWith("/login")) {
+        const next = encodeURIComponent(window.location.pathname);
+        window.location.href = `/login?next=${next}`;
+      }
     }
 
     window.addEventListener("api:unauthorized", handleUnauthorized);
