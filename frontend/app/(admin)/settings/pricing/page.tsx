@@ -5,6 +5,7 @@ import { BadgePercent } from "lucide-react";
 import { FormEvent, useState } from "react";
 
 import {
+  ApiError,
   getPricingAudit,
   getPricingMatrix,
   getPricingParameters,
@@ -63,6 +64,13 @@ function fieldFromPayload(payload: unknown) {
   }
   const data = payload as { key?: string; rating?: string };
   return data.key ?? data.rating ?? "-";
+}
+
+function mutationErrorMessage(error: unknown) {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+  return "Nao foi possivel salvar.";
 }
 
 function ParameterCard({ parameter }: { parameter: PricingParameter }) {
@@ -149,7 +157,9 @@ function ParameterCard({ parameter }: { parameter: PricingParameter }) {
           </label>
           {error ? <p className="mt-1 text-[11px] text-red-700">{error}</p> : null}
           {mutation.isError ? (
-            <p className="mt-1 text-[11px] text-red-700">Não foi possível salvar.</p>
+            <p className="mt-1 text-[11px] text-red-700">
+              {mutationErrorMessage(mutation.error)}
+            </p>
           ) : null}
           <button
             className="mt-3 flex h-10 items-center justify-center gap-1.5 rounded-md border-[0.5px] border-foreground bg-background px-4 text-[13px] font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
@@ -274,6 +284,11 @@ function MatrixEditor({ row }: { row: PricingMatrixRow }) {
                 />
               </label>
               {error ? <p className="text-[11px] text-red-700 md:col-span-3">{error}</p> : null}
+              {mutation.isError ? (
+                <p className="text-[11px] text-red-700 md:col-span-3">
+                  {mutationErrorMessage(mutation.error)}
+                </p>
+              ) : null}
               <button
                 className="flex h-10 items-center justify-center gap-1.5 rounded-md border-[0.5px] border-foreground bg-background px-4 text-[13px] font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
                 data-testid="pricing-save"

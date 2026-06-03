@@ -39,6 +39,38 @@ class ApiError extends Error {
   }
 }
 
+function errorMessage(status: number, body: string, statusText: string) {
+  if (status === 401) {
+    return "Sessao expirada ou sem permissao. Faca login novamente.";
+  }
+  if (status === 403) {
+    return "Sem permissao para executar esta acao.";
+  }
+
+  try {
+    const data = JSON.parse(body) as { detail?: unknown; error?: unknown };
+    const detail = data.detail ?? data.error;
+    if (typeof detail === "string" && detail.trim()) {
+      return detail;
+    }
+  } catch {
+    // Body is not JSON; fall back to raw text/status.
+  }
+
+  return body || statusText;
+}
+
+function notifyUnauthorized() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.dispatchEvent(
+    new CustomEvent("api:unauthorized", {
+      detail: "Sessao expirada ou sem permissao. Faca login novamente.",
+    }),
+  );
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) {
@@ -53,7 +85,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const body = await response.text();
-    throw new ApiError(response.status, body || response.statusText);
+    if (response.status === 401) {
+      notifyUnauthorized();
+    }
+    throw new ApiError(
+      response.status,
+      errorMessage(response.status, body, response.statusText),
+    );
   }
 
   return response.json() as Promise<T>;
