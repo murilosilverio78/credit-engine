@@ -67,21 +67,51 @@ def _component_result_failed(result: Any) -> bool:
 
 
 def _mark_operation_failed(operation_id: str, message: str):
-    supabase.table("operations")\
-        .update({"status": "failed", "error_message": message})\
-        .eq("id", operation_id)\
-        .execute()
+    try:
+        supabase.table("operations")\
+            .update({"status": "failed", "error_message": message})\
+            .eq("id", operation_id)\
+            .execute()
+        return
+    except Exception as exc:
+        logger.warning(
+            "pipeline.mark_operation_failed_with_message_error",
+            operation_id=operation_id,
+            failure_reason=message,
+            error=str(exc),
+        )
+
+    try:
+        supabase.table("operations")\
+            .update({"status": "failed"})\
+            .eq("id", operation_id)\
+            .execute()
+    except Exception as exc:
+        logger.error(
+            "pipeline.mark_operation_failed_error",
+            operation_id=operation_id,
+            failure_reason=message,
+            error=str(exc),
+        )
 
 
 def _mark_stale_components_failed(operation_id: str, components: list[str]):
     if not components:
         return
     message = f"snapshot running ha mais de {RUNNING_STALE_MINUTES} minutos"
-    supabase.table("component_snapshots")\
-        .update({"status": "failed", "error_message": message})\
-        .eq("operation_id", operation_id)\
-        .in_("component", components)\
-        .execute()
+    try:
+        supabase.table("component_snapshots")\
+            .update({"status": "failed", "error_message": message})\
+            .eq("operation_id", operation_id)\
+            .in_("component", components)\
+            .execute()
+    except Exception as exc:
+        logger.error(
+            "pipeline.mark_stale_components_failed_error",
+            operation_id=operation_id,
+            components=components,
+            error=str(exc),
+        )
 
 
 def _incomplete_components(operation_id: str, components: tuple[str, ...]) -> list[str]:
