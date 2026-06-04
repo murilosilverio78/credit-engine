@@ -24,10 +24,13 @@ export default function UsersSettingsPage() {
     setSuccess("");
 
     try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
       const response = await fetch("/api/auth/register", {
         body: JSON.stringify({ email, name, password, role }),
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         method: "POST",
       });
       const data = await response.json().catch(() => ({}));
