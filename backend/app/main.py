@@ -1,7 +1,13 @@
+from datetime import datetime, timedelta, timezone
+
+import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from app.core.database import supabase
 from app.api.v1.endpoints import admin, alcadas, auth, components, escaladas, operations, overrides, pricing, uploads
+
+logger = structlog.get_logger()
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -37,6 +43,53 @@ app.include_router(escaladas.router,  prefix="/api/v1/escaladas",  tags=["escala
 app.include_router(pricing.router,    prefix="/api/v1/pricing",    tags=["pricing"])
 app.include_router(operations.router, prefix="/api/operations",    tags=["operations"])
 app.include_router(escaladas.router,  prefix="/api/escaladas",     tags=["escaladas"])
+
+
+async def _recover_stale_operations():
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        result = supabase.table("operations")\
+            .select("id,status")\
+            .in_("status", ["pending", "processing"])\
+            .lt("created_at", cutoff)\
+            .execute()
+
+        total = 0
+        for operation in result.data or []:
+            operation_id = operation.get("id")
+            status_anterior = operation.get("status")
+            if not operation_id:
+                continue
+            try:
+                supabase.table("operations")\
+                    .update({
+                        "status": "failed",
+                        "error_message": "operacao interrompida por restart do container",
+                    })\
+                    .eq("id", operation_id)\
+                    .execute()
+                total += 1
+                logger.warning(
+                    "startup.operation_recovered",
+                    operation_id=operation_id,
+                    status_anterior=status_anterior,
+                )
+            except Exception as exc:
+                logger.error(
+                    "startup.operation_recovery_update_failed",
+                    operation_id=operation_id,
+                    status_anterior=status_anterior,
+                    error=str(exc),
+                )
+
+        logger.info("startup.recovery_complete", total=total)
+    except Exception as exc:
+        logger.error("startup.recovery_failed", error=str(exc))
+
+
+@app.on_event("startup")
+async def startup_recovery():
+    await _recover_stale_operations()
 
 
 @app.get("/health")
