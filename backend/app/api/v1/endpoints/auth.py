@@ -1,10 +1,11 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
-from email.message import EmailMessage
+from html import escape
 from typing import Literal
 from uuid import uuid4
 
-import aiosmtplib
 import bcrypt
+import resend
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from jose import jwt
@@ -49,19 +50,16 @@ async def _send_email(
     subject: str = "Acesso ao Credit Engine",
     body: str | None = None,
 ):
-    message = EmailMessage()
-    message["From"] = settings.EMAIL_FROM
-    message["To"] = to_email
-    message["Subject"] = subject
-    message.set_content(body or f"Acesse: {link}")
-
-    await aiosmtplib.send(
-        message,
-        hostname=settings.SMTP_HOST,
-        port=settings.SMTP_PORT,
-        username=settings.SMTP_USER,
-        password=settings.SMTP_PASS,
-        start_tls=settings.SMTP_PORT != 465,
+    resend.api_key = settings.RESEND_API_KEY
+    html_body = escape(body or f"Acesse: {link}").replace("\n", "<br>")
+    await asyncio.to_thread(
+        resend.Emails.send,
+        {
+            "from": settings.EMAIL_FROM,
+            "to": [to_email],
+            "subject": subject,
+            "html": html_body,
+        },
     )
 
 

@@ -34,10 +34,7 @@ class Settings(BaseSettings):
     TWOCAPTCHA_API_KEY: str
 
     # Email
-    SMTP_HOST: str
-    SMTP_PORT: int = 587
-    SMTP_USER: str
-    SMTP_PASS: str
+    RESEND_API_KEY: str
     EMAIL_FROM: str = "credito@antecipagov.com.br"
 
     # Upload task SLA
