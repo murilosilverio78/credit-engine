@@ -51,7 +51,8 @@ test.describe("Módulo 10 - Overrides @slow", () => {
     skipIfNoCredentials(testInfo, "analista");
 
     // Create override as analista
-    const analista = await (await apiAnalista.get("/api/v1/auth/me")).json() as { id: string };
+    const analistaResp = await (await apiAnalista.get("/api/v1/auth/me")).json() as { user: { id: string } };
+    const analista = analistaResp.user;
     const created = await apiAnalista.post(`/api/v1/overrides/operations/${operationId}/override`, {
       data: {
         justificativa: "Revisão E2E",
@@ -68,7 +69,8 @@ test.describe("Módulo 10 - Overrides @slow", () => {
     const override = await created.json() as { id: string };
 
     // Review as diretor (different user)
-    const diretor = await (await apiDiretor.get("/api/v1/auth/me")).json() as { id: string };
+    const diretorResp = await (await apiDiretor.get("/api/v1/auth/me")).json() as { user: { id: string } };
+    const diretor = diretorResp.user;
     const review = await apiDiretor.post(
       `/api/v1/overrides/operations/${operationId}/override/${override.id}/review`,
       { data: { decision: "approved", reviewed_by: diretor.id } },
