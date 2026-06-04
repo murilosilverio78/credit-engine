@@ -6,12 +6,15 @@ Executado apenas se pessoa_juridica.sancionado_cepim = True.
 Tipo: automatizado | Fila: fast | Cache: 24h
 """
 import httpx
+import time
 from app.workers.base import BaseComponentTask
 import structlog
 
 logger = structlog.get_logger()
 
 BASE_URL = "https://api.portaldatransparencia.gov.br/api-de-dados"
+MAX_PAGES = 200
+MAX_SECONDS = 180
 
 
 def _fetch(cnpj: str, token: str = None) -> dict:
@@ -21,8 +24,15 @@ def _fetch(cnpj: str, token: str = None) -> dict:
     headers = {"chave-api-dados": api_token}
     registros = []
 
+    started = time.monotonic()
     pagina = 1
     while True:
+        elapsed = time.monotonic() - started
+        if elapsed > MAX_SECONDS:
+            raise TimeoutError(f"cepim excedeu timeout de {MAX_SECONDS}s na pagina {pagina}")
+        if pagina > MAX_PAGES:
+            raise TimeoutError(f"cepim excedeu limite de {MAX_PAGES} paginas")
+
         with httpx.Client(timeout=20, verify=False) as client:
             resp = client.get(
                 f"{BASE_URL}/cepim",
@@ -35,14 +45,16 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         if not data:
             break
         registros.extend(data)
-        if len(data) < 10:
-            break
         pagina += 1
 
     return {
         "possui_sancao": len(registros) > 0,
         "total_registros": len(registros),
         "registros": registros,
+        "_pagination": {
+            "paginas_lidas": pagina,
+            "registros": len(registros),
+        },
     }
 
 
