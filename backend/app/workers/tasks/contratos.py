@@ -102,7 +102,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         "contratos_encerrados": len(encerrados),
         "valor_total_ativo": sum(float(c["valor_inicial"] or 0) for c in ativos),
         "valor_total_historico": sum(float(c["valor_inicial"] or 0) for c in parsed),
-        "orgaos_contratantes": list({c["orgao"] for c in parsed if c["orgao"]})[:10],
+        "orgaos_contratantes": sorted({c["orgao"] for c in parsed if c["orgao"]}),
         "contratos_detalhe": parsed,
         "_pagination": pagination,
     }
