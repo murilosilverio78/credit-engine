@@ -118,6 +118,15 @@ operacional, o teto é "Adequado". "Forte" e "Excepcional" exigem folga demonstr
 Se faltar dado essencial (sem porte, sem capital, sem contratos), retorne nível
 "Atencao" com a flag "dado_insuficiente" e explique.
 
+REGRA DE FATOS NUMÉRICOS: qualquer número citado em "raciocinio" ou "fatores"
+(valores de contrato, valores por órgão, totais, contagens, datas, capital,
+recebimentos) deve vir EXCLUSIVAMENTE dos DADOS ESTRUTURADOS do input. NUNCA
+aproxime, arredonde para valor diferente, nem atribua um valor a um órgão
+específico a menos que esse par (órgão, valor) esteja explícito nos dados. Se o
+número não estiver nos dados, fale qualitativamente ("contratos de grande porte
+com órgãos federais"), sem cifra. Totais agregados (valor total ativo, valor
+histórico, recebimentos 12m) só podem ser citados se presentes nos dados.
+
 Retorne APENAS JSON válido, com o raciocínio ANTES do nível:
 {
   "raciocinio": "<3-5 frases, análise antes da nota>",
