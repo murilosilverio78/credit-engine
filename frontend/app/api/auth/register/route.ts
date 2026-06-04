@@ -10,7 +10,9 @@ export async function POST(req: NextRequest) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      cookie: req.headers.get("cookie") || "",
+      ...(req.headers.get("authorization")
+        ? { authorization: req.headers.get("authorization")! }
+        : {}),
     },
     body: JSON.stringify(body),
   });
