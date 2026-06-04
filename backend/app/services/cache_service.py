@@ -12,7 +12,13 @@ logger = structlog.get_logger()
 # TTL padrão por componente (horas) — sobrescrito pela tabela component_config
 DEFAULT_TTL: dict[str, int] = {
     "brasil_api": 24,
-    "portal_transparencia": 12,
+    "pessoa_juridica": 12,
+    "contratos": 12,
+    "recursos_recebidos": 12,
+    "ceis": 12,
+    "cnep": 12,
+    "cepim": 12,
+    "acordos_leniencia": 12,
     "cndt_tst": 24,
     "cnd_federal": 24,
     "fgts": 24,
@@ -58,7 +64,7 @@ class CacheService:
         Salva resultado no cache com TTL do componente.
         Usa upsert para sobrescrever cache expirado do mesmo CNPJ+componente.
         """
-        ttl_hours = DEFAULT_TTL.get(component, 24)
+        ttl_hours = DEFAULT_TTL.get(component, 0)
         if ttl_hours == 0:
             return  # score_engine não cacheia
 
