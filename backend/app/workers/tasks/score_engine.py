@@ -71,6 +71,14 @@ ESSENTIAL_COMPONENTS = (
     "acordos_leniencia",
     "web_research",
 )
+PHASE2_COMPONENTS = (
+    "contratos",
+    "recursos_recebidos",
+    "acordos_leniencia",
+    "ceis",
+    "cnep",
+    "cepim",
+)
 RUNNING_STALE_MINUTES = 15
 
 COMPONENT_DIMENSION_MAP = {
@@ -228,14 +236,31 @@ def validate_score_preconditions(operation_id: str, supabase) -> None:
 
     snapshots = {row.get("component"): row for row in (result.data or [])}
     incomplete = []
+    phase2_incomplete = []
+    phase2_completed = 0
     stale_running = []
     for component in ESSENTIAL_COMPONENTS:
         snapshot = snapshots.get(component)
         label = _snapshot_status_label(component, snapshot, now)
-        if label:
+        if component in PHASE2_COMPONENTS and snapshot and snapshot.get("status") == "completed":
+            phase2_completed += 1
+        if label and component in PHASE2_COMPONENTS:
+            phase2_incomplete.append(label)
+            if label.startswith(f"{component}(running_stale"):
+                stale_running.append(component)
+        elif label:
             incomplete.append(label)
             if label.startswith(f"{component}(running_stale"):
                 stale_running.append(component)
+
+    if phase2_incomplete and phase2_completed == 0:
+        incomplete.extend(phase2_incomplete)
+    elif phase2_incomplete:
+        logger.warning(
+            "score_engine.phase2_partial_inputs",
+            operation_id=operation_id,
+            incomplete_components=phase2_incomplete,
+        )
 
     if incomplete:
         _mark_stale_running_failed(supabase, operation_id, stale_running)

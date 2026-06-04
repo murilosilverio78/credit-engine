@@ -13,8 +13,8 @@ test.describe("Módulo 10 - Overrides @slow", () => {
   test("10.1 - solicitar override de rating", async ({ diretorPage }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
     await diretorPage.goto(`/operations/${operationId}`);
-    await diretorPage.getByText("Solicitar override").scrollIntoViewIfNeeded();
-    await expect(diretorPage.getByText("Solicitar override")).toBeVisible();
+    await diretorPage.getByRole("heading", { name: "Solicitar override" }).scrollIntoViewIfNeeded();
+    await expect(diretorPage.getByRole("heading", { name: "Solicitar override" })).toBeVisible();
   });
 
   test("10.2 - tipos de override", async ({ diretorPage }, testInfo) => {
@@ -53,8 +53,9 @@ test.describe("Módulo 10 - Overrides @slow", () => {
     });
     testInfo.skip(!created.ok(), "Could not create override fixture.");
     const override = await created.json() as { id: string };
+    const me = await (await apiDiretor.get("/api/v1/auth/me")).json() as { id: string };
     const review = await apiDiretor.post(`/api/v1/overrides/operations/${operationId}/override/${override.id}/review`, {
-      data: { decision: "approved", reviewed_by: "reviewer-e2e" },
+      data: { decision: "approved", reviewed_by: me.id },
     });
     expect(review.status()).toBe(200);
   });

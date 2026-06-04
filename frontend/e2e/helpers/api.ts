@@ -67,11 +67,12 @@ export async function waitForStatus(
 ) {
   const deadline = Date.now() + timeoutMs;
   let lastOperation: unknown;
+  const terminalStatuses = [...new Set([...statuses, "failed"])];
 
   while (Date.now() < deadline) {
     lastOperation = await getOperation(requestContext, id);
     const status = (lastOperation as { status?: string }).status;
-    if (status && statuses.includes(status)) {
+    if (status && terminalStatuses.includes(status)) {
       return lastOperation;
     }
 

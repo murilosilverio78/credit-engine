@@ -66,6 +66,14 @@ def _component_result_failed(result: Any) -> bool:
     return bool(result.get("error")) or result.get("status") == "failed"
 
 
+def _phase2_failed_components(results: list[Any]) -> list[tuple[str, Any]]:
+    return [
+        (component, result)
+        for component, result in zip(PHASE2_COMPONENTS, results)
+        if _component_result_failed(result)
+    ]
+
+
 def _mark_operation_failed(operation_id: str, message: str):
     try:
         supabase.table("operations")\
@@ -238,7 +246,15 @@ async def start_analysis(operation_id: str):
         _run_component(run_cnep, operation_id),
         _run_component(run_cepim, operation_id),
     )
-    if any(_component_result_failed(result) for result in phase2_results):
+    failed_phase2 = _phase2_failed_components(list(phase2_results))
+    for component, result in failed_phase2:
+        logger.error(
+            "pipeline.phase2_component_failed",
+            operation_id=operation_id,
+            component=component,
+            result=result,
+        )
+    if len(failed_phase2) == len(PHASE2_COMPONENTS):
         message = "pipeline abortado: falha em componente da fase 2"
         _mark_operation_failed(operation_id, message)
         logger.error("pipeline.phase2_failed", operation_id=operation_id, results=phase2_results)
@@ -246,14 +262,20 @@ async def start_analysis(operation_id: str):
 
     incomplete = _incomplete_components(operation_id, PHASE2_COMPONENTS)
     if incomplete:
-        message = "pipeline abortado: fase 2 incompleta: " + ", ".join(incomplete)
-        _mark_operation_failed(operation_id, message)
-        logger.error(
-            "pipeline.phase2_incomplete",
+        if len(incomplete) == len(PHASE2_COMPONENTS):
+            message = "pipeline abortado: fase 2 incompleta: " + ", ".join(incomplete)
+            _mark_operation_failed(operation_id, message)
+            logger.error(
+                "pipeline.phase2_incomplete",
+                operation_id=operation_id,
+                incomplete_components=incomplete,
+            )
+            return {"operation_id": operation_id, "status": "failed", "error": message}
+        logger.warning(
+            "pipeline.phase2_partial_incomplete",
             operation_id=operation_id,
             incomplete_components=incomplete,
         )
-        return {"operation_id": operation_id, "status": "failed", "error": message}
 
     after_phase2 = await _after_phase2(operation_id)
     if isinstance(after_phase2, dict) and after_phase2.get("status") == "failed":
@@ -333,14 +355,20 @@ async def _phase3_4(operation_id: str):
 
     incomplete = _incomplete_components(operation_id, PHASE2_COMPONENTS)
     if incomplete:
-        message = "pipeline abortado: fase 2 incompleta: " + ", ".join(incomplete)
-        _mark_operation_failed(operation_id, message)
-        logger.error(
-            "pipeline.phase2_incomplete",
+        if len(incomplete) == len(PHASE2_COMPONENTS):
+            message = "pipeline abortado: fase 2 incompleta: " + ", ".join(incomplete)
+            _mark_operation_failed(operation_id, message)
+            logger.error(
+                "pipeline.phase2_incomplete",
+                operation_id=operation_id,
+                incomplete_components=incomplete,
+            )
+            return {"operation_id": operation_id, "status": "failed", "error": message}
+        logger.warning(
+            "pipeline.phase2_partial_incomplete",
             operation_id=operation_id,
             incomplete_components=incomplete,
         )
-        return {"operation_id": operation_id, "status": "failed", "error": message}
 
     web_result = await _run_component(run_web_research, operation_id)
     if _component_result_failed(web_result):

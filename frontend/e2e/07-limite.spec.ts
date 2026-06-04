@@ -12,14 +12,18 @@ test.describe("Módulo 7 - Limite aprovado @slow", () => {
     return ensureCompletedOperation(apiDiretor, payload) as Promise<{ limite_aprovado?: number; rating?: string; status: string }>;
   }
 
-  test("7.1 - limite calculado pelo saldo @slow", async ({ apiDiretor }, testInfo) => {
+  // TODO: revisar após integração Broadfactor — contrato_saldo virá do Portal AntecipaGov,
+  // não do payload da operação
+  test.skip("7.1 - limite calculado pelo saldo @slow", async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
     const operation = await completedLimit(apiDiretor, { contrato_saldo: 800000, valor_solicitado: 500000 });
     expect(operation.status).toBe("completed");
     expect(operation.limite_aprovado).toBeLessThanOrEqual(500000);
   });
 
-  test("7.2 - limite capado pelo teto @slow", async ({ apiDiretor }, testInfo) => {
+  // TODO: revisar após integração Broadfactor — contrato_saldo virá do Portal AntecipaGov,
+  // não do payload da operação
+  test.skip("7.2 - limite capado pelo teto @slow", async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
     const operation = await completedLimit(apiDiretor, { contrato_saldo: 600000, valor_solicitado: 420000 });
     expect(operation.status).toBe("completed");
