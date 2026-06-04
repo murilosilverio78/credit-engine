@@ -61,8 +61,6 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         if not data:
             break
         recursos.extend(data)
-        if len(data) < 10:
-            break
         pagina += 1
 
     valor_total = sum(float(r.get("valor") or 0) for r in recursos)
@@ -73,6 +71,20 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         ano = str(r.get("anoMes") or 0)[:4]
         if ano:
             por_ano[ano] = por_ano.get(ano, 0) + float(r.get("valor") or 0)
+
+    pagination = {
+        "paginas_lidas": pagina,
+        "registros": len(recursos),
+        "atingiu_cap": pagina > MAX_PAGES * 0.8,
+        "motivo_fim": "pagina_vazia",
+    }
+    if pagination["atingiu_cap"]:
+        logger.warning(
+            "recursos_recebidos.pagination_near_cap",
+            cnpj=cnpj,
+            max_pages=MAX_PAGES,
+            **pagination,
+        )
 
     return {
         "total_registros": len(recursos),
@@ -90,6 +102,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
             }
             for r in recursos
         ],
+        "_pagination": pagination,
     }
 
 

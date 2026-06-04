@@ -77,13 +77,24 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         if not data:
             break
         contratos.extend(data)
-        if len(data) < 50:
-            break
         pagina += 1
 
     parsed    = [_parse_contrato(c) for c in contratos]
     ativos    = [c for c in parsed if c["ativo"]]
     encerrados = [c for c in parsed if not c["ativo"]]
+    pagination = {
+        "paginas_lidas": pagina,
+        "registros": len(contratos),
+        "atingiu_cap": pagina > MAX_PAGES * 0.8,
+        "motivo_fim": "pagina_vazia",
+    }
+    if pagination["atingiu_cap"]:
+        logger.warning(
+            "contratos.pagination_near_cap",
+            cnpj=cnpj,
+            max_pages=MAX_PAGES,
+            **pagination,
+        )
 
     return {
         "total_contratos": len(parsed),
@@ -93,6 +104,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         "valor_total_historico": sum(float(c["valor_inicial"] or 0) for c in parsed),
         "orgaos_contratantes": list({c["orgao"] for c in parsed if c["orgao"]})[:10],
         "contratos_detalhe": parsed,
+        "_pagination": pagination,
     }
 
 
