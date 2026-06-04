@@ -46,10 +46,12 @@ test.describe("Módulo 10 - Overrides @slow", () => {
     expect(review.status()).toBe(400);
   });
 
-  test("10.5 - revisão de override por outro usuário", async ({ apiDiretor }, testInfo) => {
+  test("10.5 - revisão de override por outro usuário", async ({ apiDiretor, apiAnalista, diretorPage }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
-    const created = await apiDiretor.post(`/api/v1/overrides/operations/${operationId}/override`, {
-      data: { justificativa: "Revisão E2E", new_value: "C", override_type: "rating", previous_value: "B", requested_by: "requester-e2e" },
+    skipIfNoCredentials(testInfo, "analista");
+    const analista = await (await apiAnalista.get("/api/v1/auth/me")).json() as { id: string };
+    const created = await apiAnalista.post(`/api/v1/overrides/operations/${operationId}/override`, {
+      data: { justificativa: "Revisão E2E", new_value: "C", override_type: "rating", previous_value: "B", requested_by: analista.id },
     });
     testInfo.skip(!created.ok(), "Could not create override fixture.");
     const override = await created.json() as { id: string };
