@@ -8,6 +8,7 @@ Tipo: LLM | Fila: llm | Cache: 48h
 import anthropic
 import json
 import re
+from datetime import date
 from app.workers.base import BaseComponentTask
 from app.utils.encoding import fix_dict_encoding
 import structlog
@@ -56,6 +57,12 @@ POSITIVO ativo e verificado.
 Se a busca não conseguir isolar o CNPJ correto, retorne "Adequado" com a flag
 "reputacao_nao_isolada" — não invente.
 
+Você NUNCA afirma capital social, data de abertura, idade da empresa ou qualquer
+dado de registro a partir de web ou memória. Para esses fatos use EXCLUSIVAMENTE
+o bloco DADOS CADASTRAIS OFICIAIS do input. A pesquisa web é só para sinais
+qualitativos (notícias, processos, reclamações, problemas com órgãos públicos).
+Número cadastral fora do bloco oficial: OMITA, jamais invente.
+
 Inclua no JSON de saída:
   "nivel": "<Excepcional|Forte|Adequado|Atencao|Fraco|Critico>",
   "raciocinio_reputacao": "<...>",
@@ -90,6 +97,27 @@ def _format_cnpj(cnpj: str) -> str:
         f"{digits[:2]}.{digits[2:5]}.{digits[5:8]}/"
         f"{digits[8:12]}-{digits[12:]}"
     )
+
+
+def _format_brl(value) -> str:
+    if value in (None, ""):
+        return "não informado"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "não informado"
+    formatted = f"{number:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"R$ {formatted}"
+
+
+def _company_age_years(data_abertura) -> float | None:
+    if not data_abertura:
+        return None
+    try:
+        opened_at = date.fromisoformat(str(data_abertura)[:10])
+    except ValueError:
+        return None
+    return round((date.today() - opened_at).days / 365.25, 1)
 
 
 def _extract_json_object(text: str) -> str:
@@ -132,6 +160,8 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
     razao_social = ""
     cnae = ""
     socios = []
+    capital_social = None
+    data_abertura = None
     try:
         if operation_id:
             snap = supabase.table("component_snapshots")\
@@ -145,10 +175,15 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
                 razao_social = brasil.get("razao_social", "")
                 cnae = brasil.get("atividade_principal", "")
                 socios = brasil.get("qsa", [])
+                capital_social = brasil.get("capital_social")
+                data_abertura = brasil.get("data_abertura")
     except Exception:
         pass
 
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    capital_fmt = _format_brl(capital_social)
+    idade_anos = _company_age_years(data_abertura)
+    idade_fmt = f"{idade_anos} anos" if idade_anos is not None else "não informado"
 
     prompt = f"""Pesquise a reputação desta empresa no mercado brasileiro.
 
@@ -157,6 +192,12 @@ IDENTIFICAÇÃO DA EMPRESA:
 - CNPJ: {_format_cnpj(cnpj)}
 - CNAE principal: {cnae}
 - Sócios: {json.dumps(socios, ensure_ascii=False)}
+
+DADOS CADASTRAIS OFICIAIS (fonte de verdade — use SOMENTE estes para qualquer
+número cadastral; NÃO pesquise nem infira esses fatos):
+- Capital social: {capital_fmt}
+- Data de abertura: {data_abertura or "não informado"}
+- Idade: {idade_fmt}
 
 Foque especialmente em:
 - Histórico de fornecimento de serviços para o governo federal
