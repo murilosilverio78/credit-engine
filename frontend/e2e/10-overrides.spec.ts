@@ -55,7 +55,7 @@ test.describe("Módulo 10 - Overrides @slow", () => {
     const created = await apiAnalista.post(`/api/v1/overrides/operations/${operationId}/override`, {
       data: {
         justificativa: "Revisão E2E",
-        new_value: "C",
+        new_value: "E",
         override_type: "rating",
         previous_value: "B",
         requested_by: analista.id,
