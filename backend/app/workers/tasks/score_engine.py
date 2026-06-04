@@ -10,6 +10,9 @@ Tipo: LLM | Fila: llm | Cache: nunca (sempre recalcula)
 """
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
+import inspect
 import json
 import re
 import unicodedata
@@ -789,31 +792,67 @@ def gates_deterministicos(snapshots: dict[str, Any]) -> list[str]:
     return sorted(set(bloqueios))
 
 
-def score_porte_llm(cnpj: str, snapshots: dict[str, Any], client: anthropic.Anthropic | None = None) -> dict[str, Any]:
+async def _create_porte_message(client, **kwargs):
+    response = client.messages.create(**kwargs)
+    if inspect.isawaitable(response):
+        return await response
+    return response
+
+
+def _run_async(coro):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(lambda: asyncio.run(coro)).result()
+
+
+def score_porte_llm(
+    cnpj: str,
+    snapshots: dict[str, Any],
+    client: anthropic.AsyncAnthropic | anthropic.Anthropic | None = None,
+    operation_id: str | None = None,
+) -> dict[str, Any]:
     from app.core.config import settings
 
-    client = client or anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    client = client or anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     payload = {
         "brasil_api": snapshots.get("brasil_api"),
         "pessoa_juridica": snapshots.get("pessoa_juridica"),
         "contratos": snapshots.get("contratos"),
         "recursos_recebidos": snapshots.get("recursos_recebidos"),
     }
-    response = client.messages.create(
-        model="claude-opus-4-5",
-        max_tokens=1000,
-        temperature=0,
-        system=PORTE_SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"Avalie Porte e Operacionalidade da empresa CNPJ {cnpj}.\n\n"
-                    f"DADOS ESTRUTURADOS:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
-                ),
-            }
-        ],
+    logger.info(
+        "score_engine.calling_opus",
+        operation_id=operation_id,
+        timeout_s=120,
     )
+    try:
+        response = _run_async(
+            asyncio.wait_for(
+                _create_porte_message(
+                    client,
+                    model="claude-opus-4-5",
+                    max_tokens=1000,
+                    temperature=0,
+                    system=PORTE_SYSTEM_PROMPT,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Avalie Porte e Operacionalidade da empresa CNPJ {cnpj}.\n\n"
+                                f"DADOS ESTRUTURADOS:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
+                            ),
+                        }
+                    ],
+                ),
+                timeout=120.0,
+            )
+        )
+    except asyncio.TimeoutError as exc:
+        raise RuntimeError("score_engine timeout: Claude Opus não respondeu em 120s") from exc
     text = response.content[0].text
     try:
         clean = re.sub(r"```json|```", "", text).strip()
@@ -1012,6 +1051,7 @@ def consolidar_score(
     snapshots: dict[str, Any],
     operacao: dict[str, Any] | None = None,
     porte_dimension: dict[str, Any] | None = None,
+    operation_id: str | None = None,
 ) -> dict[str, Any]:
     snapshots = fix_dict_encoding(snapshots or {})
     operacao = operacao or {}
@@ -1045,7 +1085,7 @@ def consolidar_score(
 
     dimensoes = {
         "relacionamento_governamental": score_relacionamento(snapshots),
-        "porte_operacionalidade": porte_dimension or score_porte_llm(cnpj, snapshots),
+        "porte_operacionalidade": porte_dimension or score_porte_llm(cnpj, snapshots, operation_id=operation_id),
         "saude_cadastral": score_saude_cadastral(snapshots),
         "reputacao_mercado": score_reputacao(snapshots),
     }
@@ -1133,7 +1173,7 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
             logger.error("score_engine.snapshots_error", error=str(exc), operation_id=operation_id)
             raise RuntimeError(f"score_engine abortado: falha ao validar snapshots: {exc}") from exc
 
-    result = consolidar_score(cnpj, snapshots, operacao)
+    result = consolidar_score(cnpj, snapshots, operacao, operation_id=operation_id)
 
     if operation_id:
         for component, dim in COMPONENT_DIMENSION_MAP.items():
