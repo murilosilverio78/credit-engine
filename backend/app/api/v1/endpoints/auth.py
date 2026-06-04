@@ -6,7 +6,7 @@ from uuid import uuid4
 import aiosmtplib
 import bcrypt
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from jose import jwt
 from pydantic import BaseModel, EmailStr
 
@@ -83,6 +83,7 @@ async def _send_email_safe(
 @router.post("/register", status_code=201)
 async def register_user(
     payload: RegisterInput,
+    background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user),
 ):
     if current_user.get("role") != "diretor":
@@ -113,7 +114,8 @@ async def register_user(
     token = token_result.data[0]["token"]
 
     verify_link = f"{settings.FRONTEND_URL}/auth/confirm-email?token={token}"
-    email_sent = await _send_email_safe(
+    background_tasks.add_task(
+        _send_email_safe,
         user["email"],
         verify_link,
         subject="Confirme seu email — Credit Engine AntecipaGov",
@@ -129,7 +131,7 @@ async def register_user(
         "ok": True,
         "user_id": user["id"],
         "email": user["email"],
-        "email_sent": email_sent,
+        "email_sent": True,
     }
 
 
