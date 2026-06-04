@@ -114,6 +114,45 @@ def _mark_stale_components_failed(operation_id: str, components: list[str]):
         )
 
 
+def _update_operation_razao_social(operation_id: str):
+    try:
+        result = supabase.table("component_snapshots")\
+            .select("component,parsed_result")\
+            .eq("operation_id", operation_id)\
+            .in_("component", ["brasil_api", "pessoa_juridica"])\
+            .execute()
+        snapshots = {
+            row.get("component"): row.get("parsed_result") or {}
+            for row in (result.data or [])
+        }
+
+        razao_social = None
+        for component in ("brasil_api", "pessoa_juridica"):
+            parsed = snapshots.get(component) or {}
+            razao_social = (parsed.get("razao_social") or parsed.get("nome") or "").strip()
+            if razao_social:
+                break
+
+        if not razao_social:
+            return
+
+        supabase.table("operations")\
+            .update({"razao_social": razao_social})\
+            .eq("id", operation_id)\
+            .execute()
+        logger.info(
+            "operation.razao_social_updated",
+            operation_id=operation_id,
+            razao_social=razao_social,
+        )
+    except Exception as exc:
+        logger.warning(
+            "operation.razao_social_update_failed",
+            operation_id=operation_id,
+            error=str(exc),
+        )
+
+
 def _incomplete_components(operation_id: str, components: tuple[str, ...]) -> list[str]:
     now = datetime.now(timezone.utc)
     result = supabase.table("component_snapshots")\
@@ -188,6 +227,8 @@ async def start_analysis(operation_id: str):
         _mark_operation_failed(operation_id, message)
         logger.error("pipeline.phase1_failed", operation_id=operation_id, results=phase1_results)
         return {"operation_id": operation_id, "status": "failed", "error": message}
+
+    _update_operation_razao_social(operation_id)
 
     phase2_results = await asyncio.gather(
         _run_component(run_contratos, operation_id),
