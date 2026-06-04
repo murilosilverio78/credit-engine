@@ -25,7 +25,8 @@ export default function UsersSettingsPage() {
 
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
-      const response = await fetch("/api/auth/register", {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://credit-engine-production-a0a1.up.railway.app";
+      const response = await fetch(`${apiUrl}/api/v1/auth/register`, {
         body: JSON.stringify({ email, name, password, role }),
         headers: {
           "Content-Type": "application/json",
