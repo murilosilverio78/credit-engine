@@ -537,9 +537,8 @@ def sanctions_and_docs_annex(snapshots: dict[str, dict[str, Any]]) -> str:
             [
                 ("Nível de risco", web.get("nivel_risco")),
                 ("Nível", web.get("nivel")),
-                ("Score reputação", web.get("score_reputacao")),
             ],
-            3,
+            2,
         )
     )
     parts.append(paragraph(web.get("resumo"), "Resumo nao disponivel."))
