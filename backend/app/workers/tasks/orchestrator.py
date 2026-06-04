@@ -386,9 +386,9 @@ async def _complete_analysis(operation_id: str):
     }
     rating = str(data["rating"] or "").upper()
     valor = _as_float(operation.get("valor_solicitado"))
-    prazo_dias = _as_int(operation.get("prazo_dias"))
+    prazo_dias = operation.get("prazo_dias")
 
-    if rating in {"A", "B", "C", "D"} and valor > 0 and prazo_dias > 0:
+    if rating in {"A", "B", "C", "D"} and valor > 0 and prazo_dias and prazo_dias > 0:
         try:
             from app.services.pricing_engine import compute_taxa
 
