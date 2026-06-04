@@ -3,12 +3,63 @@ BaseComponentTask: classe base para todos os workers de consulta.
 Gerencia: snapshot lifecycle, cache, auditoria, erro handling.
 """
 import time
-from typing import Callable
-from app.core.config import settings
+from typing import Callable, TypeVar
+
+import httpx
 from app.utils.encoding import fix_dict_encoding
 import structlog
 
 logger = structlog.get_logger()
+
+T = TypeVar("T")
+SNAPSHOT_WRITE_RETRY_DELAYS = (0.2, 0.5)
+
+
+def _is_transient_connection_error(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    seen: set[int] = set()
+
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, (httpx.RemoteProtocolError, httpx.ConnectError)):
+            return True
+        if "Server disconnected" in str(current):
+            return True
+        current = current.__cause__ or current.__context__
+
+    return False
+
+
+def _execute_snapshot_write(
+    operation_id: str,
+    component: str,
+    action: str,
+    write: Callable[[], T],
+) -> T:
+    for attempt in range(len(SNAPSHOT_WRITE_RETRY_DELAYS) + 1):
+        try:
+            return write()
+        except Exception as exc:
+            should_retry = (
+                _is_transient_connection_error(exc)
+                and attempt < len(SNAPSHOT_WRITE_RETRY_DELAYS)
+            )
+            if not should_retry:
+                raise
+
+            delay = SNAPSHOT_WRITE_RETRY_DELAYS[attempt]
+            logger.warning(
+                "snapshot.write_retry",
+                operation_id=operation_id,
+                component=component,
+                action=action,
+                attempt=attempt + 1,
+                delay_seconds=delay,
+                error=str(exc),
+            )
+            time.sleep(delay)
+
+    raise RuntimeError("snapshot write retry loop exhausted")
 
 
 class BaseComponentTask:
@@ -45,19 +96,29 @@ class BaseComponentTask:
         if cached:
             cached = fix_dict_encoding(cached)
             logger.info("component.cache_hit", component=component, cnpj=cnpj)
-            snap_svc.save_result(
-                operation_id=operation_id,
-                component=component,
-                raw_result=cached,
-                parsed_result=cached,
-                status="completed",
-                duration_ms=0,
-                from_cache=True,
+            _execute_snapshot_write(
+                operation_id,
+                component,
+                "save_result_cache_hit",
+                lambda: snap_svc.save_result(
+                    operation_id=operation_id,
+                    component=component,
+                    raw_result=cached,
+                    parsed_result=cached,
+                    status="completed",
+                    duration_ms=0,
+                    from_cache=True,
+                ),
             )
             return {"operation_id": operation_id, "component": component, "cached": True}
 
         # Marca como running
-        snap_svc.mark_running(operation_id, component)
+        _execute_snapshot_write(
+            operation_id,
+            component,
+            "mark_running",
+            lambda: snap_svc.mark_running(operation_id, component),
+        )
         audit_svc.log(operation_id, "component_started", payload={"component": component})
 
         start = time.time()
@@ -71,13 +132,18 @@ class BaseComponentTask:
             result = fix_dict_encoding(result)
             duration_ms = int((time.time() - start) * 1000)
 
-            snap_svc.save_result(
-                operation_id=operation_id,
-                component=component,
-                raw_result=result,
-                parsed_result=result,
-                status="completed",
-                duration_ms=duration_ms,
+            _execute_snapshot_write(
+                operation_id,
+                component,
+                "save_result_completed",
+                lambda: snap_svc.save_result(
+                    operation_id=operation_id,
+                    component=component,
+                    raw_result=result,
+                    parsed_result=result,
+                    status="completed",
+                    duration_ms=duration_ms,
+                ),
             )
 
             # Salva no cache
@@ -100,27 +166,33 @@ class BaseComponentTask:
 
         except Exception as exc:
             duration_ms = int((time.time() - start) * 1000)
+            error_message = str(exc)
             logger.error(
                 "component.failed",
                 operation_id=operation_id,
                 component=component,
-                error=str(exc),
+                error=error_message,
             )
 
-            snap_svc.save_result(
-                operation_id=operation_id,
-                component=component,
-                raw_result=None,
-                parsed_result=None,
-                status="failed",
-                duration_ms=duration_ms,
-                error_message=str(exc),
+            _execute_snapshot_write(
+                operation_id,
+                component,
+                "save_result_failed",
+                lambda: snap_svc.save_result(
+                    operation_id=operation_id,
+                    component=component,
+                    raw_result=None,
+                    parsed_result=None,
+                    status="failed",
+                    duration_ms=duration_ms,
+                    error_message=error_message,
+                ),
             )
 
             audit_svc.log(
                 operation_id,
                 "component_failed",
-                payload={"component": component, "error": str(exc)},
+                payload={"component": component, "error": error_message},
             )
 
             # Propaga; o orquestrador trata falha por componente.
