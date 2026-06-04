@@ -48,6 +48,14 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         acordos.extend(data)
         pagina += 1
 
+    logger.info(
+        "_pagination",
+        component="acordos_leniencia",
+        paginas=pagina - 1,
+        registros=len(acordos),
+        elapsed_s=round(time.monotonic() - started, 1),
+    )
+
     return {
         "possui_acordo": len(acordos) > 0,
         "total_acordos": len(acordos),

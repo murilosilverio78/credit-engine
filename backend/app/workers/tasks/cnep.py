@@ -47,6 +47,14 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         registros.extend(data)
         pagina += 1
 
+    logger.info(
+        "_pagination",
+        component="cnep",
+        paginas=pagina - 1,
+        registros=len(registros),
+        elapsed_s=round(time.monotonic() - started, 1),
+    )
+
     return {
         "possui_sancao": len(registros) > 0,
         "total_registros": len(registros),
