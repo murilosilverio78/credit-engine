@@ -1082,11 +1082,23 @@ def consolidar_score(
     operacao = operacao or {}
     bloqueios = gates_deterministicos(snapshots)
     if bloqueios:
+        dimensoes = {
+            dim: _dimension(
+                20,
+                peso,
+                bloqueios,
+                bloqueios[0],
+                bloqueios,
+                fonte="gate",
+                nivel="Critico",
+            )
+            for dim, peso in PESOS_MERITO.items()
+        }
         parecer_estruturado = _parecer_estruturado(
             20,
             "E",
             20,
-            {},
+            dimensoes,
             {"fator": 1.00, "haircuts": [], "flags": []},
             [],
             bloqueios,
@@ -1099,7 +1111,7 @@ def consolidar_score(
             "fator_regularidade": 1.00,
             "limite_sugerido_pct_contrato": LIMITE_PCT_CONTRATO,
             "limite_aprovado_rs": 0.0,
-            "dimensoes": {},
+            "dimensoes": dimensoes,
             "regularidade": {"fator": 1.00, "haircuts": [], "flags": []},
             "bloqueios": bloqueios,
             "pontos_positivos": [],

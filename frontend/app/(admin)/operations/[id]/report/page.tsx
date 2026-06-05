@@ -161,10 +161,21 @@ function decodedValue<T>(value: T): T {
   return value;
 }
 
-function stringValue(value: unknown, fallback = "—") {
-  return value === null || value === undefined || value === ""
-    ? fallback
-    : String(value);
+function stringValue(value: unknown, fallback = "—"): string {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (Array.isArray(value)) {
+    const joined = value.map((v) => stringValue(v, "")).filter(Boolean).join("; ");
+    return joined || fallback;
+  }
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const readable =
+      obj.nome ?? obj.nomeExibicao ?? obj.descricaoResumida ??
+      obj.descricaoPortal ?? obj.cnpjFormatado ?? obj.codigoFormatado ??
+      obj.descricao ?? Object.values(obj)[0];
+    return stringValue(readable, fallback);
+  }
+  return String(value);
 }
 
 function numberValue(value: unknown) {
