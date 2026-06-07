@@ -245,6 +245,14 @@ async def resolve_escalation(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
+    user_role = current_user.get("role") or current_user.get("alcada") or ""
+    allowed_roles = {"gerente", "diretor", "comite"}
+    if user_role not in allowed_roles:
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas gerentes e diretores podem resolver escaladas",
+        )
+
     justificativa = (payload.justificativa or "").strip()
     if payload.action == "escalation_rejected" and len(justificativa) < 10:
         raise HTTPException(status_code=400, detail="Justificativa obrigatória com ao menos 10 caracteres")

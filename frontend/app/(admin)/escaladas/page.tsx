@@ -5,6 +5,7 @@ import { ArrowUpCircle, Check, ExternalLink, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { useSession } from "@/hooks/use-session";
 import { getPendingEscaladas, resolveEscalation } from "@/lib/api";
 import { formatTaxaAm } from "@/lib/format";
 import type { EscaladaPendente, Rating, UserRole } from "@/lib/types";
@@ -53,7 +54,11 @@ function cardBorder(role: UserRole | null) {
   return "";
 }
 
-function EscaladaCard({ item }: { item: EscaladaPendente }) {
+function canResolveEscalada(role: string | undefined) {
+  return role === "gerente" || role === "diretor" || role === "comite";
+}
+
+function EscaladaCard({ canResolve, item }: { canResolve: boolean; item: EscaladaPendente }) {
   const queryClient = useQueryClient();
   const [rejecting, setRejecting] = useState(false);
   const [justificativa, setJustificativa] = useState("");
@@ -142,28 +147,30 @@ function EscaladaCard({ item }: { item: EscaladaPendente }) {
           <ExternalLink aria-hidden="true" className="h-3 w-3" />
           ver operação
         </Link>
-        <div className="flex gap-2">
-          <button
-            className="flex h-8 items-center gap-1 rounded-md border-[0.5px] border-red-200 bg-red-50 px-3 text-[11px] font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
-            disabled={mutation.isPending}
-            onClick={() => setRejecting(true)}
-            type="button"
-          >
-            <X aria-hidden="true" className="h-3 w-3" />
-            Rejeitar
-          </button>
-          <button
-            className="flex h-8 items-center gap-1 rounded-md border-[0.5px] border-emerald-200 bg-emerald-50 px-3 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
-            disabled={mutation.isPending}
-            onClick={() => mutation.mutate("approved")}
-            type="button"
-          >
-            <Check aria-hidden="true" className="h-3 w-3" />
-            Aprovar escalada
-          </button>
-        </div>
+        {canResolve ? (
+          <div className="flex gap-2">
+            <button
+              className="flex h-8 items-center gap-1 rounded-md border-[0.5px] border-red-200 bg-red-50 px-3 text-[11px] font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+              disabled={mutation.isPending}
+              onClick={() => setRejecting(true)}
+              type="button"
+            >
+              <X aria-hidden="true" className="h-3 w-3" />
+              Rejeitar
+            </button>
+            <button
+              className="flex h-8 items-center gap-1 rounded-md border-[0.5px] border-emerald-200 bg-emerald-50 px-3 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+              disabled={mutation.isPending}
+              onClick={() => mutation.mutate("approved")}
+              type="button"
+            >
+              <Check aria-hidden="true" className="h-3 w-3" />
+              Aprovar escalada
+            </button>
+          </div>
+        ) : null}
       </div>
-      {rejecting ? (
+      {canResolve && rejecting ? (
         <div className="mt-3 rounded-md border-[0.5px] border-border bg-muted/40 p-3">
           <textarea
             className="h-16 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring"
@@ -187,6 +194,7 @@ function EscaladaCard({ item }: { item: EscaladaPendente }) {
 }
 
 export default function EscaladasPage() {
+  const { session } = useSession();
   const query = useQuery({
     queryFn: getPendingEscaladas,
     queryKey: ["escaladas", "pendentes"],
@@ -194,6 +202,7 @@ export default function EscaladasPage() {
     refetchIntervalInBackground: true,
   });
   const items = query.data ?? [];
+  const canResolve = canResolveEscalada(session?.user.role);
 
   return (
     <div className="flex min-h-dvh flex-col bg-muted/40">
@@ -216,7 +225,7 @@ export default function EscaladasPage() {
             Nenhuma escalada pendente.
           </div>
         ) : (
-          items.map((item) => <EscaladaCard item={item} key={item.id} />)
+          items.map((item) => <EscaladaCard canResolve={canResolve} item={item} key={item.id} />)
         )}
       </section>
     </div>
