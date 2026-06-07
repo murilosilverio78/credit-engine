@@ -180,14 +180,13 @@ export interface EscaladaPendente {
   operation_id: string;
   cnpj: string;
   razao_social: string | null;
-  rating_momento: Rating | null;
-  score_momento: number | null;
-  taxa_sugerida?: number | null;
-  valor_operacao: number | null;
+  rating: Rating | null;
+  score: number | null;
+  valor_solicitado: number | null;
   requested_by: string | null;
-  requested_name?: string | null;
+  requested_by_name: string | null;
   requested_role: UserRole | null;
-  created_at: string;
+  requested_at: string;
   justificativa: string | null;
 }
 

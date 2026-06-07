@@ -7,7 +7,6 @@ import { useState } from "react";
 
 import { useSession } from "@/hooks/use-session";
 import { getPendingEscaladas, resolveEscalation } from "@/lib/api";
-import { formatTaxaAm } from "@/lib/format";
 import type { EscaladaPendente, Rating, UserRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -104,34 +103,34 @@ function EscaladaCard({ canResolve, item }: { canResolve: boolean; item: Escalad
             {item.razao_social || formatCnpj(item.cnpj)}
           </p>
         </div>
-        {item.rating_momento ? (
-          <span className={cn("rounded px-2 py-0.5 text-[11px] font-medium", ratingColors[item.rating_momento])}>
-            {item.rating_momento}
+        {item.rating ? (
+          <span className={cn("rounded px-2 py-0.5 text-[11px] font-medium", ratingColors[item.rating])}>
+            {item.rating}
           </span>
         ) : null}
       </div>
       <div className="mb-3 grid grid-cols-4 gap-2">
         <div className="rounded-md bg-muted px-2.5 py-2">
           <p className="text-[10px] text-muted-foreground">Valor</p>
-          <p className="font-mono text-[13px] text-foreground">{formatCurrency(item.valor_operacao)}</p>
+          <p className="font-mono text-[13px] text-foreground">{formatCurrency(item.valor_solicitado)}</p>
         </div>
         <div className="rounded-md bg-muted px-2.5 py-2">
           <p className="text-[10px] text-muted-foreground">Score</p>
-          <p className="font-mono text-[13px] text-foreground">{item.score_momento ?? "—"}</p>
+          <p className="font-mono text-[13px] text-foreground">{item.score ?? "—"}</p>
         </div>
         <div className="rounded-md bg-muted px-2.5 py-2">
           <p className="text-[10px] text-muted-foreground">Taxa</p>
-          <p className="font-mono text-[13px] text-foreground">{formatTaxaAm(item.taxa_sugerida)}</p>
+          <p className="font-mono text-[13px] text-foreground">—</p>
         </div>
         <div className="rounded-md bg-muted px-2.5 py-2">
           <p className="text-[10px] text-muted-foreground">Solicitante</p>
           <p className="truncate text-[13px] text-foreground">
-            {item.requested_name || item.requested_by || "—"}
+            {item.requested_by_name || "—"}
           </p>
         </div>
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
-        {item.requested_role ?? "—"} · {relativeTime(item.created_at)}
+        {item.requested_role ?? "—"} · {relativeTime(item.requested_at)}
       </p>
       {item.justificativa ? (
         <p className="mb-3 text-xs leading-5 text-muted-foreground">
