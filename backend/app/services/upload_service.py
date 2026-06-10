@@ -139,6 +139,21 @@ class UploadService:
                     certificate_cnpj=certificate_cnpj,
                     operation_cnpj=operation_cnpj,
                 )
+            else:
+                certificate_type = extraction.get("tipo_certidao")
+                if certificate_type and certificate_type != document_type:
+                    snapshot_status = "failed"
+                    error_message = (
+                        f"Tipo de certidÃ£o incorreto: documento enviado Ã© '{certificate_type}' "
+                        f"mas o slot esperado Ã© '{document_type}'"
+                    )
+                    logger.warning(
+                        "upload_task.document_type_mismatch",
+                        operation_id=operation_id,
+                        task_id=task_id,
+                        certificate_type=certificate_type,
+                        expected_type=document_type,
+                    )
         except Exception as exc:
             logger.warning(
                 "upload_task.certificate_extraction_failed",
