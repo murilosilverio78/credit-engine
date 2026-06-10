@@ -31,7 +31,8 @@ class UploadService:
         query = supabase.table("upload_tasks")\
             .select(
                 "id,operation_id,document_type,token,status,notified_at,"
-                "completed_at,expires_at,created_at,operations(cnpj, razao_social)"
+                "completed_at,expires_at,created_at,error_message,"
+                "operations(cnpj, razao_social)"
             )
         if operation_id:
             query = query.eq("operation_id", operation_id)
@@ -147,10 +148,12 @@ class UploadService:
                 error=str(exc),
             )
 
-        supabase.table("upload_tasks").update({
-            "status": "completed",
+        task_update = {
+            "status": "failed" if snapshot_status == "failed" else "completed",
             "completed_at": completed_at,
-        }).eq("id", task_id).execute()
+            "error_message": error_message,
+        }
+        supabase.table("upload_tasks").update(task_update).eq("id", task_id).execute()
 
         supabase.table("documents").insert({
             "operation_id": operation_id,
@@ -249,6 +252,7 @@ Se não conseguir extrair algum campo, use null.""",
             "status": "pending",
             "completed_at": None,
             "file_content": None,
+            "error_message": None,
         }).eq("id", task["id"]).execute()
         supabase.table("component_snapshots").update({
             "status": "waiting_upload",

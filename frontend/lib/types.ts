@@ -138,8 +138,9 @@ export interface UploadTask {
   operation_id: string;
   document_type: UploadDocumentType;
   token: string;
-  status: "pending" | "completed" | "expired";
+  status: "pending" | "completed" | "expired" | "failed";
   completed_at: string | null;
+  error_message?: string;
   expires_at: string;
 }
 

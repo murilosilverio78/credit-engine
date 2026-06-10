@@ -458,7 +458,8 @@ function ManualReviewView({
   });
   const uploads = uploadsQuery.data ?? [];
   const completeCount = uploads.filter((upload) => upload.status === "completed").length;
-  const allCompleted = uploads.length > 0 && completeCount === uploads.length;
+  const allCompleted =
+    uploads.length > 0 && uploads.every((upload) => upload.status === "completed");
   const progress = uploads.length ? (completeCount / uploads.length) * 100 : 0;
 
   return (
@@ -504,6 +505,7 @@ function ManualReviewView({
           <div className="flex flex-col gap-2.5">
             {uploads.map((task) => {
               const completed = task.status === "completed";
+              const failed = task.status === "failed";
               const details = certificateDetails[task.document_type];
               const uploading =
                 uploadMutation.isPending &&
@@ -516,9 +518,13 @@ function ManualReviewView({
                 <div
                   className={cn(
                     "flex items-center gap-3 rounded-md border-[0.5px] border-border bg-muted/40 px-3 py-2.5",
-                    completed
-                      ? "rounded-l-none border-l-2 border-l-emerald-500 bg-background"
-                      : "rounded-l-none border-l-2 border-l-amber-500",
+                    completed &&
+                      "rounded-l-none border-l-2 border-l-emerald-500 bg-background",
+                    failed &&
+                      "rounded-l-none border-l-2 border-l-red-500 bg-background",
+                    !completed &&
+                      !failed &&
+                      "rounded-l-none border-l-2 border-l-amber-500",
                   )}
                   key={task.id}
                 >
@@ -526,10 +532,13 @@ function ManualReviewView({
                     className={cn(
                       "flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground",
                       completed && "bg-emerald-100 text-emerald-700",
+                      failed && "bg-red-100 text-red-700",
                     )}
                   >
                     {completed ? (
                       <Check className="h-4 w-4" />
+                    ) : failed ? (
+                      <XCircle className="h-4 w-4" />
                     ) : (
                       <FileUp className="h-4 w-4" />
                     )}
@@ -555,19 +564,38 @@ function ManualReviewView({
                         "mt-0.5 text-[10px]",
                         completed
                           ? "font-mono text-emerald-700"
-                          : "text-amber-700",
+                          : failed
+                            ? "font-mono text-red-700"
+                            : "text-amber-700",
                       )}
                     >
-                      {completed
+                      {completed || failed
                         ? filenames[task.id] || "PDF enviado"
                         : "aguardando upload"}
                     </p>
+                    {failed ? (
+                      <p className="mt-0.5 text-[11px] text-red-700">
+                        {task.error_message ||
+                          "CNPJ da certidão não corresponde ao CNPJ da operação"}
+                      </p>
+                    ) : null}
                   </div>
-                  {completed ? (
+                  {completed || failed ? (
                     <div className="flex items-center gap-2">
-                      <span className="flex h-7 items-center gap-1 rounded-md border border-emerald-200 px-3 text-[11px] text-emerald-700">
-                        <Check className="h-3 w-3" />
-                        enviado
+                      <span
+                        className={cn(
+                          "flex h-7 items-center gap-1 rounded-md border px-3 text-[11px]",
+                          completed
+                            ? "border-emerald-200 text-emerald-700"
+                            : "border-red-200 text-red-700",
+                        )}
+                      >
+                        {completed ? (
+                          <Check className="h-3 w-3" />
+                        ) : (
+                          <XCircle className="h-3 w-3" />
+                        )}
+                        {completed ? "enviado" : "CNPJ inválido"}
                       </span>
                       <button
                         className="flex h-7 items-center gap-1 rounded-md border border-red-200 px-3 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50"
