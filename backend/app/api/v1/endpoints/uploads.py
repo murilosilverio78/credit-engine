@@ -49,7 +49,7 @@ async def remove_upload(token: str):
     task = await upload_svc.get_by_token(token)
     if not task:
         raise HTTPException(status_code=404, detail="Token invalido ou expirado")
-    if task["status"] != "completed":
+    if task["status"] not in ("completed", "failed"):
         raise HTTPException(status_code=409, detail="Upload ainda nao concluido")
 
     await upload_svc.reset(task)

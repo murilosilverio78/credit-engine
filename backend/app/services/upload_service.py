@@ -144,8 +144,8 @@ class UploadService:
                 if certificate_type and certificate_type != document_type:
                     snapshot_status = "failed"
                     error_message = (
-                        f"Tipo de certidÃ£o incorreto: documento enviado Ã© '{certificate_type}' "
-                        f"mas o slot esperado Ã© '{document_type}'"
+                        f"Tipo de certidao incorreto: documento enviado e '{certificate_type}' "
+                        f"mas o slot esperado e '{document_type}'"
                     )
                     logger.warning(
                         "upload_task.document_type_mismatch",
