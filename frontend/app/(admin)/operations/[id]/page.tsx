@@ -642,7 +642,9 @@ function ManualReviewView({
         )}
         {uploadMutation.isError ? (
           <p className="mt-3 text-xs text-red-700" role="alert">
-            Nao foi possivel enviar o PDF. Verifique o arquivo e tente novamente.
+            {uploadMutation.error instanceof ApiError && uploadMutation.error.message
+              ? uploadMutation.error.message
+              : "Nao foi possivel enviar o PDF. Verifique o arquivo e tente novamente."}
           </p>
         ) : null}
         {removeMutation.isError ? (
