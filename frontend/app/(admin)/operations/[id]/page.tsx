@@ -137,11 +137,12 @@ function formatDuration(durationMs: number | null | undefined) {
   })}s`;
 }
 
-function formatValue(value: unknown) {
-  if (value === null || value === undefined || value === "") {
-    return "—";
+function formatValue(value: unknown, type?: string): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (type === "taxa" && (typeof value === "number" || typeof value === "string")) {
+    const num = typeof value === "string" ? parseFloat(value) : value;
+    if (!isNaN(num)) return formatTaxaAm(num);
   }
-
   return String(value);
 }
 
@@ -1046,8 +1047,8 @@ function CompletedView({
                     {override.override_type}
                   </td>
                   <td className="border-b-[0.5px] border-border px-3 py-2 font-mono">
-                    {formatValue(override.previous_value)} →{" "}
-                    {formatValue(override.new_value)}
+                    {formatValue(override.previous_value, override.override_type)} →{" "}
+                    {formatValue(override.new_value, override.override_type)}
                   </td>
                   <td className="border-b-[0.5px] border-border px-3 py-2">
                     {override.justificativa}
