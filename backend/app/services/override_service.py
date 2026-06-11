@@ -374,7 +374,7 @@ class OverrideService:
             if reviewer_role in ALCADA_HIERARCHY
             else 0
         )
-        if reviewer_idx < required_idx:
+        if decision == "approved" and reviewer_idx < required_idx:
             raise ValueError(
                 f"Alçada insuficiente: override requer '{required}', "
                 f"revisor tem '{reviewer_role}'"
