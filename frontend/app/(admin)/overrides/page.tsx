@@ -3,7 +3,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ExternalLink, Users, X } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useSession } from "@/hooks/use-session";
@@ -284,7 +283,6 @@ function PendingOverrideCard({ canReview, override, onReviewed }: PendingCardPro
 
 export default function OverridesPage() {
   const queryClient = useQueryClient();
-  const router = useRouter();
   const { session } = useSession();
   const [toast, setToast] = useState("");
   const overridesQuery = useQuery({
@@ -315,7 +313,7 @@ export default function OverridesPage() {
         items.filter((item) => item.id !== reviewedOverride.id),
     );
     void queryClient.invalidateQueries({ queryKey: ["overrides", "pending"] });
-    router.refresh();
+    void queryClient.invalidateQueries({ queryKey: ["operations"] });
     setToast(
       decision === "approved"
         ? "Override aprovado com sucesso."
