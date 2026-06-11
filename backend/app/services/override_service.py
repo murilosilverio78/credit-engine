@@ -11,6 +11,7 @@ from app.services.pricing_engine import compute_margem_subordinado
 
 audit = AuditService()
 SYSTEM_ACTOR_ID = "00000000-0000-0000-0000-000000000001"
+ALCADA_HIERARCHY = ["analista", "gerente", "diretor", "comite"]
 
 
 class OverrideService:
@@ -339,6 +340,7 @@ class OverrideService:
         override_id: str,
         decision: str,
         reviewed_by: str,
+        reviewer_role: Optional[str] = None,
         review_comment: Optional[str] = None,
         ip_address: Optional[str] = None,
     ) -> dict:
@@ -360,6 +362,24 @@ class OverrideService:
             raise LookupError("Override nao encontrado")
         if override.get("status") != "pending":
             raise ValueError("Somente overrides pendentes podem ser revisados")
+
+        required = override.get("alcada_required", "analista")
+        required_idx = (
+            ALCADA_HIERARCHY.index(required)
+            if required in ALCADA_HIERARCHY
+            else 0
+        )
+        reviewer_idx = (
+            ALCADA_HIERARCHY.index(reviewer_role)
+            if reviewer_role in ALCADA_HIERARCHY
+            else 0
+        )
+        if reviewer_idx < required_idx:
+            raise ValueError(
+                f"Alçada insuficiente: override requer '{required}', "
+                f"revisor tem '{reviewer_role}'"
+            )
+
         if override.get("requested_by") == reviewed_by:
             raise ValueError("O revisor deve ser diferente do solicitante")
 
@@ -386,7 +406,7 @@ class OverrideService:
             operation_id=operation_id,
             action="override_applied",
             actor_id=reviewed_by,
-            actor_type="analista",
+            actor_type=reviewer_role or "analista",
             ip_address=ip_address,
             override_reason=override.get("justificativa"),
             previous_value={override["override_type"]: override.get("previous_value")},

@@ -6,11 +6,9 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { reviewOverride, getPendingOverrides } from "@/lib/api";
+import { formatTaxaAm } from "@/lib/format";
 import type { Override, UserRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
-
-const reviewInputClassName =
-  "h-[30px] rounded-md border border-input bg-background px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring";
 
 function formatCnpj(cnpj: string) {
   const digits = cnpj.replace(/\D/g, "");
@@ -31,10 +29,12 @@ function formatDate(date: string) {
     .replace(",", " às");
 }
 
-function formatValue(value: unknown) {
-  return value === null || value === undefined || value === ""
-    ? "—"
-    : String(value);
+function formatValue(type: string, value: unknown): string {
+  if (type === "taxa" && (typeof value === "number" || typeof value === "string")) {
+    const num = typeof value === "string" ? parseFloat(value) : value;
+    if (!isNaN(num)) return formatTaxaAm(num);
+  }
+  return String(value ?? "—");
 }
 
 function alcadaLabel(alcada: UserRole) {
@@ -69,8 +69,6 @@ interface PendingCardProps {
 }
 
 function PendingOverrideCard({ override, onReviewed }: PendingCardProps) {
-  const [reviewedBy, setReviewedBy] = useState("");
-  const [reviewerError, setReviewerError] = useState("");
   const [rejectOpen, setRejectOpen] = useState(false);
   const [reviewComment, setReviewComment] = useState("");
   const [commentError, setCommentError] = useState("");
@@ -85,31 +83,16 @@ function PendingOverrideCard({ override, onReviewed }: PendingCardProps) {
       reviewOverride(override.operation_id, override.id, {
         decision,
         review_comment: comment,
-        reviewed_by: reviewedBy.trim(),
       }),
     onSuccess: (_, variables) => onReviewed(override, variables.decision),
   });
 
-  function ensureReviewer() {
-    if (!reviewedBy.trim()) {
-      setReviewerError("Informe seu nome para revisar.");
-      return false;
-    }
-
-    setReviewerError("");
-    return true;
-  }
-
   function approve() {
-    if (ensureReviewer()) {
-      mutation.mutate({ comment: null, decision: "approved" });
-    }
+    mutation.mutate({ comment: null, decision: "approved" });
   }
 
   function openReject() {
-    if (ensureReviewer()) {
-      setRejectOpen(true);
-    }
+    setRejectOpen(true);
   }
 
   function reject() {
@@ -163,11 +146,11 @@ function PendingOverrideCard({ override, onReviewed }: PendingCardProps) {
 
       <div className="mb-2.5 flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-[13px]">
         <span className="text-muted-foreground line-through">
-          {formatValue(override.previous_value)}
+          {formatValue(override.override_type, override.previous_value)}
         </span>
         <span className="text-[11px] text-muted-foreground">→</span>
         <span className="font-medium text-foreground">
-          {formatValue(override.new_value)}
+          {formatValue(override.override_type, override.new_value)}
         </span>
       </div>
 
@@ -192,18 +175,6 @@ function PendingOverrideCard({ override, onReviewed }: PendingCardProps) {
         </div>
         <div>
           <div className="flex items-center gap-2">
-            <input
-              aria-invalid={Boolean(reviewerError)}
-              className={cn(reviewInputClassName, "w-[130px]")}
-              onChange={(event) => {
-                setReviewedBy(event.target.value);
-                if (event.target.value.trim()) {
-                  setReviewerError("");
-                }
-              }}
-              placeholder="Seu nome..."
-              value={reviewedBy}
-            />
             <button
               className="flex h-[30px] items-center gap-1 rounded-md border-[0.5px] border-red-200 bg-red-50 px-3 text-[11px] font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
               disabled={mutation.isPending}
@@ -223,11 +194,6 @@ function PendingOverrideCard({ override, onReviewed }: PendingCardProps) {
               Aprovar
             </button>
           </div>
-          {reviewerError ? (
-            <p className="mt-1 text-right text-[11px] text-red-700" role="alert">
-              {reviewerError}
-            </p>
-          ) : null}
         </div>
       </footer>
 

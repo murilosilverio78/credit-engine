@@ -18,7 +18,6 @@ class OverrideCreateInput(BaseModel):
 
 class OverrideReviewInput(BaseModel):
     decision: Literal["approved", "rejected"]
-    reviewed_by: str = Field(min_length=1)
     review_comment: Optional[str] = None
 
 
@@ -83,6 +82,7 @@ async def review_override(
     override_id: str,
     payload: OverrideReviewInput,
     request: Request,
+    current_user: dict = Depends(get_current_user),
 ):
     """Aprova ou rejeita override sujeito a alcada superior."""
     from app.services.override_service import OverrideService
@@ -93,7 +93,8 @@ async def review_override(
             operation_id=operation_id,
             override_id=override_id,
             decision=payload.decision,
-            reviewed_by=payload.reviewed_by,
+            reviewed_by=current_user["id"],
+            reviewer_role=current_user.get("role") or current_user.get("alcada"),
             review_comment=payload.review_comment,
             ip_address=request.client.host if request.client else None,
         )

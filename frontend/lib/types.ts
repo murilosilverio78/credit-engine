@@ -90,7 +90,6 @@ export interface OverrideInput {
 
 export interface OverrideReviewInput {
   decision: "approved" | "rejected";
-  reviewed_by: string;
   review_comment?: string | null;
 }
 
