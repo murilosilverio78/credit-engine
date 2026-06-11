@@ -102,10 +102,10 @@ export async function verifySessionJwt(token?: string | null): Promise<SessionPa
 
 export function roleToAlcada(role: UserRole): Alcada {
   if (role === "diretor") {
-    return "committee";
+    return "diretor";
   }
   if (role === "gerente") {
-    return "manager";
+    return "gerente";
   }
-  return "analyst";
+  return "analista";
 }

@@ -21,7 +21,6 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { ApprovalActions } from "@/components/approval-actions";
-import { useAlcada } from "@/hooks/use-alcada";
 import { useSession } from "@/hooks/use-session";
 import {
   ApiError,
@@ -33,13 +32,13 @@ import {
   removeCertificateUpload,
   resumeAfterUploads,
   uploadCertificate,
+  validateTaxaOverride,
 } from "@/lib/api";
 import { formatTaxaAm } from "@/lib/format";
 import type {
   Component,
   ComponentSnapshot,
   OperationDetails,
-  OverrideType,
   Rating,
   UploadDocumentType,
   UploadTask,
@@ -53,14 +52,6 @@ const ratingColors: Record<Rating, string> = {
   D: "bg-[#FAECE7] text-[#712B13]",
   E: "bg-[#FCEBEB] text-[#791F1F]",
 };
-
-const overrideTypes: OverrideType[] = [
-  "rating",
-  "score",
-  "taxa",
-  "limite",
-  "status_operacao",
-];
 
 const certificateDetails: Record<
   UploadDocumentType,
@@ -84,10 +75,9 @@ const certificateDetails: Record<
 };
 
 const overrideSchema = z.object({
-  override_type: z.enum(["rating", "score", "taxa", "limite", "status_operacao"]),
+  override_type: z.literal("taxa"),
   previous_value: z.string().min(1, "Informe o valor anterior."),
-  new_value: z.string().min(1, "Informe o novo valor."),
-  requested_by: z.string().min(1, "Informe o solicitante."),
+  taxa_proposta: z.string().min(1, "Informe a taxa proposta."),
   justificativa: z
     .string()
     .min(10, "A justificativa deve conter pelo menos 10 caracteres."),
@@ -155,6 +145,29 @@ function formatValue(value: unknown) {
   return String(value);
 }
 
+function taxaPercentInput(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  return (value * 100).toFixed(2);
+}
+
+function parseTaxaPercent(value: string) {
+  const normalized = value.replace(",", ".");
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric / 100 : null;
+}
+
+function formatTaxaPercent(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  return (value * 100).toLocaleString("pt-BR", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  });
+}
+
 function asParsedResult(value: unknown): ParsedResult {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as ParsedResult)
@@ -195,19 +208,8 @@ function certificateStatus(component: PipelineComponent) {
   }
 }
 
-function currentValue(operation: OperationDetails, overrideType: OverrideType) {
-  switch (overrideType) {
-    case "rating":
-      return operation.rating ?? "";
-    case "score":
-      return operation.score?.toString() ?? "";
-    case "taxa":
-      return operation.taxa_sugerida?.toString() ?? "";
-    case "limite":
-      return operation.limite_aprovado?.toString() ?? "";
-    case "status_operacao":
-      return operation.status;
-  }
+function currentTaxaValue(operation: OperationDetails) {
+  return operation.taxa_sugerida?.toString() ?? "";
 }
 
 function pipelineComponents(
@@ -704,7 +706,6 @@ function CompletedView({
 }) {
   const queryClient = useQueryClient();
   const { session } = useSession();
-  const alcada = useAlcada();
   const [confirmation, setConfirmation] = useState("");
   const {
     formState: { errors },
@@ -712,46 +713,41 @@ function CompletedView({
     register,
     reset,
     setValue,
-    watch,
   } = useForm<OverrideFormValues>({
     defaultValues: {
       justificativa: "",
-      new_value: "",
-      override_type: "rating",
-      previous_value: currentValue(operation, "rating"),
-      requested_by: "",
+      override_type: "taxa",
+      previous_value: currentTaxaValue(operation),
+      taxa_proposta: "",
     },
     resolver: zodResolver(overrideSchema),
   });
-  const overrideType = watch("override_type");
-  const newValue = watch("new_value");
-  const requestedBy = watch("requested_by");
-  const operationValue = operation.valor_solicitado ?? operation.limite_aprovado ?? null;
-  const newRating =
-    overrideType === "rating" && ["A", "B", "C", "D", "E"].includes(newValue.toUpperCase())
-      ? (newValue.toUpperCase() as Rating)
-      : undefined;
-  const canSubmitOverride = alcada.podeOverride(operationValue, newRating);
-  const escalationRole = alcada.roleEscalaDest();
+  const currentUserRole = session?.user.role ?? "analista";
   const overridesQuery = useQuery({
     queryFn: () => getOperationOverrides(operationId),
     queryKey: ["operations", operationId, "overrides"],
   });
+  const taxaValidationMutation = useMutation({
+    mutationFn: (taxaProposta: number) =>
+      validateTaxaOverride(operationId, taxaProposta, currentUserRole),
+  });
   const overrideMutation = useMutation({
     mutationFn: (values: OverrideFormValues) =>
       createOverride(operationId, {
-        ...values,
-        escalar: !canSubmitOverride,
+        justificativa: values.justificativa,
+        new_value: parseTaxaPercent(values.taxa_proposta) ?? values.taxa_proposta,
+        override_type: "taxa",
+        previous_value: currentTaxaValue(operation),
       }),
     onSuccess: async () => {
       setConfirmation("Override solicitado com sucesso.");
       reset({
         justificativa: "",
-        new_value: "",
-        override_type: overrideType,
-        previous_value: currentValue(operation, overrideType),
-        requested_by: session?.user.name ?? session?.user.email ?? "",
+        override_type: "taxa",
+        previous_value: currentTaxaValue(operation),
+        taxa_proposta: "",
       });
+      taxaValidationMutation.reset();
       await queryClient.invalidateQueries({
         queryKey: ["operations", operationId, "overrides"],
       });
@@ -759,14 +755,8 @@ function CompletedView({
   });
 
   useEffect(() => {
-    setValue("previous_value", currentValue(operation, overrideType));
-  }, [operation, overrideType, setValue]);
-
-  useEffect(() => {
-    if (session?.user && !requestedBy) {
-      setValue("requested_by", session.user.name || session.user.email);
-    }
-  }, [requestedBy, session?.user, setValue]);
+    setValue("previous_value", currentTaxaValue(operation));
+  }, [operation, setValue]);
 
   const decisionBadge =
     operation.status === "approved"
@@ -943,41 +933,55 @@ function CompletedView({
           overrideMutation.mutate(values);
         })}
       >
+        <input type="hidden" {...register("override_type")} />
+        <input type="hidden" {...register("previous_value")} />
         <div className="mb-2.5 grid grid-cols-2 gap-2.5">
-          <OverrideField label="Tipo" message={errors.override_type?.message}>
-            <select className={fieldClassName} {...register("override_type")}>
-              {overrideTypes.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-          </OverrideField>
           <OverrideField
-            label="Valor anterior"
+            label="Taxa sugerida atual"
             message={errors.previous_value?.message}
           >
             <input
               className={cn(fieldClassName, "font-mono")}
-              {...register("previous_value")}
+              readOnly
+              value={`${taxaPercentInput(operation.taxa_sugerida)}% a.m.`}
             />
           </OverrideField>
-          <OverrideField label="Novo valor" message={errors.new_value?.message}>
+          <OverrideField label="Taxa proposta (% a.m.)" message={errors.taxa_proposta?.message}>
             <input
               className={cn(fieldClassName, "font-mono")}
-              placeholder="Ex: A"
-              {...register("new_value")}
+              inputMode="decimal"
+              placeholder="Ex: 2,15"
+              step="0.01"
+              type="number"
+              {...register("taxa_proposta")}
+              onBlur={(event) => {
+                const taxaProposta = parseTaxaPercent(event.target.value);
+                if (taxaProposta) {
+                  taxaValidationMutation.mutate(taxaProposta);
+                } else {
+                  taxaValidationMutation.reset();
+                }
+              }}
             />
-          </OverrideField>
-          <OverrideField
-            label="Solicitante"
-            message={errors.requested_by?.message}
-          >
-            <input
-              className={fieldClassName}
-              placeholder="Nome do analista"
-              {...register("requested_by")}
-            />
+            {taxaValidationMutation.isPending ? (
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Verificando...
+              </p>
+            ) : taxaValidationMutation.data?.approved ? (
+              <p className="mt-1 text-[11px] text-emerald-700">
+                ✓ Aprovável na sua alçada
+              </p>
+            ) : taxaValidationMutation.data ? (
+              <p className="mt-1 text-[11px] text-amber-700">
+                Taxa mínima para sua alçada:{" "}
+                {formatTaxaPercent(taxaValidationMutation.data.taxa_minima_sua_alcada)}
+                % a.m.
+              </p>
+            ) : taxaValidationMutation.isError ? (
+              <p className="mt-1 text-[11px] text-red-700">
+                Não foi possível validar a taxa.
+              </p>
+            ) : null}
           </OverrideField>
         </div>
         <OverrideField
@@ -990,11 +994,6 @@ function CompletedView({
             {...register("justificativa")}
           />
         </OverrideField>
-        {!canSubmitOverride ? (
-          <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            Este override exige aprovação do {escalationRole ?? "diretor"}.
-          </p>
-        ) : null}
         {confirmation ? (
           <p className="mt-3 text-xs text-emerald-700" role="status">
             {confirmation}

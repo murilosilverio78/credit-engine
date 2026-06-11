@@ -194,6 +194,45 @@ def _solve_taxa(valor: float, prazo_meses: int, params: dict, m: dict) -> float:
     return (lo + hi) / 2
 
 
+def compute_margem_subordinado(
+    taxa_am: float,
+    valor: float,
+    prazo_meses: int,
+    rating: str,
+) -> float:
+    """
+    Calcula a margem mensal resultante do subordinado para uma taxa fixa.
+
+    Reusa o waterfall existente sem rodar o solver de taxa. O fluxo residual
+    positivo/negativo depois da margem alvo do subordinado e convertido em
+    margem mensal incremental sobre a base subordinada media do fluxo.
+    """
+    rating = (rating or "").upper()
+    taxa_am = float(taxa_am or 0)
+    valor = float(valor or 0)
+    prazo_meses = max(int(prazo_meses or 1), 1)
+    params, _, m = _pricing_inputs(rating, valor, prazo_meses)
+    derived = _derive(params, m, valor, prazo_meses)
+    flows, metrics = _build_flow(
+        taxa_am,
+        valor,
+        prazo_meses,
+        params,
+        m,
+        collect_metrics=True,
+    )
+
+    margem_alvo = derived["margem_sub_am"]
+    if margem_alvo <= 0:
+        return 0.0
+
+    saldo_subordinado_total = metrics.custo_sub_rs / margem_alvo
+    if saldo_subordinado_total <= 0:
+        return 0.0
+
+    return (metrics.custo_sub_rs + sum(flows)) / saldo_subordinado_total
+
+
 def compute_taxa(rating: str, valor: float, prazo_meses: int) -> dict:
     """
     Calcula taxa a.m. por fluxo de caixa e Goal Seek via bissecao.

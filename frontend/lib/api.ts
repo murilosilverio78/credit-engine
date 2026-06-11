@@ -11,12 +11,14 @@ import type {
   OperationCreated,
   OperationDetails,
   Override,
+  OverrideCreateResult,
   OverrideInput,
   OverrideReviewInput,
   PaginatedOperations,
   PricingMatrixRow,
   PricingParameter,
   PropostaInput,
+  TaxaOverrideValidation,
   UploadDocumentType,
   UploadResetResult,
   UploadResumeResult,
@@ -180,12 +182,26 @@ export function getOperationOverrides(operationId: string) {
 }
 
 export function createOverride(operationId: string, payload: OverrideInput) {
-  return request<Override>(
+  return request<OverrideCreateResult>(
     `/api/v1/overrides/operations/${operationId}/override`,
     {
       method: "POST",
       body: JSON.stringify(payload),
     },
+  );
+}
+
+export function validateTaxaOverride(
+  operationId: string,
+  taxaProposta: number,
+  role: UserRole,
+) {
+  const params = new URLSearchParams({
+    requesting_role: role,
+    taxa_proposta: String(taxaProposta),
+  });
+  return request<TaxaOverrideValidation>(
+    `/api/v1/overrides/operations/${operationId}/validate-taxa?${params}`,
   );
 }
 

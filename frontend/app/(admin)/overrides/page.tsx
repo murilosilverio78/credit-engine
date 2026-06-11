@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { reviewOverride, getPendingOverrides } from "@/lib/api";
-import type { Alcada, Override } from "@/lib/types";
+import type { Override, UserRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const reviewInputClassName =
@@ -37,28 +37,28 @@ function formatValue(value: unknown) {
     : String(value);
 }
 
-function alcadaLabel(alcada: Alcada) {
-  return alcada === "committee" ? "comitê" : alcada;
+function alcadaLabel(alcada: UserRole) {
+  return alcada;
 }
 
-function alcadaBadge(alcada: Alcada) {
+function alcadaBadge(alcada: UserRole) {
   switch (alcada) {
-    case "committee":
+    case "diretor":
       return "bg-amber-100 text-amber-800";
-    case "manager":
+    case "gerente":
       return "bg-blue-100 text-blue-800";
-    case "analyst":
+    case "analista":
       return "bg-muted text-muted-foreground";
   }
 }
 
-function cardBorder(alcada: Alcada) {
+function cardBorder(alcada: UserRole) {
   switch (alcada) {
-    case "committee":
+    case "diretor":
       return "rounded-l-none border-l-2 border-l-amber-500";
-    case "manager":
+    case "gerente":
       return "rounded-l-none border-l-2 border-l-blue-500";
-    case "analyst":
+    case "analista":
       return "";
   }
 }
@@ -153,7 +153,7 @@ function PendingOverrideCard({ override, onReviewed }: PendingCardProps) {
               alcadaBadge(override.alcada_required),
             )}
           >
-            {override.alcada_required === "committee" ? (
+            {override.alcada_required === "diretor" ? (
               <Users aria-hidden="true" className="h-2.5 w-2.5" />
             ) : null}
             {alcadaLabel(override.alcada_required)}

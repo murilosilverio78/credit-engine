@@ -116,15 +116,15 @@ export function AdminSidebar() {
       ? { color: "bg-red-500", label: "API offline" }
       : { color: "bg-muted-foreground/50", label: "Verificando API" };
   const alcadaLabel =
-    session?.user.alcada === "committee"
-      ? "comitê"
-      : session?.user.alcada === "manager"
+    session?.user.alcada === "diretor"
+      ? "diretor"
+      : session?.user.alcada === "gerente"
         ? "gerente"
         : "analista";
   const alcadaDot =
-    session?.user.alcada === "committee"
+    session?.user.alcada === "diretor"
       ? "bg-amber-500"
-      : session?.user.alcada === "manager"
+      : session?.user.alcada === "gerente"
         ? "bg-blue-500"
         : "bg-muted-foreground/50";
 

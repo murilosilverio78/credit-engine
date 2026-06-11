@@ -7,9 +7,9 @@ from app.core.config import settings
 
 
 ROLE_TO_ALCADA = {
-    "analista": "analyst",
-    "gerente": "manager",
-    "diretor": "committee",
+    "analista": "analista",
+    "gerente": "gerente",
+    "diretor": "diretor",
 }
 
 
@@ -27,7 +27,7 @@ def _decode_token(token: str) -> Optional[dict]:
     if user_id:
         payload["id"] = user_id
     if payload.get("role") and not payload.get("alcada"):
-        payload["alcada"] = ROLE_TO_ALCADA.get(payload["role"], "analyst")
+        payload["alcada"] = ROLE_TO_ALCADA.get(payload["role"], "analista")
     return payload
 
 

@@ -35,10 +35,10 @@ async function fetchSession() {
   const alcada: Alcada =
     user.alcada ??
     (user.role === "diretor"
-      ? "committee"
+      ? "diretor"
       : user.role === "gerente"
-        ? "manager"
-        : "analyst");
+        ? "gerente"
+        : "analista");
 
   return {
     user: {

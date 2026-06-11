@@ -10,15 +10,10 @@ export type OperationStatus =
   | "rejected"
   | "escalated";
 
-export type OverrideType =
-  | "rating"
-  | "score"
-  | "taxa"
-  | "limite"
-  | "status_operacao";
+export type OverrideType = "taxa";
 
-export type Alcada = "analyst" | "manager" | "committee";
 export type UserRole = "analista" | "gerente" | "diretor";
+export type Alcada = UserRole;
 
 export interface Operation {
   id: string;
@@ -56,11 +51,25 @@ export interface Override {
   previous_value: unknown;
   new_value: unknown;
   justificativa: string;
-  alcada_required: Alcada;
+  alcada_required: UserRole;
   status?: "pending" | "approved" | "rejected";
   score_no_momento: number | null;
   requested_at: string;
   created_at: string;
+}
+
+export interface TaxaOverrideValidation {
+  approved: boolean;
+  alcada_required: UserRole;
+  motivo: "delta_excedido" | "margem_insuficiente" | null;
+  margem_resultante: number;
+  taxa_minima_sua_alcada: number;
+  taxa_minima_proximo_nivel: number | null;
+}
+
+export interface OverrideCreateResult {
+  override: Override;
+  validation: TaxaOverrideValidation;
 }
 
 export interface PropostaInput {
@@ -77,8 +86,6 @@ export interface OverrideInput {
   previous_value: unknown;
   new_value: unknown;
   justificativa: string;
-  requested_by?: string;
-  escalar?: boolean;
 }
 
 export interface OverrideReviewInput {
