@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { useSession } from "@/hooks/use-session";
 import { reviewOverride, getPendingOverrides } from "@/lib/api";
 import { formatTaxaAm } from "@/lib/format";
 import type { Override, UserRole } from "@/lib/types";
@@ -64,12 +65,23 @@ function cardBorder(alcada: UserRole) {
   }
 }
 
+function canReviewOverride(role: string | undefined) {
+  return role === "gerente" || role === "diretor" || role === "comite";
+}
+
+function reviewErrorMessage(error: unknown) {
+  return error instanceof Error && error.message
+    ? error.message
+    : "Não foi possível processar a revisão.";
+}
+
 interface PendingCardProps {
+  canReview: boolean;
   override: Override;
   onReviewed: (override: Override, decision: "approved" | "rejected") => void;
 }
 
-function PendingOverrideCard({ override, onReviewed }: PendingCardProps) {
+function PendingOverrideCard({ canReview, override, onReviewed }: PendingCardProps) {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [reviewComment, setReviewComment] = useState("");
   const [commentError, setCommentError] = useState("");
@@ -87,6 +99,9 @@ function PendingOverrideCard({ override, onReviewed }: PendingCardProps) {
       }),
     onSuccess: (_, variables) => onReviewed(override, variables.decision),
   });
+  const mutationError = mutation.isError
+    ? reviewErrorMessage(mutation.error)
+    : "";
 
   function approve() {
     mutation.mutate({ comment: null, decision: "approved" });
@@ -174,37 +189,39 @@ function PendingOverrideCard({ override, onReviewed }: PendingCardProps) {
             ver operação
           </Link>
         </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <button
-              className="flex h-[30px] items-center gap-1 rounded-md border-[0.5px] border-red-200 bg-red-50 px-3 text-[11px] font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
-              disabled={mutation.isPending}
-              onClick={openReject}
-              type="button"
-            >
-              <X aria-hidden="true" className="h-3 w-3" />
-              Rejeitar
-            </button>
-            <button
-              className="flex h-[30px] items-center gap-1 rounded-md border-[0.5px] border-emerald-200 bg-emerald-50 px-3 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
-              disabled={mutation.isPending}
-              onClick={approve}
-              type="button"
-            >
-              <Check aria-hidden="true" className="h-3 w-3" />
-              Aprovar
-            </button>
+        {canReview ? (
+          <div>
+            <div className="flex items-center gap-2">
+              <button
+                className="flex h-[30px] items-center gap-1 rounded-md border-[0.5px] border-red-200 bg-red-50 px-3 text-[11px] font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+                disabled={mutation.isPending}
+                onClick={openReject}
+                type="button"
+              >
+                <X aria-hidden="true" className="h-3 w-3" />
+                Rejeitar
+              </button>
+              <button
+                className="flex h-[30px] items-center gap-1 rounded-md border-[0.5px] border-emerald-200 bg-emerald-50 px-3 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                disabled={mutation.isPending}
+                onClick={approve}
+                type="button"
+              >
+                <Check aria-hidden="true" className="h-3 w-3" />
+                Aprovar
+              </button>
+            </div>
           </div>
-        </div>
+        ) : null}
       </footer>
 
-      {mutation.isError ? (
+      {canReview && mutationError && !rejectOpen ? (
         <p className="mt-3 text-xs text-red-700" role="alert">
-          Não foi possível concluir a revisão.
+          {mutationError}
         </p>
       ) : null}
 
-      {rejectOpen ? (
+      {canReview && rejectOpen ? (
         <div
           aria-label="Confirmar rejeição"
           className="absolute inset-0 flex items-center justify-center rounded-lg bg-background/95 p-4"
@@ -253,6 +270,11 @@ function PendingOverrideCard({ override, onReviewed }: PendingCardProps) {
                 Confirmar rejeição
               </button>
             </div>
+            {mutationError ? (
+              <p className="mt-3 text-xs text-red-700" role="alert">
+                {mutationError}
+              </p>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -263,6 +285,7 @@ function PendingOverrideCard({ override, onReviewed }: PendingCardProps) {
 export default function OverridesPage() {
   const queryClient = useQueryClient();
   const router = useRouter();
+  const { session } = useSession();
   const [toast, setToast] = useState("");
   const overridesQuery = useQuery({
     queryFn: getPendingOverrides,
@@ -271,6 +294,7 @@ export default function OverridesPage() {
     refetchIntervalInBackground: true,
   });
   const pending = overridesQuery.data ?? [];
+  const canReview = canReviewOverride(session?.user.role);
 
   useEffect(() => {
     if (!toast) {
@@ -328,6 +352,7 @@ export default function OverridesPage() {
         ) : (
           pending.map((override) => (
             <PendingOverrideCard
+              canReview={canReview}
               key={override.id}
               onReviewed={handleReviewed}
               override={override}
