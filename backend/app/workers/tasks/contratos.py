@@ -66,7 +66,13 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         if elapsed > MAX_SECONDS:
             raise TimeoutError(f"contratos excedeu timeout de {MAX_SECONDS}s na pagina {pagina}")
         if pagina > MAX_PAGES:
-            raise TimeoutError(f"contratos excedeu limite de {MAX_PAGES} paginas")
+            logger.warning(
+                "contratos.pagination_cap_reached",
+                cnpj=cnpj,
+                paginas_lidas=pagina,
+                registros_ate_agora=len(contratos),
+            )
+            break
 
         with httpx.Client(timeout=20, verify=SSL_VERIFY) as client:
             resp = client.get(
@@ -85,15 +91,16 @@ def _fetch(cnpj: str, token: str = None) -> dict:
     parsed    = [_parse_contrato(c) for c in contratos]
     ativos    = [c for c in parsed if c["ativo"]]
     encerrados = [c for c in parsed if not c["ativo"]]
+    atingiu_cap = pagina > MAX_PAGES
     pagination = {
         "paginas_lidas": pagina,
         "registros": len(contratos),
-        "atingiu_cap": pagina > MAX_PAGES * 0.8,
-        "motivo_fim": "pagina_vazia",
+        "atingiu_cap": atingiu_cap,
+        "motivo_fim": "limite_paginas" if atingiu_cap else "pagina_vazia",
     }
-    if pagination["atingiu_cap"]:
+    if atingiu_cap:
         logger.warning(
-            "contratos.pagination_near_cap",
+            "contratos.pagination_cap_reached",
             cnpj=cnpj,
             max_pages=MAX_PAGES,
             **pagination,

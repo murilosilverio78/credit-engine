@@ -46,7 +46,12 @@ def _fetch(cnpj: str, token: str = None) -> dict:
                 f"recursos_recebidos excedeu timeout de {MAX_SECONDS}s na pagina {pagina}"
             )
         if pagina > MAX_PAGES:
-            raise TimeoutError(f"recursos_recebidos excedeu limite de {MAX_PAGES} paginas")
+            logger.warning(
+                "recursos_recebidos.pagination_cap_reached",
+                paginas_lidas=pagina,
+                registros_ate_agora=len(recursos),
+            )
+            break
 
         # URL montada como string para evitar encoding do "/" pelo httpx
         url = (
@@ -75,15 +80,16 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         if ano:
             por_ano[ano] = por_ano.get(ano, 0) + float(r.get("valor") or 0)
 
+    atingiu_cap = pagina > MAX_PAGES
     pagination = {
         "paginas_lidas": pagina,
         "registros": len(recursos),
-        "atingiu_cap": pagina > MAX_PAGES * 0.8,
-        "motivo_fim": "pagina_vazia",
+        "atingiu_cap": atingiu_cap,
+        "motivo_fim": "limite_paginas" if atingiu_cap else "pagina_vazia",
     }
-    if pagination["atingiu_cap"]:
+    if atingiu_cap:
         logger.warning(
-            "recursos_recebidos.pagination_near_cap",
+            "recursos_recebidos.pagination_cap_reached",
             cnpj=cnpj,
             max_pages=MAX_PAGES,
             **pagination,

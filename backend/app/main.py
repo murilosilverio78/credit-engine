@@ -49,16 +49,21 @@ app.include_router(pricing.router,    prefix="/api/v1/pricing",    tags=["pricin
 app.include_router(operations.router, prefix="/api/operations",    tags=["operations"], dependencies=_auth_dep)
 app.include_router(escaladas.router,  prefix="/api/escaladas",     tags=["escaladas"],  dependencies=_auth_dep)
 
-# Rotas públicas por design (link de upload enviado ao fornecedor — sem auth)
+# Rotas p?blicas por design (link de upload enviado ao fornecedor ? sem auth)
 app.include_router(uploads_public_router, prefix="/api/v1/uploads", tags=["uploads-public"])
 
 
 async def _recover_stale_operations():
     try:
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+
+        # Opera??es sem heartbeat nos ?ltimos 10 min (ou nunca tiveram heartbeat e t?m > 10min)
         result = supabase.table("operations")\
             .select("id,status")\
             .in_("status", ["pending", "processing"])\
+            .or_(
+                f"heartbeat_at.is.null,heartbeat_at.lt.{cutoff}"
+            )\
             .lt("created_at", cutoff)\
             .execute()
 

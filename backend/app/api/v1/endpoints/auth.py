@@ -1,4 +1,6 @@
 import asyncio
+import time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Literal
@@ -7,7 +9,7 @@ from uuid import uuid4
 import bcrypt
 import resend
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from jose import jwt
 from pydantic import BaseModel, EmailStr
 
@@ -18,6 +20,32 @@ from app.core.database import supabase
 
 router = APIRouter()
 logger = structlog.get_logger()
+
+# Rate limiting in-process (sem depend?ncia externa)
+# Estrutura: {ip: [timestamp, ...]}
+_rate_buckets: dict[str, list[float]] = defaultdict(list)
+_rate_lock = asyncio.Lock()
+_RATE_WINDOW = 60.0
+_RATE_MAX_LOGIN = 5
+_RATE_MAX_RESEND = 3
+
+
+async def _check_rate_limit(ip: str, max_calls: int) -> None:
+    """Levanta 429 se o IP excedeu o limite na janela corrente."""
+    now = time.monotonic()
+    async with _rate_lock:
+        calls = _rate_buckets[ip]
+        _rate_buckets[ip] = [t for t in calls if now - t < _RATE_WINDOW]
+        if len(_rate_buckets[ip]) >= max_calls:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Muitas tentativas. Aguarde 1 minuto e tente novamente.",
+                    "retry_after_seconds": int(_RATE_WINDOW),
+                },
+            )
+        _rate_buckets[ip].append(now)
 
 
 class RegisterInput(BaseModel):
@@ -134,7 +162,10 @@ async def register_user(
 
 
 @router.post("/login")
-async def login(payload: LoginInput):
+async def login(payload: LoginInput, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    await _check_rate_limit(client_ip, _RATE_MAX_LOGIN)
+
     erro_credencial = "Email ou senha inválidos"
 
     try:
@@ -221,7 +252,10 @@ async def confirm_email(payload: ConfirmEmailInput):
 
 
 @router.post("/resend-verification")
-async def resend_verification(payload: ResendInput):
+async def resend_verification(payload: ResendInput, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    await _check_rate_limit(client_ip, _RATE_MAX_RESEND)
+
     msg = "Se o email existir e ainda não estiver confirmado, um novo link foi enviado."
 
     try:

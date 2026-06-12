@@ -103,6 +103,17 @@ def _mark_operation_failed(operation_id: str, message: str):
         )
 
 
+def _update_heartbeat(operation_id: str):
+    """Atualiza heartbeat_at para evitar que o recovery mate opera??es em andamento."""
+    try:
+        supabase.table("operations")\
+            .update({"heartbeat_at": datetime.now(timezone.utc).isoformat()})\
+            .eq("id", operation_id)\
+            .execute()
+    except Exception as exc:
+        logger.warning("pipeline.heartbeat_failed", operation_id=operation_id, error=str(exc))
+
+
 def _mark_stale_components_failed(operation_id: str, components: list[str]):
     if not components:
         return
@@ -226,17 +237,46 @@ async def start_analysis(operation_id: str):
 
     logger.info("pipeline.started", operation_id=operation_id)
 
+    # Sinaliza que o pipeline est? em execu??o e registra heartbeat inicial
+    supabase.table("operations")\
+        .update({
+            "status": "processing",
+            "heartbeat_at": datetime.now(timezone.utc).isoformat(),
+        })\
+        .eq("id", operation_id)\
+        .execute()
+
     phase1_results = await asyncio.gather(
         _run_component(run_brasil_api, operation_id),
         _run_component(run_pessoa_juridica, operation_id),
     )
-    if any(_component_result_failed(result) for result in phase1_results):
-        message = "pipeline abortado: falha em componente da fase 1"
+    phase1_failed = [
+        name for name, result in zip(["brasil_api", "pessoa_juridica"], phase1_results)
+        if _component_result_failed(result)
+    ]
+    if len(phase1_failed) == 2:
+        # Ambas as fontes falharam ? sem dados cadastrais m?nimos para continuar
+        message = "pipeline abortado: falha em todos os componentes da fase 1"
         _mark_operation_failed(operation_id, message)
         logger.error("pipeline.phase1_failed", operation_id=operation_id, results=phase1_results)
         return {"operation_id": operation_id, "status": "failed", "error": message}
+    if phase1_failed:
+        logger.warning(
+            "pipeline.phase1_partial_failure",
+            operation_id=operation_id,
+            failed_components=phase1_failed,
+        )
+        # Marcar flag de dado degradado na opera??o para visibilidade no score
+        try:
+            supabase.table("operations")\
+                .update({"dado_cadastral_degradado": True})\
+                .eq("id", operation_id)\
+                .execute()
+        except Exception:
+            pass  # campo pode n?o existir ainda ? n?o bloquear pipeline
 
     _update_operation_razao_social(operation_id)
+    _update_heartbeat(operation_id)
 
     phase2_results = await asyncio.gather(
         _run_component(run_contratos, operation_id),
@@ -376,6 +416,8 @@ async def _phase3_4(operation_id: str):
         _mark_operation_failed(operation_id, message)
         logger.error("pipeline.web_research_failed", operation_id=operation_id, result=web_result)
         return {"operation_id": operation_id, "status": "failed", "error": message}
+
+    _update_heartbeat(operation_id)
 
     score_result = await _run_component(run_score_engine, operation_id)
     if _component_result_failed(score_result):
