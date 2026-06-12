@@ -5,6 +5,8 @@ Executado apenas se pessoa_juridica.possui_contratacao = True.
 
 Tipo: automatizado | Fila: fast | Cache: 12h
 """
+import os
+
 import httpx
 import time
 from datetime import date
@@ -13,6 +15,7 @@ import structlog
 
 logger = structlog.get_logger()
 
+SSL_VERIFY = os.getenv("SSL_VERIFY", "true").lower() != "false"
 BASE_URL = "https://api.portaldatransparencia.gov.br/api-de-dados"
 MAX_PAGES = 200
 MAX_SECONDS = 180
@@ -65,7 +68,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         if pagina > MAX_PAGES:
             raise TimeoutError(f"contratos excedeu limite de {MAX_PAGES} paginas")
 
-        with httpx.Client(timeout=20, verify=False) as client:
+        with httpx.Client(timeout=20, verify=SSL_VERIFY) as client:
             resp = client.get(
                 f"{BASE_URL}/contratos/cpf-cnpj",
                 headers=headers,

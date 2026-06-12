@@ -5,12 +5,15 @@ Retorna flags que controlam quais componentes downstream serão executados.
 
 Tipo: automatizado | Fila: fast | Cache: 12h
 """
+import os
+
 import httpx
 from app.workers.base import BaseComponentTask
 import structlog
 
 logger = structlog.get_logger()
 
+SSL_VERIFY = os.getenv("SSL_VERIFY", "true").lower() != "false"
 BASE_URL = "https://api.portaldatransparencia.gov.br/api-de-dados"
 
 
@@ -22,7 +25,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
     headers = {"chave-api-dados": api_token}
     sem_registro = False
 
-    with httpx.Client(timeout=15, verify=False) as client:
+    with httpx.Client(timeout=15, verify=SSL_VERIFY) as client:
         resp = client.get(
             f"{BASE_URL}/pessoa-juridica",
             headers=headers,

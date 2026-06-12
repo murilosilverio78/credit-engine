@@ -1,9 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from app.core.auth import get_current_user
 from app.core.database import supabase
 from app.api.v1.endpoints import admin, alcadas, auth, components, escaladas, operations, overrides, pricing, uploads
 
@@ -32,17 +33,20 @@ app.add_middleware(
 )
 
 # Routers
-app.include_router(operations.router, prefix="/api/v1/operations", tags=["operations"])
-app.include_router(components.router, prefix="/api/v1/components", tags=["components"])
-app.include_router(uploads.router,    prefix="/api/v1/uploads",    tags=["uploads"])
-app.include_router(admin.router,      prefix="/api/v1/admin",      tags=["admin"])
-app.include_router(overrides.router,  prefix="/api/v1/overrides",  tags=["overrides"])
+_auth_dep = [Depends(get_current_user)]
+
+app.include_router(operations.router, prefix="/api/v1/operations", tags=["operations"], dependencies=_auth_dep)
+app.include_router(components.router, prefix="/api/v1/components", tags=["components"], dependencies=_auth_dep)
+app.include_router(uploads.router,    prefix="/api/v1/uploads",    tags=["uploads"],    dependencies=_auth_dep)
+app.include_router(uploads.public_router, prefix="/api/v1/uploads", tags=["uploads"])
+app.include_router(admin.router,      prefix="/api/v1/admin",      tags=["admin"],      dependencies=_auth_dep)
+app.include_router(overrides.router,  prefix="/api/v1/overrides",  tags=["overrides"],  dependencies=_auth_dep)
 app.include_router(auth.router,       prefix="/api/v1/auth",       tags=["auth"])
-app.include_router(alcadas.router,    prefix="/api/v1/alcadas",    tags=["alcadas"])
-app.include_router(escaladas.router,  prefix="/api/v1/escaladas",  tags=["escaladas"])
-app.include_router(pricing.router,    prefix="/api/v1/pricing",    tags=["pricing"])
-app.include_router(operations.router, prefix="/api/operations",    tags=["operations"])
-app.include_router(escaladas.router,  prefix="/api/escaladas",     tags=["escaladas"])
+app.include_router(alcadas.router,    prefix="/api/v1/alcadas",    tags=["alcadas"],    dependencies=_auth_dep)
+app.include_router(escaladas.router,  prefix="/api/v1/escaladas",  tags=["escaladas"],  dependencies=_auth_dep)
+app.include_router(pricing.router,    prefix="/api/v1/pricing",    tags=["pricing"],    dependencies=_auth_dep)
+app.include_router(operations.router, prefix="/api/operations",    tags=["operations"], dependencies=_auth_dep)
+app.include_router(escaladas.router,  prefix="/api/escaladas",     tags=["escaladas"],  dependencies=_auth_dep)
 
 
 async def _recover_stale_operations():

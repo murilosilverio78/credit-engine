@@ -5,6 +5,8 @@ Sempre executado — independente das flags do pessoa_juridica.
 
 Tipo: automatizado | Fila: fast | Cache: 24h
 """
+import os
+
 import httpx
 import time
 from app.workers.base import BaseComponentTask
@@ -12,6 +14,7 @@ import structlog
 
 logger = structlog.get_logger()
 
+SSL_VERIFY = os.getenv("SSL_VERIFY", "true").lower() != "false"
 BASE_URL = "https://api.portaldatransparencia.gov.br/api-de-dados"
 MAX_PAGES = 200
 MAX_SECONDS = 180
@@ -34,7 +37,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         if pagina > MAX_PAGES:
             raise TimeoutError(f"acordos_leniencia excedeu limite de {MAX_PAGES} paginas")
 
-        with httpx.Client(timeout=15, verify=False) as client:
+        with httpx.Client(timeout=15, verify=SSL_VERIFY) as client:
             resp = client.get(
                 f"{BASE_URL}/acordos-leniencia",
                 headers=headers,

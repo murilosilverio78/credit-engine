@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Portal da Transparência
     PORTAL_TRANSPARENCIA_TOKEN: str
 
+    # TLS verification — False apenas em .env local Windows
+    HTTPX_VERIFY_SSL: bool = True
+
     # 2captcha
     TWOCAPTCHA_API_KEY: str
 

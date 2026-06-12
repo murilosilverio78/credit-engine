@@ -4,6 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Uploa
 import structlog
 
 router = APIRouter()
+public_router = APIRouter()
 logger = structlog.get_logger()
 
 ALLOWED_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png"}
@@ -40,7 +41,7 @@ async def resume_operation(operation_id: str, background_tasks: BackgroundTasks)
     return {"operation_id": operation_id, "status": "resume_requested"}
 
 
-@router.delete("/{token}")
+@public_router.delete("/{token}", dependencies=[])
 async def remove_upload(token: str):
     """Reset one uploaded task so the certificate can be replaced."""
     from app.services.upload_service import UploadService
@@ -56,7 +57,7 @@ async def remove_upload(token: str):
     return {"operation_id": task["operation_id"], "status": "pending"}
 
 
-@router.post("/{token}")
+@public_router.post("/{token}", dependencies=[])
 async def receive_upload(
     token: str,
     file: UploadFile = File(...),

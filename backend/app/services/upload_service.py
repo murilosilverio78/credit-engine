@@ -41,14 +41,24 @@ class UploadService:
         return query.order("created_at", desc=False).execute().data
 
     async def get_by_token(self, token: str) -> Optional[dict]:
-        """Look up an upload task through its unique token."""
+        """Look up an upload task through its unique token. Returns None if expired."""
         try:
             result = supabase.table("upload_tasks")\
                 .select("*")\
                 .eq("token", token)\
                 .single()\
                 .execute()
-            return result.data
+            task = result.data
+            if not task:
+                return None
+            expires_at_str = task.get("expires_at")
+            if expires_at_str:
+                expires_at = datetime.fromisoformat(
+                    expires_at_str.replace("Z", "+00:00"),
+                )
+                if expires_at < datetime.now(timezone.utc):
+                    return None
+            return task
         except Exception:
             return None
 
