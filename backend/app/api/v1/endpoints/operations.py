@@ -14,67 +14,11 @@ audit = AuditService()
 RATING_RANK = {"A": 1, "B": 2, "C": 3, "D": 4, "E": 5}
 
 VALID_TRANSITIONS = {
-    "approve": {"completed", "escalated"},
-    "reject": {"completed", "escalated"},
-    "escalate": {"completed"},
+    "approve":            {"completed"},
+    "reject":             {"completed", "escalated"},
+    "escalate":           {"completed"},
     "resolve-escalation": {"escalated"},
 }
-
-
-def _get_alcada_config(role: str) -> dict:
-    """Lê a configuração de alçada do role no Supabase. Levanta 500 se não encontrado."""
-    result = supabase.table("alcada_config")\
-        .select("*")\
-        .eq("role", role)\
-        .single()\
-        .execute()
-    if not result.data:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Configuração de alçada não encontrada para role '{role}'",
-        )
-    return result.data
-
-
-def _check_state_transition(operation: dict, action: str):
-    """Levanta 409 se o status atual não permite a transição solicitada."""
-    current = operation.get("status", "")
-    allowed = VALID_TRANSITIONS.get(action, set())
-    if current not in allowed:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "INVALID_STATE_TRANSITION",
-                "current_status": current,
-                "allowed_statuses": sorted(allowed),
-                "action": action,
-            },
-        )
-
-
-def _check_alcada(operation: dict, alcada: dict):
-    """Levanta 403 se o valor ou rating da operação excede a alçada do usuário."""
-    valor = operation.get("valor_solicitado") or 0
-    rating = operation.get("rating") or "E"
-
-    max_valor = alcada.get("max_valor") or 0
-    max_rating = alcada.get("max_rating") or "A"
-
-    valor_excede = valor > max_valor
-    rating_excede = RATING_RANK.get(rating, 5) > RATING_RANK.get(max_rating, 1)
-
-    if valor_excede or rating_excede:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "ALCADA_EXCEDIDA",
-                "escalate": True,
-                "valor_operacao": valor,
-                "max_valor_role": max_valor,
-                "rating_operacao": rating,
-                "max_rating_role": max_rating,
-            },
-        )
 
 
 class PropostaInput(BaseModel):
@@ -90,7 +34,7 @@ class PropostaInput(BaseModel):
     def validate_cnpj(cls, v):
         digits = re.sub(r"\D", "", v)
         if len(digits) != 14:
-            raise ValueError("CNPJ deve ter 14 dígitos")
+            raise ValueError("CNPJ deve ter 14 d?gitos")
         return digits
 
 
@@ -105,13 +49,9 @@ class ResolveEscalationInput(BaseModel):
 
 
 def _operation_snapshot(operation_id: str) -> dict:
-    result = supabase.table("operations")\
-        .select("*")\
-        .eq("id", operation_id)\
-        .single()\
-        .execute()
+    result = supabase.table("operations")        .select("*")        .eq("id", operation_id)        .single()        .execute()
     if not result.data:
-        raise HTTPException(status_code=404, detail="Operação não encontrada")
+        raise HTTPException(status_code=404, detail="Opera??o n?o encontrada")
     return result.data
 
 
@@ -140,39 +80,75 @@ def _insert_approval(
 
 
 def _update_operation_status(operation_id: str, new_status: str, expected_status: str):
-    """
-    Atualiza status com update condicional atômico.
-    Levanta 409 se o status atual não é o esperado (race condition ou double-submit).
-    """
-    result = supabase.table("operations")\
-        .update({"status": new_status})\
-        .eq("id", operation_id)\
-        .eq("status", expected_status)\
-        .execute()
+    """Update condicional at?mico ? levanta 409 em race condition ou double-submit."""
+    result = supabase.table("operations")        .update({"status": new_status})        .eq("id", operation_id)        .eq("status", expected_status)        .execute()
 
     if not result.data:
-        current = supabase.table("operations")\
-            .select("status")\
-            .eq("id", operation_id)\
-            .single()\
-            .execute()
+        current = supabase.table("operations")            .select("status")            .eq("id", operation_id)            .single()            .execute()
         current_status = current.data.get("status", "unknown") if current.data else "unknown"
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "CONCURRENT_STATE_CHANGE",
                 "current_status": current_status,
-                "message": "Status da operação foi alterado por outra requisição simultânea",
+                "message": "Status da opera??o foi alterado por outra requisi??o simult?nea",
+            },
+        )
+
+
+def _get_alcada_config(role: str) -> dict:
+    """L? configura??o de al?ada do Supabase para o role informado."""
+    result = supabase.table("alcada_config")        .select("*")        .eq("role", role)        .single()        .execute()
+    if not result.data:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Configura??o de al?ada n?o encontrada para role '{role}'",
+        )
+    return result.data
+
+
+def _check_state_transition(operation: dict, action: str):
+    """Levanta 409 se o status atual n?o permite a transi??o solicitada."""
+    current = operation.get("status", "")
+    allowed = VALID_TRANSITIONS.get(action, set())
+    if current not in allowed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "INVALID_STATE_TRANSITION",
+                "current_status": current,
+                "allowed_statuses": sorted(allowed),
+                "action": action,
+            },
+        )
+
+
+def _check_alcada(operation: dict, alcada: dict):
+    """Levanta 403 se valor ou rating da opera??o excede a al?ada do usu?rio."""
+    valor = operation.get("valor_solicitado") or 0
+    rating = operation.get("rating") or "E"
+    max_valor = alcada.get("max_valor") or 0
+    max_rating = alcada.get("max_rating") or "A"
+
+    valor_excede = valor > max_valor
+    rating_excede = RATING_RANK.get(rating, 5) > RATING_RANK.get(max_rating, 1)
+
+    if valor_excede or rating_excede:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "ALCADA_EXCEDIDA",
+                "escalate": True,
+                "valor_operacao": valor,
+                "max_valor_role": max_valor,
+                "rating_operacao": rating,
+                "max_rating_role": max_rating,
             },
         )
 
 
 @router.post("/", status_code=201)
 async def create_operation(payload: PropostaInput, background_tasks: BackgroundTasks):
-    """
-    Cria uma nova operação de crédito e inicia o pipeline de análise.
-    Retorna imediatamente com o operation_id; análise roda em background.
-    """
     from app.services.eligibility_service import check_eligibility
     from app.services.operation_service import OperationService
     from app.workers.tasks.orchestrator import start_analysis
@@ -203,27 +179,25 @@ async def create_operation(payload: PropostaInput, background_tasks: BackgroundT
         source=payload.source,
     )
 
-    # Dispara pipeline assíncrono
     background_tasks.add_task(start_analysis, str(operation["id"]))
 
     return {
         "operation_id": operation["id"],
         "cnpj": payload.cnpj,
         "status": "pending",
-        "message": "Análise iniciada. Acompanhe via /api/v1/operations/{id}",
+        "message": "An?lise iniciada. Acompanhe via /api/v1/operations/{id}",
     }
 
 
 @router.get("/{operation_id}")
 async def get_operation(operation_id: str):
-    """Retorna o status completo de uma operação, incluindo snapshots por componente."""
     from app.services.operation_service import OperationService
 
     svc = OperationService()
     operation = await svc.get_with_snapshots(operation_id)
 
     if not operation:
-        raise HTTPException(status_code=404, detail="Operação não encontrada")
+        raise HTTPException(status_code=404, detail="Opera??o n?o encontrada")
 
     return operation
 
@@ -233,7 +207,6 @@ async def get_operation_report_pdf(
     operation_id: str,
     _current_user: dict = Depends(get_current_user),
 ):
-    """Gera o relatorio de credito completo em PDF no backend."""
     pdf = await ReportPdfService().render_operation_pdf(operation_id)
     filename = f"credit-engine-{operation_id}.pdf"
     return Response(
@@ -250,7 +223,6 @@ async def list_operations(
     limit: int = 20,
     offset: int = 0,
 ):
-    """Lista operações com filtros. Usado pelo Admin UI."""
     from app.services.operation_service import OperationService
 
     svc = OperationService()
@@ -266,21 +238,9 @@ async def approve_operation(
 ):
     role = current_user.get("role", "analista")
     operation = _operation_snapshot(operation_id)
-
-    if operation.get("status") != "completed":
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "INVALID_STATE_TRANSITION",
-                "current_status": operation.get("status", ""),
-                "allowed_statuses": ["completed"],
-                "action": "approve",
-            },
-        )
-
+    _check_state_transition(operation, "approve")
     alcada = _get_alcada_config(role)
     _check_alcada(operation, alcada)
-
     approval = _insert_approval(operation, "approved", current_user, payload.justificativa)
     _update_operation_status(operation_id, "approved", expected_status=operation["status"])
     audit.log(
@@ -302,11 +262,9 @@ async def reject_operation(
     current_user: dict = Depends(get_current_user),
 ):
     if not payload.justificativa or len(payload.justificativa.strip()) < 10:
-        raise HTTPException(status_code=400, detail="Justificativa obrigatória com ao menos 10 caracteres")
-
+        raise HTTPException(status_code=400, detail="Justificativa obrigat?ria com ao menos 10 caracteres")
     operation = _operation_snapshot(operation_id)
     _check_state_transition(operation, "reject")
-
     approval = _insert_approval(operation, "rejected", current_user, payload.justificativa.strip())
     _update_operation_status(operation_id, "rejected", expected_status=operation["status"])
     audit.log(
@@ -330,7 +288,6 @@ async def escalate_operation(
 ):
     operation = _operation_snapshot(operation_id)
     _check_state_transition(operation, "escalate")
-
     approval = _insert_approval(operation, "escalated", current_user, payload.justificativa)
     _update_operation_status(operation_id, "escalated", expected_status=operation["status"])
     audit.log(
@@ -353,12 +310,8 @@ async def resolve_escalation(
     current_user: dict = Depends(get_current_user),
 ):
     role = current_user.get("role", "")
-    allowed_roles = {"gerente", "diretor", "comite"}
-    if role not in allowed_roles:
-        raise HTTPException(
-            status_code=403,
-            detail="Apenas gerentes e diretores podem resolver escaladas",
-        )
+    if role not in {"gerente", "diretor", "comite"}:
+        raise HTTPException(status_code=403, detail="Apenas gerentes e diretores podem resolver escaladas")
 
     operation = _operation_snapshot(operation_id)
     _check_state_transition(operation, "resolve-escalation")
@@ -369,25 +322,21 @@ async def resolve_escalation(
             status_code=403,
             detail={
                 "code": "SEM_PERMISSAO_ESCALADA",
-                "message": f"Role '{role}' não tem permissão para aprovar escaladas",
+                "message": f"Role '{role}' n?o tem permiss?o para aprovar escaladas",
             },
         )
     _check_alcada(operation, alcada)
 
     justificativa = (payload.justificativa or "").strip()
     if payload.action == "escalation_rejected" and len(justificativa) < 10:
-        raise HTTPException(status_code=400, detail="Justificativa obrigatória com ao menos 10 caracteres")
+        raise HTTPException(status_code=400, detail="Justificativa obrigat?ria com ao menos 10 caracteres")
 
     decision_extra = {"decided_role": role}
     if current_user.get("id"):
         decision_extra["decided_by"] = current_user.get("id")
 
     approval = _insert_approval(
-        operation,
-        payload.action,
-        current_user,
-        justificativa or None,
-        extra=decision_extra,
+        operation, payload.action, current_user, justificativa or None, extra=decision_extra,
     )
     new_status = "approved" if payload.action == "escalation_approved" else "rejected"
     _update_operation_status(operation_id, new_status, expected_status="escalated")
