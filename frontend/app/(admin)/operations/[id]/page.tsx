@@ -155,7 +155,7 @@ function taxaPercentInput(value: number | null | undefined) {
 function parseTaxaPercent(value: string) {
   const normalized = value.replace(",", ".");
   const numeric = Number(normalized);
-  return Number.isFinite(numeric) && numeric > 0 ? numeric / 100 : null;
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
 }
 
 function formatTaxaPercent(value: number | null | undefined) {
@@ -209,7 +209,7 @@ function certificateStatus(component: PipelineComponent) {
 }
 
 function currentTaxaValue(operation: OperationDetails) {
-  return operation.taxa_sugerida?.toString() ?? "";
+  return taxaPercentInput(operation.taxa_sugerida);
 }
 
 function pipelineComponents(

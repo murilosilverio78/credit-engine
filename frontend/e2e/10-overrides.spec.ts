@@ -53,7 +53,7 @@ test.describe("Modulo 10 - Overrides @slow", () => {
         justificativa: "Override valido E2E",
         new_value: taxaProposta(0.1),
         override_type: "taxa",
-        previous_value: taxaSugerida,
+        previous_value: taxaSugeridaPercent(),
         requested_by: "playwright",
       },
     });
@@ -67,7 +67,7 @@ test.describe("Modulo 10 - Overrides @slow", () => {
         justificativa: "Segregacao E2E",
         new_value: taxaProposta(0.1),
         override_type: "taxa",
-        previous_value: taxaSugerida,
+        previous_value: taxaSugeridaPercent(),
         requested_by: "same-user",
       },
     });
@@ -94,7 +94,7 @@ test.describe("Modulo 10 - Overrides @slow", () => {
         justificativa: "Revisao E2E",
         new_value: taxaProposta(2.0),
         override_type: "taxa",
-        previous_value: taxaSugerida,
+        previous_value: taxaSugeridaPercent(),
         requested_by: analista.id,
       },
     });

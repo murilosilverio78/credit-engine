@@ -1141,6 +1141,11 @@ def consolidar_score(
         for dim, value in dimensoes.items()
         if value["score"] < 67
     ]
+    if "reputacao_parse_falhou" in (dimensoes["reputacao_mercado"].get("flags") or []):
+        pontos_atencao.append(
+            "Reputação de mercado não pôde ser verificada automaticamente "
+            "(falha de parse) — dimensão avaliada de forma neutra"
+        )
     limite_aprovado_rs, limite_flags = _limite_aprovado(snapshots, operacao)
     parecer_estruturado = _parecer_estruturado(
         score_final,

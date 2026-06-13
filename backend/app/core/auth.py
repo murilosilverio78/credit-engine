@@ -43,14 +43,17 @@ async def get_current_user_optional(request: Request) -> Optional[dict]:
         token = request.cookies.get("session")
     if not token:
         return None
-    return _decode_token(token)
+    user = _decode_token(token)
+    if not user:
+        return None
+    if not await _validate_against_db(user):
+        return None
+    return user
 
 
-async def get_current_user(request: Request) -> dict:
-    user = await get_current_user_optional(request)
-    if not user or not user.get("id"):
-        raise HTTPException(status_code=401, detail="Não autenticado")
-
+async def _validate_against_db(user: dict) -> bool:
+    if not user.get("id"):
+        return False
     # Débito técnico: +1 query por request; aceitável no volume atual.
     # Se virar gargalo, otimizar com cache curto por usuário/token_version.
     try:
@@ -64,11 +67,18 @@ async def get_current_user(request: Request) -> dict:
         row = None
 
     if not row or row.get("active") is False:
-        raise HTTPException(status_code=401, detail="Não autenticado")
+        return False
 
     if (row.get("token_version") or 0) != (user.get("token_version") or 0):
-        raise HTTPException(status_code=401, detail="Não autenticado")
+        return False
 
+    return True
+
+
+async def get_current_user(request: Request) -> dict:
+    user = await get_current_user_optional(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autenticado")
     return user
 
 

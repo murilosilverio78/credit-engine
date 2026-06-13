@@ -1,12 +1,13 @@
-"""
-StorageService: upload e download de documentos no Cloudflare R2.
-Usa boto3 com endpoint S3-compatível do R2.
-"""
+"""StorageService: upload e download de documentos no Cloudflare R2."""
+import asyncio
+from functools import lru_cache
+
 import boto3
 from botocore.config import Config
-from app.core.config import settings
-from functools import lru_cache
 import structlog
+
+from app.core.config import settings
+
 
 logger = structlog.get_logger()
 
@@ -48,6 +49,11 @@ def get_r2_client():
 
 
 class StorageService:
+    MIME_EXTENSIONS = {
+        "application/pdf": "pdf",
+        "image/jpeg": "jpg",
+        "image/png": "png",
+    }
 
     async def upload_document(
         self,
@@ -62,11 +68,13 @@ class StorageService:
         Retorna a storage_key do objeto.
         """
         import uuid
-        ext = filename.rsplit(".", 1)[-1] if "." in filename else "pdf"
+
+        ext = self.MIME_EXTENSIONS.get(mime_type, "bin")
         storage_key = f"operations/{operation_id}/{document_type}/{uuid.uuid4()}.{ext}"
 
         client = get_r2_client()
-        client.put_object(
+        await asyncio.to_thread(
+            client.put_object,
             Bucket=settings.R2_BUCKET_NAME,
             Key=storage_key,
             Body=content,
@@ -94,5 +102,9 @@ class StorageService:
     async def delete(self, storage_key: str):
         """Remove documento do R2."""
         client = get_r2_client()
-        client.delete_object(Bucket=settings.R2_BUCKET_NAME, Key=storage_key)
+        await asyncio.to_thread(
+            client.delete_object,
+            Bucket=settings.R2_BUCKET_NAME,
+            Key=storage_key,
+        )
         logger.info("storage.deleted", storage_key=storage_key)

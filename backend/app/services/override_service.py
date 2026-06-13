@@ -4,12 +4,15 @@ OverrideService: gerencia solicitacoes e revisoes de alteracao manual de credito
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+import structlog
+
 from app.core.database import supabase
 from app.services.audit_service import AuditService
 from app.services.pricing_engine import compute_margem_subordinado
 
 
 audit = AuditService()
+logger = structlog.get_logger()
 SYSTEM_ACTOR_ID = "00000000-0000-0000-0000-000000000001"
 ALCADA_HIERARCHY = ["analista", "gerente", "diretor", "comite"]
 
@@ -20,15 +23,20 @@ class OverrideService:
     }
     ROLE_ORDER = ("analista", "gerente", "diretor")
 
-    def _normalize_value(self, override_type: str, value: Any) -> Any:
-        if override_type not in self.FIELD_MAP:
-            raise ValueError("Tipo de override invalido")
-
+    def _pct_to_fraction(self, value: Any) -> float:
         try:
-            numeric = float(value)
+            percentual = float(value)
         except (TypeError, ValueError):
             raise ValueError("Novo valor deve ser numerico") from None
-        return numeric / 100 if numeric > 1 else numeric
+
+        if percentual < 0.1 or percentual > 30:
+            raise ValueError("Taxa proposta fora do range plausível (0,1% a 30% a.m.)")
+        return percentual / 100
+
+    def _normalize_client_value(self, override_type: str, value: Any) -> Any:
+        if override_type not in self.FIELD_MAP:
+            raise ValueError("Tipo de override invalido")
+        return self._pct_to_fraction(value)
 
     def _get_operation(self, operation_id: str) -> Optional[dict]:
         try:
@@ -43,10 +51,18 @@ class OverrideService:
 
     def _apply_override(self, operation_id: str, override_type: str, new_value: Any):
         field = self.FIELD_MAP[override_type]
-        supabase.table("operations")\
+        result = supabase.table("operations")\
             .update({field: new_value})\
             .eq("id", operation_id)\
+            .eq("status", "completed")\
             .execute()
+        if not result.data:
+            logger.warning(
+                "override.apply_skipped",
+                operation_id=operation_id,
+                override_type=override_type,
+                reason="operation_not_completed",
+            )
 
     def _normalize_role(self, role: str) -> str:
         aliases = {
@@ -73,12 +89,11 @@ class OverrideService:
         except (TypeError, ValueError):
             return 0.0
 
-    def _fraction_value(self, value: Any) -> float:
+    def _as_fraction(self, value: Any) -> float:
         try:
-            numeric = float(value or 0)
+            return float(value or 0)
         except (TypeError, ValueError):
             return 0.0
-        return numeric / 100 if numeric > 1 else numeric
 
     def _fetch_alcada_config(self, role: str) -> dict:
         result = supabase.table("alcada_config")\
@@ -99,7 +114,7 @@ class OverrideService:
         config: dict,
     ) -> float:
         delta_maximo = self._delta_pp_to_fraction(config.get("delta_maximo_taxa_pp"))
-        margem_minima = self._fraction_value(config.get("margem_minima_subordinado"))
+        margem_minima = self._as_fraction(config.get("margem_minima_subordinado"))
         piso_delta = max(taxa_sugerida - delta_maximo, 0.0)
 
         margem_no_piso = compute_margem_subordinado(
@@ -147,7 +162,7 @@ class OverrideService:
         config: dict,
     ) -> tuple[bool, str | None]:
         delta_maximo = self._delta_pp_to_fraction(config.get("delta_maximo_taxa_pp"))
-        margem_minima = self._fraction_value(config.get("margem_minima_subordinado"))
+        margem_minima = self._as_fraction(config.get("margem_minima_subordinado"))
         delta = taxa_sugerida - taxa_proposta
 
         if delta > delta_maximo:
@@ -178,8 +193,8 @@ class OverrideService:
         if not operation:
             raise LookupError("Operacao nao encontrada")
 
-        taxa_sugerida = self._fraction_value(operation.get("taxa_sugerida"))
-        taxa_proposta = self._fraction_value(taxa_proposta)
+        taxa_sugerida = self._as_fraction(operation.get("taxa_sugerida"))
+        taxa_proposta = self._pct_to_fraction(taxa_proposta)
         valor = float(operation.get("valor_solicitado") or 0)
         prazo_meses = self._prazo_meses(operation.get("prazo_dias"))
         rating = str(operation.get("rating") or "").upper()
@@ -273,11 +288,11 @@ class OverrideService:
             raise LookupError("Operacao nao encontrada")
 
         requested_by = requested_by or SYSTEM_ACTOR_ID
-        normalized_previous_value = self._normalize_value(override_type, previous_value)
-        normalized_value = self._normalize_value(override_type, new_value)
+        normalized_previous_value = self._normalize_client_value(override_type, previous_value)
+        normalized_value = self._normalize_client_value(override_type, new_value)
         validation = await self._validate_taxa_override(
             operation_id,
-            normalized_value,
+            new_value,
             requesting_role,
         )
         alcada = validation["alcada_required"]
@@ -313,7 +328,7 @@ class OverrideService:
 
         audit.log(
             operation_id=operation_id,
-            action="override_applied",
+            action="override_requested",
             actor_id=requested_by,
             actor_type=requesting_role,
             ip_address=ip_address,
@@ -362,6 +377,11 @@ class OverrideService:
             raise LookupError("Override nao encontrado")
         if override.get("status") != "pending":
             raise ValueError("Somente overrides pendentes podem ser revisados")
+        operation = self._get_operation(operation_id)
+        if not operation or operation.get("status") != "completed":
+            raise ValueError(
+                "Override só pode ser revisado/aplicado com a operação em status completed"
+            )
 
         required = override.get("alcada_required", "analista")
         required_idx = (
@@ -393,7 +413,10 @@ class OverrideService:
             .update(updated)\
             .eq("id", override_id)\
             .eq("operation_id", operation_id)\
+            .eq("status", "pending")\
             .execute()
+        if not result.data:
+            raise ValueError("Override já foi revisado por outra requisição")
 
         if decision == "approved":
             self._apply_override(
@@ -404,7 +427,7 @@ class OverrideService:
 
         audit.log(
             operation_id=operation_id,
-            action="override_applied",
+            action="override_reviewed",
             actor_id=reviewed_by,
             actor_type=reviewer_role or "analista",
             ip_address=ip_address,

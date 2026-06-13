@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import asyncio
 import json
 import math
 import re
@@ -8,7 +9,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
-from fastapi.concurrency import run_in_threadpool
 from playwright.sync_api import sync_playwright
 
 from app.utils.encoding import fix_dict_encoding
@@ -683,7 +683,7 @@ class ReportPdfService:
         operation = await OperationService().get_with_snapshots(operation_id)
         if not operation:
             raise HTTPException(status_code=404, detail="Operação não encontrada")
-        return await run_in_threadpool(self._render_pdf, operation)
+        return await asyncio.to_thread(self._render_pdf, operation)
 
     def _render_pdf(self, operation: dict[str, Any]) -> bytes:
         html_doc, header, footer = document_html(operation)

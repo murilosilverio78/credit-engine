@@ -221,20 +221,23 @@ Retorne apenas o JSON estruturado conforme instruído."""
         messages=[{"role": "user", "content": prompt}],
     )
 
-    result_text = ""
-    for block in response.content:
-        if block.type == "text":
-            result_text = block.text
-            break
+    text_blocks = [block.text for block in response.content if block.type == "text"]
+    result_text = "\n".join(text_blocks)
 
     try:
         clean = _extract_json_object(result_text)
         return fix_dict_encoding(json.loads(clean))
     except Exception:
+        if text_blocks:
+            try:
+                clean = _extract_json_object(text_blocks[-1])
+                return fix_dict_encoding(json.loads(clean))
+            except Exception:
+                pass
         return fix_dict_encoding({
-            "score_reputacao": 70,
-            "nivel_risco": "baixo",
-            "nivel": "Adequado",
+            "score_reputacao": 50,
+            "nivel_risco": "indeterminado",
+            "nivel": "Atencao",
             "raciocinio_reputacao": "Nao foi possivel interpretar o JSON retornado pela pesquisa de reputacao.",
             "fatores_reputacao": [],
             "flags_reputacao": ["reputacao_parse_falhou"],
