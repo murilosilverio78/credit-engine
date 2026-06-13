@@ -29,10 +29,6 @@ class UploadService:
     async def list_pending(self, operation_id: Optional[str] = None) -> list[dict]:
         """List the pending queue or full upload progress for one operation."""
         fields = (
-            "id,operation_id,document_type,token,status,notified_at,"
-            "completed_at,expires_at,created_at,error_message,"
-            "operations(cnpj, razao_social)"
-        ) if operation_id else (
             "id,operation_id,document_type,status,notified_at,"
             "completed_at,expires_at,created_at,error_message,"
             "operations(cnpj, razao_social)"
