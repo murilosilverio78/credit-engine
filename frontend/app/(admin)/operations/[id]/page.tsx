@@ -847,6 +847,53 @@ function CompletedView({
         </div>
       </div>
 
+      {/* Dados da Proposta — verificação de coerência da taxa */}
+      <div className="mb-4 rounded-lg border bg-card p-4">
+        <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Dados da Proposta
+        </h3>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div>
+            <p className="text-xs text-muted-foreground">Valor Solicitado</p>
+            <p className="text-sm font-medium">
+              {operation.valor_solicitado != null
+                ? operation.valor_solicitado.toLocaleString("pt-BR", {
+                    currency: "BRL",
+                    style: "currency",
+                  })
+                : "—"}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Prazo</p>
+            <p className="text-sm font-medium">
+              {operation.prazo_dias != null ? `${operation.prazo_dias} dias` : "—"}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Saldo do Contrato</p>
+            <p className="text-sm font-medium">
+              {operation.contrato_saldo != null
+                ? operation.contrato_saldo.toLocaleString("pt-BR", {
+                    currency: "BRL",
+                    style: "currency",
+                  })
+                : "—"}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Taxa Sugerida</p>
+            <p className="text-sm font-medium">
+              {operation.taxa_sugerida != null
+                ? formatTaxaAm(operation.taxa_sugerida)
+                : operation.pricing_skipped_reason
+                  ? `N/A — ${operation.pricing_skipped_reason}`
+                  : "—"}
+            </p>
+          </div>
+        </div>
+      </div>
+
       {operation.status === "completed" ? (
         <ApprovalActions operation={operation} />
       ) : decisionBadge ? (

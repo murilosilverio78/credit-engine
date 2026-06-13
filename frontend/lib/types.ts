@@ -5,6 +5,7 @@ export type OperationStatus =
   | "processing"
   | "completed"
   | "failed"
+  | "error"          // alias legado — unificado para 'failed' no backend (PR-4)
   | "manual_review"
   | "approved"
   | "rejected"
@@ -25,6 +26,9 @@ export interface Operation {
   taxa_sugerida: number | null;
   taxa_breakdown?: Record<string, unknown> | null;
   valor_solicitado?: number | null;
+  prazo_dias?: number | null;
+  contrato_saldo?: number | null;
+  pricing_skipped_reason?: string | null;
   source: string;
   created_at: string;
   limite_aprovado?: number | null;

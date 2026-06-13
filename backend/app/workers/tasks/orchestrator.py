@@ -475,12 +475,22 @@ async def _complete_analysis(operation_id: str):
                 error=str(exc),
             )
     else:
+        motivos = []
+        if rating not in {"A", "B", "C", "D"}:
+            motivos.append(f"rating={rating or 'ausente'}")
+        if not valor or valor <= 0:
+            motivos.append("valor_solicitado ausente")
+        if not prazo_dias or prazo_dias <= 0:
+            motivos.append("prazo_dias ausente")
+        motivo_str = "; ".join(motivos) if motivos else "condi??o n?o atendida"
+        data["pricing_skipped_reason"] = motivo_str
         logger.info(
             "pipeline.pricing_skipped",
             operation_id=operation_id,
             rating=rating,
             valor=valor,
             prazo_dias=prazo_dias,
+            motivo=motivo_str,
         )
 
     supabase.table("operations")\

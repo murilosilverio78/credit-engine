@@ -105,11 +105,11 @@ class OperationService:
         limit: int = 20,
         offset: int = 0,
     ) -> dict:
-        """Lista operações com filtros opcionais."""
-        query = supabase.table("operations")\
-            .select("id, cnpj, razao_social, status, rating, score, taxa_sugerida, source, created_at")\
-            .order("created_at", desc=True)\
-            .range(offset, offset + limit - 1)
+        """Lista opera??es com filtros opcionais."""
+        query = supabase.table("operations")            .select(
+                "id, cnpj, razao_social, status, rating, score, taxa_sugerida, source, created_at",
+                count="exact",
+            )            .order("created_at", desc=True)            .range(offset, offset + limit - 1)
 
         if status:
             query = query.eq("status", status)
@@ -117,7 +117,8 @@ class OperationService:
             query = query.eq("cnpj", cnpj)
 
         result = query.execute()
-        return {"items": result.data, "total": len(result.data), "limit": limit, "offset": offset}
+        total = result.count if result.count is not None else len(result.data)
+        return {"items": result.data, "total": total, "limit": limit, "offset": offset}
 
     async def update_status(self, operation_id: str, status: str, **kwargs):
         """Atualiza status e campos opcionais da operação."""

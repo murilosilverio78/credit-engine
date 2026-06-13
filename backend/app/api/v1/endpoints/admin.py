@@ -52,13 +52,13 @@ async def cleanup_orphan_operations(
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Marca como 'error' operações travadas em 'pending' há mais de
+    Marca como 'failed' operações travadas em 'pending' há mais de
     ORPHAN_THRESHOLD_MINUTES minutos. Cobre o caso de o processo FastAPI
     ter reiniciado durante uma análise (task em background perdida).
 
     NÃO afeta:
       - operações 'waiting_upload' (têm prazo próprio de 48h via upload_tasks)
-      - operações já 'completed', 'approved', 'rejected', 'escalated', 'error'
+      - operações já 'completed', 'approved', 'rejected', 'escalated', 'failed'
     Somente diretor pode executar.
     """
     if current_user.get("role") != "diretor":
@@ -79,10 +79,11 @@ async def cleanup_orphan_operations(
 
     orphan_ids = [row["id"] for row in orphan_rows]
 
-    # Marcar como error
+    # Marcar como failed
     supabase.table("operations")\
         .update({
-            "status": "error",
+            "status": "failed",
+            "error_message": "Opera??o ?rf? - processo reiniciado (cleanup manual)",
             "updated_at": datetime.now(timezone.utc).isoformat(),
         })\
         .in_("id", orphan_ids)\
