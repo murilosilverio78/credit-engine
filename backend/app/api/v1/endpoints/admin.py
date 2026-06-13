@@ -83,7 +83,7 @@ async def cleanup_orphan_operations(
     supabase.table("operations")\
         .update({
             "status": "failed",
-            "error_message": "Opera??o ?rf? - processo reiniciado (cleanup manual)",
+            "error_message": "Operação órfã - processo reiniciado (cleanup manual)",
             "updated_at": datetime.now(timezone.utc).isoformat(),
         })\
         .in_("id", orphan_ids)\

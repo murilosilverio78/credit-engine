@@ -104,7 +104,7 @@ def _mark_operation_failed(operation_id: str, message: str):
 
 
 def _update_heartbeat(operation_id: str):
-    """Atualiza heartbeat_at para evitar que o recovery mate opera??es em andamento."""
+    """Atualiza heartbeat_at para evitar que o recovery mate operações em andamento."""
     try:
         supabase.table("operations")\
             .update({"heartbeat_at": datetime.now(timezone.utc).isoformat()})\
@@ -237,7 +237,7 @@ async def start_analysis(operation_id: str):
 
     logger.info("pipeline.started", operation_id=operation_id)
 
-    # Sinaliza que o pipeline est? em execu??o e registra heartbeat inicial
+    # Sinaliza que o pipeline está em execução e registra heartbeat inicial
     supabase.table("operations")\
         .update({
             "status": "processing",
@@ -255,7 +255,7 @@ async def start_analysis(operation_id: str):
         if _component_result_failed(result)
     ]
     if len(phase1_failed) == 2:
-        # Ambas as fontes falharam ? sem dados cadastrais m?nimos para continuar
+        # Ambas as fontes falharam — sem dados cadastrais mínimos para continuar
         message = "pipeline abortado: falha em todos os componentes da fase 1"
         _mark_operation_failed(operation_id, message)
         logger.error("pipeline.phase1_failed", operation_id=operation_id, results=phase1_results)
@@ -266,14 +266,18 @@ async def start_analysis(operation_id: str):
             operation_id=operation_id,
             failed_components=phase1_failed,
         )
-        # Marcar flag de dado degradado na opera??o para visibilidade no score
+        # Marcar flag de dado degradado na operação para visibilidade no score
         try:
             supabase.table("operations")\
                 .update({"dado_cadastral_degradado": True})\
                 .eq("id", operation_id)\
                 .execute()
-        except Exception:
-            pass  # campo pode n?o existir ainda ? n?o bloquear pipeline
+        except Exception as exc:
+            logger.warning(
+                "pipeline.flag_degradado_failed",
+                operation_id=operation_id,
+                error=str(exc),
+            )
 
     _update_operation_razao_social(operation_id)
     _update_heartbeat(operation_id)
@@ -286,6 +290,7 @@ async def start_analysis(operation_id: str):
         _run_component(run_cnep, operation_id),
         _run_component(run_cepim, operation_id),
     )
+    _update_heartbeat(operation_id)
     failed_phase2 = _phase2_failed_components(list(phase2_results))
     for component, result in failed_phase2:
         logger.error(
@@ -466,6 +471,7 @@ async def _complete_analysis(operation_id: str):
             data["taxa_sugerida"] = pricing.get("taxa_sugerida_am")
             data["taxa_breakdown"] = pricing
         except Exception as exc:
+            data["pricing_skipped_reason"] = f"erro no cálculo de taxa: {exc}"[:300]
             logger.error(
                 "pipeline.pricing_error",
                 operation_id=operation_id,
@@ -482,7 +488,7 @@ async def _complete_analysis(operation_id: str):
             motivos.append("valor_solicitado ausente")
         if not prazo_dias or prazo_dias <= 0:
             motivos.append("prazo_dias ausente")
-        motivo_str = "; ".join(motivos) if motivos else "condi??o n?o atendida"
+        motivo_str = "; ".join(motivos) if motivos else "condição não atendida"
         data["pricing_skipped_reason"] = motivo_str
         logger.info(
             "pipeline.pricing_skipped",
@@ -510,7 +516,10 @@ async def _complete_analysis(operation_id: str):
 async def resume_after_upload(operation_id: str):
     """Continue analysis once all required certificate uploads are complete."""
     resumed = supabase.table("operations")\
-        .update({"status": "pending"})\
+        .update({
+            "status": "processing",
+            "heartbeat_at": datetime.now(timezone.utc).isoformat(),
+        })\
         .eq("id", operation_id)\
         .eq("status", "manual_review")\
         .execute()
@@ -518,5 +527,5 @@ async def resume_after_upload(operation_id: str):
         logger.info("pipeline.resume_skipped", operation_id=operation_id)
         return {"operation_id": operation_id, "status": "already_resumed"}
 
-    logger.info("pipeline.resumed", operation_id=operation_id)
+    logger.info("pipeline.resumed_processing", operation_id=operation_id)
     return await _phase3_4(operation_id)

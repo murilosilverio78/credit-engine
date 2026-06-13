@@ -77,6 +77,17 @@ npm run dev
 
 Ver `backend/.env.example` e `frontend/.env.local.example`.
 
+## Verificação de encoding
+
+Antes de commitar mudanças no backend, rode:
+
+```bash
+python scripts/check_encoding.py
+```
+
+O script falha se encontrar provável mojibake de acentuação em literais de string
+Python, como `Opera??o` ou `n?o`.
+
 ## Dívida de segurança
 
 A autenticação usa access token JWT em `localStorage` no frontend para viabilizar

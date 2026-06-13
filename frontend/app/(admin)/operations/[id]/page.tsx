@@ -21,7 +21,6 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { ApprovalActions } from "@/components/approval-actions";
-import { useSession } from "@/hooks/use-session";
 import {
   ApiError,
   createOverride,
@@ -706,7 +705,6 @@ function CompletedView({
   operationId: string;
 }) {
   const queryClient = useQueryClient();
-  const { session } = useSession();
   const [confirmation, setConfirmation] = useState("");
   const {
     formState: { errors },
@@ -723,14 +721,13 @@ function CompletedView({
     },
     resolver: zodResolver(overrideSchema),
   });
-  const currentUserRole = session?.user.role ?? "analista";
   const overridesQuery = useQuery({
     queryFn: () => getOperationOverrides(operationId),
     queryKey: ["operations", operationId, "overrides"],
   });
   const taxaValidationMutation = useMutation({
     mutationFn: (taxaProposta: number) =>
-      validateTaxaOverride(operationId, taxaProposta, currentUserRole),
+      validateTaxaOverride(operationId, taxaProposta),
   });
   const overrideMutation = useMutation({
     mutationFn: (values: OverrideFormValues) =>
@@ -779,6 +776,11 @@ function CompletedView({
             <p className="text-sm font-medium text-foreground">
               {operation.razao_social || formatCnpj(operation.cnpj)}
             </p>
+            {operation.dado_cadastral_degradado ? (
+              <p className="mt-1 inline-flex rounded bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                Dados cadastrais parcialmente indisponíveis na análise
+              </p>
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
             {operation.status === "completed" ? (

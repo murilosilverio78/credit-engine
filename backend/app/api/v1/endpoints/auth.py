@@ -11,7 +11,7 @@ import resend
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from jose import jwt
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from app.core.auth import ROLE_TO_ALCADA, get_current_user
 from app.core.config import settings
@@ -21,7 +21,9 @@ from app.core.database import supabase
 router = APIRouter()
 logger = structlog.get_logger()
 
-# Rate limiting in-process (sem depend?ncia externa)
+# Rate limiting in-process (sem dependência externa).
+# Débito técnico: bucket em memória é por instância e reseta a cada deploy;
+# aceitável para instância única do MVP.
 # Estrutura: {ip: [timestamp, ...]}
 _rate_buckets: dict[str, list[float]] = defaultdict(list)
 _rate_lock = asyncio.Lock()
@@ -48,11 +50,18 @@ async def _check_rate_limit(ip: str, max_calls: int) -> None:
         _rate_buckets[ip].append(now)
 
 
+def _client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip() or "unknown"
+    return request.client.host if request.client else "unknown"
+
+
 class RegisterInput(BaseModel):
     email: EmailStr
     name: str
     role: Literal["analista", "gerente", "diretor"]
-    password: str
+    password: str = Field(min_length=10)
 
 
 class LoginInput(BaseModel):
@@ -122,7 +131,13 @@ async def register_user(
     if existing.data:
         raise HTTPException(status_code=409, detail="Email já cadastrado")
 
-    hashed = bcrypt.hashpw(payload.password.encode(), bcrypt.gensalt()).decode()
+    hashed = (
+        await asyncio.to_thread(
+            bcrypt.hashpw,
+            payload.password.encode(),
+            bcrypt.gensalt(),
+        )
+    ).decode()
 
     result = supabase.table("users").insert({
         "email": payload.email.lower(),
@@ -163,7 +178,7 @@ async def register_user(
 
 @router.post("/login")
 async def login(payload: LoginInput, request: Request):
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _client_ip(request)
     await _check_rate_limit(client_ip, _RATE_MAX_LOGIN)
 
     erro_credencial = "Email ou senha inválidos"
@@ -184,7 +199,12 @@ async def login(payload: LoginInput, request: Request):
     if not user.get("password_hash"):
         raise HTTPException(status_code=401, detail=erro_credencial)
 
-    if not bcrypt.checkpw(payload.password.encode(), user["password_hash"].encode()):
+    valid_password = await asyncio.to_thread(
+        bcrypt.checkpw,
+        payload.password.encode(),
+        user["password_hash"].encode(),
+    )
+    if not valid_password:
         raise HTTPException(status_code=401, detail=erro_credencial)
 
     if not user.get("email_verified"):
@@ -253,7 +273,7 @@ async def confirm_email(payload: ConfirmEmailInput):
 
 @router.post("/resend-verification")
 async def resend_verification(payload: ResendInput, request: Request):
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _client_ip(request)
     await _check_rate_limit(client_ip, _RATE_MAX_RESEND)
 
     msg = "Se o email existir e ainda não estiver confirmado, um novo link foi enviado."

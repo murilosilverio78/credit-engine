@@ -25,12 +25,13 @@ class OverrideReviewInput(BaseModel):
 async def validate_taxa_override(
     operation_id: str,
     taxa_proposta: float = Query(...),
-    requesting_role: str = Query(...),
+    current_user: dict = Depends(get_current_user),
 ):
     """Simula validacao de override de taxa em tempo real."""
     from app.services.override_service import OverrideService
 
     svc = OverrideService()
+    requesting_role = current_user.get("role") or current_user.get("alcada") or "analista"
     try:
         return await svc._validate_taxa_override(
             operation_id=operation_id,

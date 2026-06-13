@@ -194,10 +194,8 @@ export function createOverride(operationId: string, payload: OverrideInput) {
 export function validateTaxaOverride(
   operationId: string,
   taxaProposta: number,
-  role: UserRole,
 ) {
   const params = new URLSearchParams({
-    requesting_role: role,
     taxa_proposta: String(taxaProposta),
   });
   return request<TaxaOverrideValidation>(

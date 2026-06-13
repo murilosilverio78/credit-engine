@@ -105,7 +105,7 @@ class OperationService:
         limit: int = 20,
         offset: int = 0,
     ) -> dict:
-        """Lista opera??es com filtros opcionais."""
+        """Lista operações com filtros opcionais."""
         query = supabase.table("operations")            .select(
                 "id, cnpj, razao_social, status, rating, score, taxa_sugerida, source, created_at",
                 count="exact",

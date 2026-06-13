@@ -29,6 +29,7 @@ export interface Operation {
   prazo_dias?: number | null;
   contrato_saldo?: number | null;
   pricing_skipped_reason?: string | null;
+  dado_cadastral_degradado?: boolean | null;
   source: string;
   created_at: string;
   limite_aprovado?: number | null;

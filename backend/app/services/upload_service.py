@@ -28,12 +28,17 @@ def _parse_json_response(text: str) -> dict:
 class UploadService:
     async def list_pending(self, operation_id: Optional[str] = None) -> list[dict]:
         """List the pending queue or full upload progress for one operation."""
+        fields = (
+            "id,operation_id,document_type,token,status,notified_at,"
+            "completed_at,expires_at,created_at,error_message,"
+            "operations(cnpj, razao_social)"
+        ) if operation_id else (
+            "id,operation_id,document_type,status,notified_at,"
+            "completed_at,expires_at,created_at,error_message,"
+            "operations(cnpj, razao_social)"
+        )
         query = supabase.table("upload_tasks")\
-            .select(
-                "id,operation_id,document_type,token,status,notified_at,"
-                "completed_at,expires_at,created_at,error_message,"
-                "operations(cnpj, razao_social)"
-            )
+            .select(fields)
         if operation_id:
             query = query.eq("operation_id", operation_id)
         else:
