@@ -11,6 +11,7 @@ import httpx
 import time
 from datetime import date
 from app.workers.base import BaseComponentTask
+from app.workers.http_utils import fetch_json_with_retry
 import structlog
 
 logger = structlog.get_logger()
@@ -39,37 +40,35 @@ def _fetch(cnpj: str, token: str = None) -> dict:
 
     started = time.monotonic()
     pagina = 1
-    while True:
-        elapsed = time.monotonic() - started
-        if elapsed > MAX_SECONDS:
-            raise TimeoutError(
-                f"recursos_recebidos excedeu timeout de {MAX_SECONDS}s na pagina {pagina}"
-            )
-        if pagina > MAX_PAGES:
-            logger.warning(
-                "recursos_recebidos.pagination_cap_reached",
-                paginas_lidas=pagina,
-                registros_ate_agora=len(recursos),
-            )
-            break
+    with httpx.Client(timeout=20, verify=SSL_VERIFY) as client:
+        while True:
+            elapsed = time.monotonic() - started
+            if elapsed > MAX_SECONDS:
+                raise TimeoutError(
+                    f"recursos_recebidos excedeu timeout de {MAX_SECONDS}s na pagina {pagina}"
+                )
+            if pagina > MAX_PAGES:
+                logger.warning(
+                    "recursos_recebidos.pagination_cap_reached",
+                    paginas_lidas=pagina,
+                    registros_ate_agora=len(recursos),
+                )
+                break
 
-        # URL montada como string para evitar encoding do "/" pelo httpx
-        url = (
-            f"{BASE_URL}/despesas/recursos-recebidos"
-            f"?codigoFavorecido={cnpj}"
-            f"&mesAnoInicio={mes_inicio}"
-            f"&mesAnoFim={mes_fim}"
-            f"&pagina={pagina}"
-        )
-        with httpx.Client(timeout=20, verify=SSL_VERIFY) as client:
-            resp = client.get(url, headers=headers)
-            resp.raise_for_status()
-            data = [] if not resp.content or not resp.text.strip() else resp.json()
+            # URL montada como string para evitar encoding do "/" pelo httpx
+            url = (
+                f"{BASE_URL}/despesas/recursos-recebidos"
+                f"?codigoFavorecido={cnpj}"
+                f"&mesAnoInicio={mes_inicio}"
+                f"&mesAnoFim={mes_fim}"
+                f"&pagina={pagina}"
+            )
+            data = fetch_json_with_retry(client, url, headers=headers)
 
-        if not data:
-            break
-        recursos.extend(data)
-        pagina += 1
+            if not data:
+                break
+            recursos.extend(data)
+            pagina += 1
 
     valor_total = sum(float(r.get("valor") or 0) for r in recursos)
     orgaos = list({r.get("nomeOrgao", "") for r in recursos if r.get("nomeOrgao")})

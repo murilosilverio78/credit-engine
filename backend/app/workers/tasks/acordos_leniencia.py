@@ -10,6 +10,7 @@ import os
 import httpx
 import time
 from app.workers.base import BaseComponentTask
+from app.workers.http_utils import fetch_json_with_retry
 import structlog
 
 logger = structlog.get_logger()
@@ -30,26 +31,25 @@ def _fetch(cnpj: str, token: str = None) -> dict:
 
     started = time.monotonic()
     pagina = 1
-    while True:
-        elapsed = time.monotonic() - started
-        if elapsed > MAX_SECONDS:
-            raise TimeoutError(f"acordos_leniencia excedeu timeout de {MAX_SECONDS}s na pagina {pagina}")
-        if pagina > MAX_PAGES:
-            raise TimeoutError(f"acordos_leniencia excedeu limite de {MAX_PAGES} paginas")
+    with httpx.Client(timeout=20, verify=SSL_VERIFY) as client:
+        while True:
+            elapsed = time.monotonic() - started
+            if elapsed > MAX_SECONDS:
+                raise TimeoutError(f"acordos_leniencia excedeu timeout de {MAX_SECONDS}s na pagina {pagina}")
+            if pagina > MAX_PAGES:
+                raise TimeoutError(f"acordos_leniencia excedeu limite de {MAX_PAGES} paginas")
 
-        with httpx.Client(timeout=15, verify=SSL_VERIFY) as client:
-            resp = client.get(
+            data = fetch_json_with_retry(
+                client,
                 f"{BASE_URL}/acordos-leniencia",
                 headers=headers,
                 params={"cnpjSancionado": cnpj_limpo, "pagina": pagina},
             )
-            resp.raise_for_status()
-            data = [] if not resp.content or not resp.text.strip() else resp.json()
 
-        if not data:
-            break
-        acordos.extend(data)
-        pagina += 1
+            if not data:
+                break
+            acordos.extend(data)
+            pagina += 1
 
     logger.info(
         "_pagination",

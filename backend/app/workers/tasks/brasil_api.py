@@ -3,8 +3,8 @@ Componente: BrasilAPI
 Consulta dados cadastrais da empresa (CNPJ, QSA, atividade, situação, regime tributário).
 Tipo: automatizado | Fila: fast | Cache: 24h
 
-Nota: verify=False necessário por limitação de certificados SSL em alguns ambientes Windows.
-      Em produção (Railway/Linux) funciona normalmente com verify=True.
+Nota: a verifica??o TLS pode ser desabilitada em .env local Windows.
+      Em produ??o (Railway/Linux) funciona normalmente com verifica??o ativa.
 """
 import httpx
 import os

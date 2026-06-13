@@ -46,8 +46,6 @@ app.include_router(auth.router,       prefix="/api/v1/auth",       tags=["auth"]
 app.include_router(alcadas.router,    prefix="/api/v1/alcadas",    tags=["alcadas"],    dependencies=_auth_dep)
 app.include_router(escaladas.router,  prefix="/api/v1/escaladas",  tags=["escaladas"],  dependencies=_auth_dep)
 app.include_router(pricing.router,    prefix="/api/v1/pricing",    tags=["pricing"],    dependencies=_auth_dep)
-app.include_router(operations.router, prefix="/api/operations",    tags=["operations"], dependencies=_auth_dep)
-app.include_router(escaladas.router,  prefix="/api/escaladas",     tags=["escaladas"],  dependencies=_auth_dep)
 
 # Rotas públicas por design (link de upload enviado ao fornecedor — sem auth)
 app.include_router(uploads_public_router, prefix="/api/v1/uploads", tags=["uploads-public"])

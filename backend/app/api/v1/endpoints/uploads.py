@@ -9,6 +9,20 @@ logger = structlog.get_logger()
 
 ALLOWED_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png"}
 MAX_FILE_SIZE_MB = 10
+MAGIC_BYTES = {
+    "application/pdf": b"%PDF-",
+    "image/jpeg": b"\xff\xd8\xff",
+    "image/png": b"\x89PNG\r\n\x1a\n",
+}
+
+
+def _validate_magic_bytes(content: bytes, content_type: str):
+    expected = MAGIC_BYTES.get(content_type)
+    if expected and not content.startswith(expected):
+        raise HTTPException(
+            status_code=400,
+            detail="Conteúdo do arquivo não corresponde ao tipo declarado",
+        )
 
 
 @router.get("/pending")
@@ -86,6 +100,7 @@ async def receive_upload(
         )
 
     content = await file.read()
+    _validate_magic_bytes(content, file.content_type)
     if len(content) > MAX_FILE_SIZE_MB * 1024 * 1024:
         raise HTTPException(
             status_code=400,

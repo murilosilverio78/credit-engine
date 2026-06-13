@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException, Request
 from jose import JWTError, jwt
 
 from app.core.config import settings
+from app.core.database import supabase
 
 
 ROLE_TO_ALCADA = {
@@ -28,6 +29,8 @@ def _decode_token(token: str) -> Optional[dict]:
         payload["id"] = user_id
     if payload.get("role") and not payload.get("alcada"):
         payload["alcada"] = ROLE_TO_ALCADA.get(payload["role"], "analista")
+    if "token_version" not in payload:
+        payload["token_version"] = 0
     return payload
 
 
@@ -45,9 +48,28 @@ async def get_current_user_optional(request: Request) -> Optional[dict]:
 
 async def get_current_user(request: Request) -> dict:
     user = await get_current_user_optional(request)
-    if user:
-        return user
-    raise HTTPException(status_code=401, detail="Não autenticado")
+    if not user or not user.get("id"):
+        raise HTTPException(status_code=401, detail="Não autenticado")
+
+    # Débito técnico: +1 query por request; aceitável no volume atual.
+    # Se virar gargalo, otimizar com cache curto por usuário/token_version.
+    try:
+        result = supabase.table("users")\
+            .select("token_version,active")\
+            .eq("id", user["id"])\
+            .single()\
+            .execute()
+        row = result.data
+    except Exception:
+        row = None
+
+    if not row or row.get("active") is False:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+
+    if (row.get("token_version") or 0) != (user.get("token_version") or 0):
+        raise HTTPException(status_code=401, detail="Não autenticado")
+
+    return user
 
 
 CurrentUser = Depends(get_current_user)

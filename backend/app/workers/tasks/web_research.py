@@ -213,7 +213,7 @@ NUNCA atribua informações de outra empresa a esta.
 Retorne apenas o JSON estruturado conforme instruído."""
 
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model=settings.CLAUDE_MODEL_RESEARCH,
         max_tokens=1000,
         temperature=0,
         system=SYSTEM_PROMPT,

@@ -859,7 +859,7 @@ def score_porte_llm(
             asyncio.wait_for(
                 _create_porte_message(
                     client,
-                    model="claude-opus-4-5",
+                    model=settings.CLAUDE_MODEL_SCORE,
                     max_tokens=1000,
                     temperature=0,
                     system=PORTE_SYSTEM_PROMPT,

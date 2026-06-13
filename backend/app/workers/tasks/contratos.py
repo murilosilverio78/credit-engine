@@ -11,6 +11,7 @@ import httpx
 import time
 from datetime import date
 from app.workers.base import BaseComponentTask
+from app.workers.http_utils import fetch_json_with_retry
 import structlog
 
 logger = structlog.get_logger()
@@ -61,32 +62,31 @@ def _fetch(cnpj: str, token: str = None) -> dict:
 
     started = time.monotonic()
     pagina = 1
-    while True:
-        elapsed = time.monotonic() - started
-        if elapsed > MAX_SECONDS:
-            raise TimeoutError(f"contratos excedeu timeout de {MAX_SECONDS}s na pagina {pagina}")
-        if pagina > MAX_PAGES:
-            logger.warning(
-                "contratos.pagination_cap_reached",
-                cnpj=cnpj,
-                paginas_lidas=pagina,
-                registros_ate_agora=len(contratos),
-            )
-            break
+    with httpx.Client(timeout=20, verify=SSL_VERIFY) as client:
+        while True:
+            elapsed = time.monotonic() - started
+            if elapsed > MAX_SECONDS:
+                raise TimeoutError(f"contratos excedeu timeout de {MAX_SECONDS}s na pagina {pagina}")
+            if pagina > MAX_PAGES:
+                logger.warning(
+                    "contratos.pagination_cap_reached",
+                    cnpj=cnpj,
+                    paginas_lidas=pagina,
+                    registros_ate_agora=len(contratos),
+                )
+                break
 
-        with httpx.Client(timeout=20, verify=SSL_VERIFY) as client:
-            resp = client.get(
+            data = fetch_json_with_retry(
+                client,
                 f"{BASE_URL}/contratos/cpf-cnpj",
                 headers=headers,
                 params={"cpfCnpj": cnpj, "pagina": pagina, "tamanhoPagina": 50},
             )
-            resp.raise_for_status()
-            data = [] if not resp.content or not resp.text.strip() else resp.json()
 
-        if not data:
-            break
-        contratos.extend(data)
-        pagina += 1
+            if not data:
+                break
+            contratos.extend(data)
+            pagina += 1
 
     parsed    = [_parse_contrato(c) for c in contratos]
     ativos    = [c for c in parsed if c["ativo"]]

@@ -117,12 +117,14 @@ class UploadService:
         parsed_result = {"storage_key": storage_key, "filename": filename}
         snapshot_status = "completed"
         error_message = None
+        extraction_succeeded = False
 
         try:
             extraction = fix_dict_encoding(self._extract_certificate(
                 document_type=document_type,
                 file_content=task.data.get("file_content"),
             ))
+            extraction_succeeded = True
             parsed_result.update({
                 "status": "obtida",
                 "resultado": extraction.get("resultado"),
@@ -183,7 +185,11 @@ class UploadService:
             "completed_at": completed_at,
             "error_message": error_message,
         }
+        if extraction_succeeded:
+            task_update["file_content"] = None
         supabase.table("upload_tasks").update(task_update).eq("id", task_id).execute()
+        if extraction_succeeded:
+            logger.info("upload.inline_cleared", operation_id=operation_id, task_id=task_id)
 
         supabase.table("documents").insert({
             "operation_id": operation_id,
@@ -230,7 +236,7 @@ class UploadService:
 
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=settings.CLAUDE_MODEL_EXTRACTION,
             max_tokens=500,
             messages=[{
                 "role": "user",

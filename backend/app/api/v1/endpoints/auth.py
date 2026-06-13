@@ -185,7 +185,7 @@ async def login(payload: LoginInput, request: Request):
 
     try:
         result = supabase.table("users")\
-            .select("id,email,name,role,active,password_hash,email_verified")\
+            .select("id,email,name,role,active,password_hash,email_verified,token_version")\
             .eq("email", payload.email.lower())\
             .single()\
             .execute()
@@ -229,6 +229,7 @@ async def login(payload: LoginInput, request: Request):
             "name": user.get("name") or user["email"],
             "role": user["role"],
             "session_token": session_token,
+            "token_version": user.get("token_version") or 0,
         },
         _secret(),
         algorithm="HS256",
@@ -312,6 +313,19 @@ async def me(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/logout")
-async def logout(response: Response):
+async def logout(
+    response: Response,
+    current_user: dict = Depends(get_current_user),
+):
+    user = supabase.table("users")\
+        .select("token_version")\
+        .eq("id", current_user["id"])\
+        .single()\
+        .execute()
+    current_version = (user.data.get("token_version") or 0) if user.data else 0
+    supabase.table("users")\
+        .update({"token_version": current_version + 1})\
+        .eq("id", current_user["id"])\
+        .execute()
     response.delete_cookie("session", samesite="none", secure=True)
     return {"ok": True}
