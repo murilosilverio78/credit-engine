@@ -224,7 +224,7 @@ async def login(payload: LoginInput, request: Request):
         {
             "alcada": ROLE_TO_ALCADA.get(user["role"], "analyst"),
             "email": user["email"],
-            "exp": datetime.now(timezone.utc) + timedelta(days=7),
+            "exp": datetime.now(timezone.utc) + timedelta(hours=8),
             "id": user["id"],
             "name": user.get("name") or user["email"],
             "role": user["role"],
