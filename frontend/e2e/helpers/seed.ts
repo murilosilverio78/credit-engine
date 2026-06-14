@@ -13,6 +13,7 @@ import { env } from "./env";
 type CompletedOperation = {
   operation_id: string;
   status?: string;
+  taxa_sugerida?: number | string | null;
   [key: string]: unknown;
 };
 
