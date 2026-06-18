@@ -30,17 +30,20 @@ Retorne APENAS um JSON válido com esta estrutura:
   "score_reputacao": <0-100>,
   "nivel_risco": "<baixo|medio|alto|critico>",
   "nivel": "<Excepcional|Forte|Adequado|Atencao|Fraco|Critico>",
-  "raciocinio_reputacao": "<raciocinio antes da escolha do nivel>",
-  "fatores_reputacao": ["<fator1>", "<fator2>"],
-  "flags_reputacao": ["<flag1>", "<flag2>"],
+  "raciocinio_reputacao": "<maximo 2 frases resumidas, nao o raciocinio completo>",
+  "fatores_reputacao": ["<maximo 3 fatores principais>"],
+  "flags_reputacao": ["<flags objetivas, sem explicacao longa>"],
   "noticias_negativas": <true|false>,
   "processos_relevantes": <true|false>,
   "reclamacoes_graves": <true|false>,
   "problemas_governo": <true|false>,
-  "resumo": "<2-3 frases objetivas>",
-  "alertas": ["<alerta1>", "<alerta2>"],
+  "resumo": "<maximo 2 frases>",
+  "alertas": ["<maximo 3 alertas, frases curtas>"],
   "fontes_consultadas": ["<fonte1>", "<fonte2>"]
 }
+
+IMPORTANTE: Seja conciso. O JSON inteiro deve caber em menos de 800 tokens.
+Raciocinio longo vai em raciocinio_reputacao em NO MAXIMO 2 frases curtas.
 
 Ao final da pesquisa, classifique a REPUTAÇÃO da empresa em um nível, com raciocínio
 ANTES da escolha. Âncoras:
@@ -74,16 +77,16 @@ markdown, sem ```json. A primeira linha da resposta deve ser { e a ultima }.
 O JSON deve conter OBRIGATORIAMENTE estes campos:
 {
   "nivel": "<Excepcional|Forte|Adequado|Atencao|Fraco|Critico>",
-  "raciocinio_reputacao": "<...>",
-  "fatores_reputacao": [...],
-  "flags_reputacao": [...],
+  "raciocinio_reputacao": "<maximo 2 frases resumidas>",
+  "fatores_reputacao": ["<maximo 3 fatores principais>"],
+  "flags_reputacao": ["<flags objetivas, sem explicacao longa>"],
   "score_reputacao": <0-100>,
   "nivel_risco": "<baixo|medio|alto>",
   "noticias_negativas": <bool>,
   "processos_relevantes": <bool>,
   "reclamacoes_graves": <bool>,
   "problemas_governo": <bool>,
-  "resumo": "<...>",
+  "resumo": "<maximo 2 frases>",
   "fontes_consultadas": [...]
 }
 """
@@ -121,36 +124,79 @@ def _company_age_years(data_abertura) -> float | None:
 
 
 def _extract_json_object(text: str) -> str:
-    clean = re.sub(r"```(?:json)?", "", text, flags=re.IGNORECASE)
-    clean = clean.replace("```", "").strip()
-    start = clean.find("{")
-    if start == -1:
-        raise ValueError("JSON object start not found")
+    """
+    Extracts and repairs a JSON object from LLM output.
+    Handles: markdown fences, truncated JSON, extra text before/after.
+    """
+    import re
+    # Strip markdown fences
+    text = re.sub(r"```json|```", "", text).strip()
 
+    # Find the start of JSON object
+    start = text.find("{")
+    if start == -1:
+        raise ValueError("No JSON object found in text")
+    text = text[start:]
+
+    # Try parsing as-is first
+    try:
+        json.loads(text)
+        return text
+    except json.JSONDecodeError:
+        pass
+
+    # Try to find complete JSON object by matching braces
     depth = 0
     in_string = False
-    escaped = False
-    for index in range(start, len(clean)):
-        char = clean[index]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
+    escape_next = False
+    end_pos = -1
+    for i, ch in enumerate(text):
+        if escape_next:
+            escape_next = False
             continue
-
-        if char == '"':
-            in_string = True
-        elif char == "{":
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
             depth += 1
-        elif char == "}":
+        elif ch == "}":
             depth -= 1
             if depth == 0:
-                return clean[start:index + 1]
+                end_pos = i
+                break
 
-    raise ValueError("JSON object end not found")
+    if end_pos != -1:
+        candidate = text[:end_pos + 1]
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
+
+    # Last resort: truncation repair
+    # Close any open strings, arrays, and objects
+    repaired = text
+    # Remove trailing incomplete string/value
+    repaired = re.sub(r',\s*"[^"]*$', "", repaired)  # remove last incomplete key-value
+    repaired = re.sub(r':\s*"[^"]*$', ': ""', repaired)  # close open string value
+    repaired = re.sub(r',\s*$', "", repaired)  # remove trailing comma
+
+    # Count unclosed brackets
+    open_arrays = repaired.count("[") - repaired.count("]")
+    open_objects = repaired.count("{") - repaired.count("}")
+    repaired += "]" * max(0, open_arrays)
+    repaired += "}" * max(0, open_objects)
+
+    try:
+        json.loads(repaired)
+        return repaired
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Could not repair truncated JSON: {e}") from e
 
 
 def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
@@ -214,7 +260,7 @@ Retorne apenas o JSON estruturado conforme instruído."""
 
     response = client.messages.create(
         model=settings.CLAUDE_MODEL_RESEARCH,
-        max_tokens=1000,
+        max_tokens=2000,
         temperature=0,
         system=SYSTEM_PROMPT,
         tools=[{"type": "web_search_20250305", "name": "web_search"}],
