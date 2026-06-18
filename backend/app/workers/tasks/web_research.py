@@ -221,8 +221,12 @@ Retorne apenas o JSON estruturado conforme instruído."""
         messages=[{"role": "user", "content": prompt}],
     )
 
+    # Collect all text blocks; JSON lives in the LAST one after tool_use/tool_result
     text_blocks = [block.text for block in response.content if block.type == "text"]
-    result_text = "\n".join(text_blocks)
+    result_text = text_blocks[-1] if text_blocks else ""
+    if not result_text:
+        logger.warning("web_research.no_text_block", operation_id="unknown",
+                       block_types=[b.type for b in response.content])
 
     try:
         clean = _extract_json_object(result_text)
