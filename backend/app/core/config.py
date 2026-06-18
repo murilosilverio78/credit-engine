@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     # Claude API
     ANTHROPIC_API_KEY: str
     CLAUDE_MODEL_SCORE: str = "claude-opus-4-5"
-    CLAUDE_MODEL_RESEARCH: str = "claude-sonnet-4-20250514"
-    CLAUDE_MODEL_EXTRACTION: str = "claude-sonnet-4-20250514"
+    CLAUDE_MODEL_RESEARCH: str = "claude-sonnet-4-6"
+    CLAUDE_MODEL_EXTRACTION: str = "claude-sonnet-4-6"
 
     # Portal da Transparência
     PORTAL_TRANSPARENCIA_TOKEN: str

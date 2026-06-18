@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 CNPJ = os.getenv("TEST_CNPJ", "03012610000101")
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 
 SYSTEM = """Voce e um analista de risco de credito especializado em fornecedores do governo brasileiro.
 Pesquise a reputacao da empresa e retorne APENAS um JSON valido:
