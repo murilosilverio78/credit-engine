@@ -20,6 +20,12 @@ def _normalize_cnpj(cnpj: Optional[str]) -> str:
     return re.sub(r"\D", "", cnpj or "")
 
 
+def _cnpj_root(cnpj: str) -> str:
+    """Return the 8-digit CNPJ root (ignores branch suffix)."""
+    digits = "".join(c for c in (cnpj or "") if c.isdigit())
+    return digits[:8]
+
+
 def _parse_json_response(text: str) -> dict:
     clean = re.sub(r"```json|```", "", text).strip()
     return json.loads(clean)
@@ -143,20 +149,34 @@ class UploadService:
                 .execute()
             operation_cnpj = _normalize_cnpj(operation.data.get("cnpj"))
             certificate_cnpj = _normalize_cnpj(extraction.get("cnpj"))
-            if certificate_cnpj and operation_cnpj and certificate_cnpj != operation_cnpj:
-                snapshot_status = "failed"
-                error_message = (
-                    f"CNPJ da certidão ({certificate_cnpj}) não corresponde ao "
-                    f"CNPJ analisado ({operation_cnpj})"
-                )
-                logger.warning(
-                    "upload_task.cnpj_mismatch",
-                    operation_id=operation_id,
-                    task_id=task_id,
-                    certificate_cnpj=certificate_cnpj,
-                    operation_cnpj=operation_cnpj,
-                )
-            else:
+            if certificate_cnpj and operation_cnpj:
+                cert_root = _cnpj_root(certificate_cnpj)
+                op_root = _cnpj_root(operation_cnpj)
+                if cert_root != op_root:
+                    # Completely different legal entity - hard block
+                    snapshot_status = "failed"
+                    error_message = (
+                        f"CNPJ da certidão ({certificate_cnpj}) não pertence ao grupo "
+                        f"empresarial do CNPJ analisado ({operation_cnpj})"
+                    )
+                    logger.warning(
+                        "upload_task.cnpj_mismatch",
+                        operation_id=operation_id,
+                        task_id=task_id,
+                        certificate_cnpj=certificate_cnpj,
+                        operation_cnpj=operation_cnpj,
+                    )
+                elif certificate_cnpj != operation_cnpj:
+                    # Same root, different branch - accepted with a warning flag
+                    parsed_result["cnpj_matriz_aceito"] = True
+                    logger.info(
+                        "upload_task.cnpj_matriz_accepted",
+                        operation_id=operation_id,
+                        task_id=task_id,
+                        certificate_cnpj=certificate_cnpj,
+                        operation_cnpj=operation_cnpj,
+                    )
+            if snapshot_status != "failed":
                 certificate_type = extraction.get("tipo_certidao")
                 if certificate_type and certificate_type != document_type:
                     snapshot_status = "failed"
