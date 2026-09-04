@@ -10,7 +10,7 @@
   "favorecido_despesas": true,
   "favorecido_transferencias": false,
   "convenios": false,
-  "participa_licitacao": false,
+  "participa_licitacao": true,
   "emitiu_nfe": false,
   "beneficiado_renuncia_fiscal": false,
   "possui_sancao": false

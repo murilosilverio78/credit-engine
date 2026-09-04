@@ -1,50 +1,26 @@
 {
   "total_registros": 75,
-  "valor_total_recebido": 4261658.3,
-  "periodo_inicio": "06/2025",
-  "periodo_fim": "06/2026",
+  "valor_total_recebido": 4318736.91,
+  "periodo_inicio": "09/2025",
+  "periodo_fim": "09/2026",
   "orgaos_pagadores": [
     "Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira",
+    "Instituto do Patrimônio Histórico e Artístico Nacional",
+    "Instituto Brasileiro de Museus",
+    "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
     "Ministério das Comunicações - Unidades com vínculo direto",
     "Instituto Nacional de Colonização e Reforma Agrária",
-    "Instituto Brasileiro de Museus",
-    "Instituto do Patrimônio Histórico e Artístico Nacional",
-    "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
     "Ministério da Saúde - Unidades com vínculo direto"
   ],
   "valor_por_ano": {
-    "2026": 1794946.2099999993,
-    "2025": 2466712.09
+    "2025": 1660423.74,
+    "2026": 2658313.17
   },
   "recursos_detalhe": [
     {
-      "mes": 202603,
-      "valor": 222169.18,
-      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
-      "acao": null
-    },
-    {
-      "mes": 202507,
-      "valor": 95250.8,
+      "mes": 202511,
+      "valor": 60062.1,
       "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
-      "acao": null
-    },
-    {
-      "mes": 202601,
-      "valor": 57073.06,
-      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
-      "acao": null
-    },
-    {
-      "mes": 202512,
-      "valor": 64997.13,
-      "orgao": "Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira",
-      "acao": null
-    },
-    {
-      "mes": 202602,
-      "valor": 12764.9,
-      "orgao": "Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira",
       "acao": null
     },
     {
@@ -54,206 +30,20 @@
       "acao": null
     },
     {
-      "mes": 202602,
-      "valor": 25057.55,
-      "orgao": "Ministério da Saúde - Unidades com vínculo direto",
-      "acao": null
-    },
-    {
-      "mes": 202506,
-      "valor": 63354.11,
-      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
-      "acao": null
-    },
-    {
       "mes": 202601,
-      "valor": 15499.23,
-      "orgao": "Instituto Brasileiro de Museus",
-      "acao": null
-    },
-    {
-      "mes": 202606,
-      "valor": 30752.79,
+      "valor": 72225.6,
       "orgao": "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
       "acao": null
     },
     {
-      "mes": 202601,
-      "valor": 101701.66,
-      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
-      "acao": null
-    },
-    {
-      "mes": 202511,
-      "valor": 60062.1,
+      "mes": 202608,
+      "valor": 7523.81,
       "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
-      "acao": null
-    },
-    {
-      "mes": 202605,
-      "valor": 551.0,
-      "orgao": "Instituto Brasileiro de Museus",
       "acao": null
     },
     {
       "mes": 202603,
-      "valor": 31409.51,
-      "orgao": "Instituto Brasileiro de Museus",
-      "acao": null
-    },
-    {
-      "mes": 202512,
-      "valor": 70707.19,
-      "orgao": "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
-      "acao": null
-    },
-    {
-      "mes": 202602,
-      "valor": 10060.73,
-      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
-      "acao": null
-    },
-    {
-      "mes": 202507,
-      "valor": 27947.15,
-      "orgao": "Ministério das Comunicações - Unidades com vínculo direto",
-      "acao": null
-    },
-    {
-      "mes": 202509,
-      "valor": 81157.33,
-      "orgao": "Instituto Brasileiro de Museus",
-      "acao": null
-    },
-    {
-      "mes": 202601,
-      "valor": 10163.87,
-      "orgao": "Ministério das Comunicações - Unidades com vínculo direto",
-      "acao": null
-    },
-    {
-      "mes": 202507,
-      "valor": 413073.87,
-      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
-      "acao": null
-    },
-    {
-      "mes": 202604,
-      "valor": 66587.28,
-      "orgao": "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
-      "acao": null
-    },
-    {
-      "mes": 202508,
-      "valor": 72905.81,
-      "orgao": "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
-      "acao": null
-    },
-    {
-      "mes": 202510,
-      "valor": 52078.94,
-      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
-      "acao": null
-    },
-    {
-      "mes": 202603,
-      "valor": 49220.95,
-      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
-      "acao": null
-    },
-    {
-      "mes": 202512,
-      "valor": 9837.35,
-      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
-      "acao": null
-    },
-    {
-      "mes": 202602,
-      "valor": 24302.85,
-      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
-      "acao": null
-    },
-    {
-      "mes": 202507,
-      "valor": 40215.47,
-      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
-      "acao": null
-    },
-    {
-      "mes": 202512,
-      "valor": 24761.83,
-      "orgao": "Ministério da Saúde - Unidades com vínculo direto",
-      "acao": null
-    },
-    {
-      "mes": 202602,
-      "valor": 32137.21,
-      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
-      "acao": null
-    },
-    {
-      "mes": 202605,
-      "valor": 53285.88,
-      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
-      "acao": null
-    },
-    {
-      "mes": 202508,
-      "valor": 13618.58,
-      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
-      "acao": null
-    },
-    {
-      "mes": 202510,
-      "valor": 14050.1,
-      "orgao": "Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira",
-      "acao": null
-    },
-    {
-      "mes": 202603,
-      "valor": 17855.99,
-      "orgao": "Instituto Brasileiro de Museus",
-      "acao": null
-    },
-    {
-      "mes": 202508,
-      "valor": 71794.51,
-      "orgao": "Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira",
-      "acao": null
-    },
-    {
-      "mes": 202605,
-      "valor": 211014.62,
-      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
-      "acao": null
-    },
-    {
-      "mes": 202605,
-      "valor": 57767.91,
-      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
-      "acao": null
-    },
-    {
-      "mes": 202512,
-      "valor": 139475.46,
-      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
-      "acao": null
-    },
-    {
-      "mes": 202508,
-      "valor": 37137.21,
-      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
-      "acao": null
-    },
-    {
-      "mes": 202511,
-      "valor": 169821.77,
-      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
-      "acao": null
-    },
-    {
-      "mes": 202604,
-      "valor": 31167.91,
+      "valor": 222169.18,
       "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
       "acao": null
     },
@@ -264,14 +54,92 @@
       "acao": null
     },
     {
-      "mes": 202604,
-      "valor": 25098.99,
+      "mes": 202601,
+      "valor": 57073.06,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "acao": null
+    },
+    {
+      "mes": 202509,
+      "valor": 23583.63,
       "orgao": "Ministério da Saúde - Unidades com vínculo direto",
       "acao": null
     },
     {
-      "mes": 202604,
-      "valor": 135665.61,
+      "mes": 202603,
+      "valor": 48159.53,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "acao": null
+    },
+    {
+      "mes": 202509,
+      "valor": 81157.33,
+      "orgao": "Instituto Brasileiro de Museus",
+      "acao": null
+    },
+    {
+      "mes": 202607,
+      "valor": 129609.92,
+      "orgao": "Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira",
+      "acao": null
+    },
+    {
+      "mes": 202601,
+      "valor": 101701.66,
+      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
+      "acao": null
+    },
+    {
+      "mes": 202601,
+      "valor": 65271.13,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "acao": null
+    },
+    {
+      "mes": 202509,
+      "valor": 74486.86,
+      "orgao": "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
+      "acao": null
+    },
+    {
+      "mes": 202605,
+      "valor": 25026.46,
+      "orgao": "Ministério da Saúde - Unidades com vínculo direto",
+      "acao": null
+    },
+    {
+      "mes": 202512,
+      "valor": 64997.13,
+      "orgao": "Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira",
+      "acao": null
+    },
+    {
+      "mes": 202606,
+      "valor": 30752.79,
+      "orgao": "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
+      "acao": null
+    },
+    {
+      "mes": 202606,
+      "valor": 43002.24,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "acao": null
+    },
+    {
+      "mes": 202607,
+      "valor": 11878.65,
+      "orgao": "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
+      "acao": null
+    },
+    {
+      "mes": 202605,
+      "valor": 551.0,
+      "orgao": "Instituto Brasileiro de Museus",
+      "acao": null
+    },
+    {
+      "mes": 202602,
+      "valor": 12764.9,
       "orgao": "Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira",
       "acao": null
     },
@@ -282,14 +150,110 @@
       "acao": null
     },
     {
-      "mes": 202507,
-      "valor": 16459.65,
+      "mes": 202602,
+      "valor": 32137.21,
+      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
+      "acao": null
+    },
+    {
+      "mes": 202512,
+      "valor": 139475.46,
+      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
+      "acao": null
+    },
+    {
+      "mes": 202512,
+      "valor": 70707.19,
+      "orgao": "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
+      "acao": null
+    },
+    {
+      "mes": 202604,
+      "valor": 67892.95,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "acao": null
+    },
+    {
+      "mes": 202601,
+      "valor": 15499.23,
       "orgao": "Instituto Brasileiro de Museus",
       "acao": null
     },
     {
-      "mes": 202506,
-      "valor": 9092.56,
+      "mes": 202509,
+      "valor": 9761.89,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "acao": null
+    },
+    {
+      "mes": 202604,
+      "valor": 227254.77,
+      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
+      "acao": null
+    },
+    {
+      "mes": 202510,
+      "valor": 14050.1,
+      "orgao": "Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira",
+      "acao": null
+    },
+    {
+      "mes": 202606,
+      "valor": 59804.24,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "acao": null
+    },
+    {
+      "mes": 202511,
+      "valor": 169821.77,
+      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
+      "acao": null
+    },
+    {
+      "mes": 202510,
+      "valor": 106772.7,
+      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
+      "acao": null
+    },
+    {
+      "mes": 202602,
+      "valor": 43553.38,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "acao": null
+    },
+    {
+      "mes": 202606,
+      "valor": 33875.05,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "acao": null
+    },
+    {
+      "mes": 202602,
+      "valor": 25057.55,
+      "orgao": "Ministério da Saúde - Unidades com vínculo direto",
+      "acao": null
+    },
+    {
+      "mes": 202602,
+      "valor": 6180.69,
+      "orgao": "Instituto Brasileiro de Museus",
+      "acao": null
+    },
+    {
+      "mes": 202601,
+      "valor": 58315.66,
+      "orgao": "Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira",
+      "acao": null
+    },
+    {
+      "mes": 202602,
+      "valor": 24302.85,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "acao": null
+    },
+    {
+      "mes": 202510,
+      "valor": 93837.52,
       "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
       "acao": null
     },
@@ -300,37 +264,73 @@
       "acao": null
     },
     {
-      "mes": 202508,
-      "valor": 40325.03,
+      "mes": 202601,
+      "valor": 25132.67,
+      "orgao": "Ministério da Saúde - Unidades com vínculo direto",
+      "acao": null
+    },
+    {
+      "mes": 202608,
+      "valor": 33418.0,
       "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "acao": null
+    },
+    {
+      "mes": 202607,
+      "valor": 52908.85,
+      "orgao": "Instituto Brasileiro de Museus",
+      "acao": null
+    },
+    {
+      "mes": 202607,
+      "valor": 9921.46,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "acao": null
+    },
+    {
+      "mes": 202605,
+      "valor": 211014.62,
+      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
+      "acao": null
+    },
+    {
+      "mes": 202606,
+      "valor": 66809.63,
+      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
+      "acao": null
+    },
+    {
+      "mes": 202511,
+      "valor": 24848.88,
+      "orgao": "Ministério da Saúde - Unidades com vínculo direto",
       "acao": null
     },
     {
       "mes": 202509,
-      "valor": 61400.45,
-      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "valor": 34480.76,
+      "orgao": "Ministério das Comunicações - Unidades com vínculo direto",
       "acao": null
     },
     {
-      "mes": 202603,
-      "valor": 48159.53,
-      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "mes": 202604,
+      "valor": 11319.57,
+      "orgao": "Instituto Brasileiro de Museus",
       "acao": null
     }
   ],
   "raw_primeiro": {
-    "anoMes": 202603,
+    "anoMes": 202511,
     "codigoPessoa": "03.012.610/0001-01",
     "nomePessoa": "MASF SERVICOS E FACILITIES LTDA",
     "tipoPessoa": "Entidades Empresariais Privadas",
     "municipioPessoa": "BRASÍLIA",
     "siglaUFPessoa": "DF",
-    "codigoUG": "373083",
-    "nomeUG": "DIV.EXECUTIVA DE FINANCAS-DAF.2 INCRA-SEDE/DF",
-    "codigoOrgao": "22201",
-    "nomeOrgao": "Instituto Nacional de Colonização e Reforma Agrária",
-    "codigoOrgaoSuperior": "49000",
-    "nomeOrgaoSuperior": "Ministério do Desenvolvimento Agrário e Agricultura Familiar",
-    "valor": 222169.18
+    "codigoUG": "343014",
+    "nomeUG": "SUPERINTENDENCIA DO IPHAN EM GOIAS, IPHAN-GO",
+    "codigoOrgao": "20411",
+    "nomeOrgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+    "codigoOrgaoSuperior": "42000",
+    "nomeOrgaoSuperior": "Ministério da Cultura",
+    "valor": 60062.1
   }
 }

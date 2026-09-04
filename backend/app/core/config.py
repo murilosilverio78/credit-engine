@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # Portal da Transparência
     PORTAL_TRANSPARENCIA_TOKEN: str
 
+    # Broadfactor
+    BROADFACTOR_CLIENT_ID: str = ""
+    BROADFACTOR_CLIENT_SECRET: str = ""
+    BROADFACTOR_BASE_URL: str = "http://api.dev.antecipagov.com.br"
+
     # TLS verification — False apenas em .env local Windows
     HTTPX_VERIFY_SSL: bool = True
 

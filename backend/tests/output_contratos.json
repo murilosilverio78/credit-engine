@@ -1,28 +1,28 @@
 {
   "total_contratos": 13,
-  "contratos_ativos": 10,
-  "contratos_encerrados": 3,
-  "valor_total_ativo": 17134737.39,
+  "contratos_ativos": 8,
+  "contratos_encerrados": 5,
+  "valor_total_ativo": 15771926.09,
   "valor_total_historico": 19000951.18,
   "orgaos_contratantes": [
-    "Ministério da Cultura",
-    "Ministério da Saúde",
-    "Ministério do Meio Ambiente e Mudança do Clima",
     "Ministério da Educação",
+    "Ministério da Cultura",
+    "Ministério do Meio Ambiente e Mudança do Clima",
+    "Ministério das Comunicações",
     "Ministério do Desenvolvimento Agrário e Agricultura Familiar",
-    "Ministério das Comunicações"
+    "Ministério da Saúde"
   ],
   "contratos_detalhe": [
     {
-      "numero": "000042024",
-      "objeto": "PRESTAÇÃO DO SERVIÇO DE DE FORMA CONTINUADA NA ÁREA DE APOIO ADMINISTRATIVO PARA ATENDER AS NECESSIDADES NO ÂMBITO DA SUPERINTENDÊNCIA DO IPHAN/MA E DO ESCRITÓRIO TÉCNICO DE ALCÂNTARA/MA, POR UM PERÍODO DE 02 (DOIS) ANOS, CONFORME CONDIÇÕES, QUANTIDADES E EXIGÊNCIAS ESTABELECIDAS NO EDITAL E SEUS ANEXOS.",
+      "numero": "027522024",
+      "objeto": "CONTRATAÇÃO DE SERVIÇOS CONTÍNUOS DE MOTORISTA DE VEÍCULO PESADO, COM DISPONIBILIZAÇÃO DE MÃO DE OBRA EM REGIME DE DEDICAÇÃO EXCLUSIVA, E PAGAMENTO DE DIÁRIAS QUANDO NECESSÁRIO.",
       "situacao": "Não se aplica",
-      "valor_inicial": 1494777.6,
-      "valor_final": 1599022.32,
-      "data_inicio": "2024-10-01",
-      "data_fim": "2026-10-01",
-      "orgao": "Ministério da Cultura",
-      "ativo": true
+      "valor_inicial": 518270.26,
+      "valor_final": 141411.63,
+      "data_inicio": "2025-01-03",
+      "data_fim": "2026-07-03",
+      "orgao": "Ministério do Desenvolvimento Agrário e Agricultura Familiar",
+      "ativo": false
     },
     {
       "numero": "000022024",
@@ -32,6 +32,28 @@
       "valor_final": 498356.25,
       "data_inicio": "2024-07-01",
       "data_fim": "2029-06-30",
+      "orgao": "Ministério da Cultura",
+      "ativo": true
+    },
+    {
+      "numero": "000062026",
+      "objeto": "SERVIÇOS CONTÍNUOS DE LIMPEZA, ASSEIO E CONSERVAÇÃO PREDIAL, A SEREM EXECUTADOS COM REGIME DE DEDICAÇÃO EXCLUSIVA DE MÃO DE OBRA COM FORNECIMENTO DE MATERIAIS E EQUIPAMENTOS.",
+      "situacao": "Não se aplica",
+      "valor_inicial": 1537477.44,
+      "valor_final": 1610819.16,
+      "data_inicio": "2026-03-09",
+      "data_fim": "2027-03-09",
+      "orgao": "Ministério da Educação",
+      "ativo": true
+    },
+    {
+      "numero": "000042024",
+      "objeto": "PRESTAÇÃO DO SERVIÇO DE DE FORMA CONTINUADA NA ÁREA DE APOIO ADMINISTRATIVO PARA ATENDER AS NECESSIDADES NO ÂMBITO DA SUPERINTENDÊNCIA DO IPHAN/MA E DO ESCRITÓRIO TÉCNICO DE ALCÂNTARA/MA, POR UM PERÍODO DE 02 (DOIS) ANOS, CONFORME CONDIÇÕES, QUANTIDADES E EXIGÊNCIAS ESTABELECIDAS NO EDITAL E SEUS ANEXOS.",
+      "situacao": "Não se aplica",
+      "valor_inicial": 1494777.6,
+      "valor_final": 1599022.32,
+      "data_inicio": "2024-10-01",
+      "data_fim": "2026-10-01",
       "orgao": "Ministério da Cultura",
       "ativo": true
     },
@@ -69,50 +91,6 @@
       "ativo": true
     },
     {
-      "numero": "000142024",
-      "objeto": "CONTRATAÇÃO DE SERVIÇOS DE MOTORISTAS PARA ATENDER SUA AUTORIDADE MÁXIMA, O SENHOR MINISTRO DAS COMUNICAÇÕES, BEM COMO DE SERVIDORES DA ALTA GESTÃO EM SUAS MISSÕES INSTITUCIONAIS, NO DISTRITO FEDERAL E NO ESTADO DE SÃO PAULO, A SEREM EXECUTADOS COM REGIME DE DEDICAÇÃO EXCLUSIVA DE MÃO DE OBRA",
-      "situacao": "Não se aplica",
-      "valor_inicial": 478787.04,
-      "valor_final": 586945.2,
-      "data_inicio": "2024-08-14",
-      "data_fim": "2026-01-02",
-      "orgao": "Ministério das Comunicações",
-      "ativo": false
-    },
-    {
-      "numero": "027522024",
-      "objeto": "CONTRATAÇÃO DE SERVIÇOS CONTÍNUOS DE MOTORISTA DE VEÍCULO PESADO, COM DISPONIBILIZAÇÃO DE MÃO DE OBRA EM REGIME DE DEDICAÇÃO EXCLUSIVA, E PAGAMENTO DE DIÁRIAS QUANDO NECESSÁRIO.",
-      "situacao": "Não se aplica",
-      "valor_inicial": 518270.26,
-      "valor_final": 141411.63,
-      "data_inicio": "2025-01-03",
-      "data_fim": "2026-07-03",
-      "orgao": "Ministério do Desenvolvimento Agrário e Agricultura Familiar",
-      "ativo": true
-    },
-    {
-      "numero": "000062026",
-      "objeto": "SERVIÇOS CONTÍNUOS DE LIMPEZA, ASSEIO E CONSERVAÇÃO PREDIAL, A SEREM EXECUTADOS COM REGIME DE DEDICAÇÃO EXCLUSIVA DE MÃO DE OBRA COM FORNECIMENTO DE MATERIAIS E EQUIPAMENTOS.",
-      "situacao": "Não se aplica",
-      "valor_inicial": 1537477.44,
-      "valor_final": 1610819.16,
-      "data_inicio": "2026-03-09",
-      "data_fim": "2027-03-09",
-      "orgao": "Ministério da Educação",
-      "ativo": true
-    },
-    {
-      "numero": "000012024",
-      "objeto": "CONTRATAÇÃO DE EMPRESA ESPECIALIZADA PARA O FORNECIMENTO DE SERVIÇO DE MOTORISTAS DE CARRO LEVE A SER EXECUTADO POR DOIS POSTOS, DE FORMA CONTÍNUA E EM REGIME DE DEDICAÇÃO EXCLUSIVA DE MÃO DE OBRA, COM VISTAS ATENDER AS NECESSIDADE DO IPHAN-DF.",
-      "situacao": "Não se aplica",
-      "valor_inicial": 835917.6,
-      "valor_final": 945598.8,
-      "data_inicio": "2024-04-02",
-      "data_fim": "2029-04-02",
-      "orgao": "Ministério da Cultura",
-      "ativo": true
-    },
-    {
       "numero": "000092024",
       "objeto": "CONTRATAÇÃO DE SERVIÇOS DE AUXILIAR ADMINISTRATIVO, MONITORIA E ASSISTENTE DE ACERVO E EXPOSIÇÕES NAS CATEGORIAS E QUANTIDADES DEFINIDAS NO PRESENTE INSTRUMENTO, NECESSÁRIO À REALIZAÇÃO DAS ROTINAS ADMINISTRATIVAS, NAS DEPENDÊNCIAS DAS UNIDADES MUSEOLÓGICAS, INTEGRANTES DO INSTITUTO BRASILEIRO DE MUSEUS: MUSEU DAS BANDEIRAS, MUSEU DE ARTE SACRA DA BOA MORTE E MUSEU CASA DA PRINCESA,",
       "situacao": "Não se aplica",
@@ -121,17 +99,6 @@
       "data_inicio": "2024-05-02",
       "data_fim": "2029-05-02",
       "orgao": "Ministério da Cultura",
-      "ativo": true
-    },
-    {
-      "numero": "000192024",
-      "objeto": "contratação de serviços de Recepção e Encarregado Geral, a serem executados com regime de dedicação exclusiva de mão de obra, de forma contínua, nos termos da tabela abaixo, conforme condições e exigências estabelecidas no Termo de Referência",
-      "situacao": "Não se aplica",
-      "valor_inicial": 844541.04,
-      "valor_final": 871042.92,
-      "data_inicio": "2024-08-15",
-      "data_fim": "2026-08-15",
-      "orgao": "Ministério da Educação",
       "ativo": true
     },
     {
@@ -146,6 +113,28 @@
       "ativo": false
     },
     {
+      "numero": "000142024",
+      "objeto": "CONTRATAÇÃO DE SERVIÇOS DE MOTORISTAS PARA ATENDER SUA AUTORIDADE MÁXIMA, O SENHOR MINISTRO DAS COMUNICAÇÕES, BEM COMO DE SERVIDORES DA ALTA GESTÃO EM SUAS MISSÕES INSTITUCIONAIS, NO DISTRITO FEDERAL E NO ESTADO DE SÃO PAULO, A SEREM EXECUTADOS COM REGIME DE DEDICAÇÃO EXCLUSIVA DE MÃO DE OBRA",
+      "situacao": "Não se aplica",
+      "valor_inicial": 478787.04,
+      "valor_final": 586945.2,
+      "data_inicio": "2024-08-14",
+      "data_fim": "2026-01-02",
+      "orgao": "Ministério das Comunicações",
+      "ativo": false
+    },
+    {
+      "numero": "000192024",
+      "objeto": "contratação de serviços de Recepção e Encarregado Geral, a serem executados com regime de dedicação exclusiva de mão de obra, de forma contínua, nos termos da tabela abaixo, conforme condições e exigências estabelecidas no Termo de Referência",
+      "situacao": "Não se aplica",
+      "valor_inicial": 844541.04,
+      "valor_final": 871042.92,
+      "data_inicio": "2024-08-15",
+      "data_fim": "2026-08-15",
+      "orgao": "Ministério da Educação",
+      "ativo": false
+    },
+    {
       "numero": "025012024",
       "objeto": "PRESTAÇÃO DE SERVIÇOS CONTINUADOS DE LIMPEZA, HIGIENIZAÇÃO E CONSERVAÇÃO PARA AS INSTITUIÇÕES DA ADMINISTRAÇÃO PÚBLICA FEDERAL SEDIADAS NO EDIFÍCIO PALÁCIO DO DESENVOLVIMENTO, SITUADO NO SETOR BANCÁRIO NORTE - QUADRA 01, BLOCO \"D\", LOTE 32 E NAS DEPENDÊNCIAS DO INCRA SEDE NA SGON QUADRA 04 LOTE 07/08, COM  FORNECIMENTO DE TODOS OS INSUMOS E MATERIAIS E O EMPREGO DOS EQUIPAMENTOS NECESSÁRIOS À EXECUÇÃO DOS SERVIÇOS.",
       "situacao": "Não se aplica",
@@ -154,6 +143,17 @@
       "data_inicio": "2024-12-01",
       "data_fim": "2026-12-01",
       "orgao": "Ministério do Desenvolvimento Agrário e Agricultura Familiar",
+      "ativo": true
+    },
+    {
+      "numero": "000012024",
+      "objeto": "CONTRATAÇÃO DE EMPRESA ESPECIALIZADA PARA O FORNECIMENTO DE SERVIÇO DE MOTORISTAS DE CARRO LEVE A SER EXECUTADO POR DOIS POSTOS, DE FORMA CONTÍNUA E EM REGIME DE DEDICAÇÃO EXCLUSIVA DE MÃO DE OBRA, COM VISTAS ATENDER AS NECESSIDADE DO IPHAN-DF.",
+      "situacao": "Não se aplica",
+      "valor_inicial": 835917.6,
+      "valor_final": 945598.8,
+      "data_inicio": "2024-04-02",
+      "data_fim": "2029-04-02",
+      "orgao": "Ministério da Cultura",
       "ativo": true
     }
   ]
