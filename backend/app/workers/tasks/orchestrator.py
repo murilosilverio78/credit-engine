@@ -536,7 +536,9 @@ async def _complete_analysis(operation_id: str):
         operation_id,
         "load_operation_for_completion",
         lambda: supabase.table("operations")
-        .select("valor_solicitado,prazo_dias")
+        .select(
+            "valor_solicitado,valor_enquadrado,prazo_dias,prazo_final_meses"
+        )
         .eq("id", operation_id)
         .maybe_single()
         .execute(),
@@ -552,10 +554,28 @@ async def _complete_analysis(operation_id: str):
         "limite_aprovado": score_result.get("limite_aprovado_rs"),
     }
     rating = str(data["rating"] or "").upper()
-    valor = _as_float(operation.get("valor_solicitado"))
-    prazo_dias = operation.get("prazo_dias")
+    valor_enquadrado = operation.get("valor_enquadrado")
+    valor_solicitado = operation.get("valor_solicitado")
+    if valor_enquadrado not in (None, ""):
+        valor = _as_float(valor_enquadrado)
+        valor_origem = "valor_enquadrado"
+    else:
+        valor = _as_float(valor_solicitado)
+        valor_origem = "valor_solicitado"
 
-    if rating in {"A", "B", "C", "D"} and valor > 0 and prazo_dias and prazo_dias > 0:
+    prazo_final_meses = operation.get("prazo_final_meses")
+    prazo_dias = _as_int(operation.get("prazo_dias"))
+    if prazo_final_meses not in (None, ""):
+        prazo_meses = _as_int(prazo_final_meses)
+        prazo_origem = "prazo_final_meses"
+    elif prazo_dias > 0:
+        prazo_meses = _prazo_meses(prazo_dias)
+        prazo_origem = "prazo_dias"
+    else:
+        prazo_meses = 0
+        prazo_origem = "ausente"
+
+    if rating in {"A", "B", "C", "D"} and valor > 0 and prazo_meses > 0:
         try:
             from app.services.pricing_engine import compute_taxa
 
@@ -566,7 +586,7 @@ async def _complete_analysis(operation_id: str):
             pricing = compute_taxa(
                 rating,
                 valor,
-                _prazo_meses(prazo_dias),
+                prazo_meses,
                 pd_multiplier=pd_multiplier,
             )
             data["taxa_sugerida"] = pricing.get("taxa_sugerida_am")
@@ -578,7 +598,10 @@ async def _complete_analysis(operation_id: str):
                 operation_id=operation_id,
                 rating=rating,
                 valor=valor,
+                valor_origem=valor_origem,
                 prazo_dias=prazo_dias,
+                prazo_meses=prazo_meses,
+                prazo_origem=prazo_origem,
                 error=str(exc),
             )
     else:
@@ -586,9 +609,9 @@ async def _complete_analysis(operation_id: str):
         if rating not in {"A", "B", "C", "D"}:
             motivos.append(f"rating={rating or 'ausente'}")
         if not valor or valor <= 0:
-            motivos.append("valor_solicitado ausente")
-        if not prazo_dias or prazo_dias <= 0:
-            motivos.append("prazo_dias ausente")
+            motivos.append("valor_enquadrado/valor_solicitado ausente")
+        if prazo_meses <= 0:
+            motivos.append("prazo_final_meses/prazo_dias ausente")
         motivo_str = "; ".join(motivos) if motivos else "condição não atendida"
         data["pricing_skipped_reason"] = motivo_str
         logger.info(
@@ -596,7 +619,10 @@ async def _complete_analysis(operation_id: str):
             operation_id=operation_id,
             rating=rating,
             valor=valor,
+            valor_origem=valor_origem,
             prazo_dias=prazo_dias,
+            prazo_meses=prazo_meses,
+            prazo_origem=prazo_origem,
             motivo=motivo_str,
         )
 

@@ -25,8 +25,14 @@ import structlog
 from app.services.eligibility_service import PCT_MARGEM_SOBRE_SALDO
 from app.utils.encoding import fix_dict_encoding
 from app.workers.base import BaseComponentTask
+from app.workers.base import _execute_snapshot_write as _execute_with_retry
 
 logger = structlog.get_logger()
+
+
+def _execute_db(operation_id: str, action: str, request):
+    return _execute_with_retry(operation_id, "score_engine", action, request)
+
 
 NIVEL_NOTA = {
     "Excepcional": 95,
@@ -229,11 +235,15 @@ def _mark_stale_running_failed(supabase, operation_id: str, components: list[str
         return
     message = f"snapshot running ha mais de {RUNNING_STALE_MINUTES} minutos"
     try:
-        supabase.table("component_snapshots")\
-            .update({"status": "failed", "error_message": message})\
-            .eq("operation_id", operation_id)\
-            .in_("component", components)\
-            .execute()
+        _execute_db(
+            operation_id,
+            "mark_stale_components_failed",
+            lambda: supabase.table("component_snapshots")
+            .update({"status": "failed", "error_message": message})
+            .eq("operation_id", operation_id)
+            .in_("component", components)
+            .execute(),
+        )
     except Exception as exc:
         logger.error(
             "score_engine.stale_mark_failed_error",
@@ -246,11 +256,15 @@ def _mark_stale_running_failed(supabase, operation_id: str, components: list[str
 def validate_score_preconditions(operation_id: str, supabase) -> None:
     """Abort score consolidation unless every essential input is completed."""
     now = datetime.now(timezone.utc)
-    result = supabase.table("component_snapshots")\
-        .select("component,status,started_at,error_message")\
-        .eq("operation_id", operation_id)\
-        .in_("component", list(ESSENTIAL_COMPONENTS))\
-        .execute()
+    result = _execute_db(
+        operation_id,
+        "validate_score_preconditions",
+        lambda: supabase.table("component_snapshots")
+        .select("component,status,started_at,error_message")
+        .eq("operation_id", operation_id)
+        .in_("component", list(ESSENTIAL_COMPONENTS))
+        .execute(),
+    )
 
     snapshots = {row.get("component"): row for row in (result.data or [])}
     incomplete = []
@@ -1495,14 +1509,18 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
         try:
             validate_score_preconditions(operation_id, supabase)
 
-            operation_result = supabase.table("operations")\
+            operation_result = _execute_db(
+                operation_id,
+                "load_operation_for_score",
+                lambda: supabase.table("operations")
                 .select(
                     "valor_solicitado,valor_enquadrado,saldo_vincendo,prazo_dias,"
                     "contrato_saldo,margem_disponivel,origem_dados"
-                )\
-                .eq("id", operation_id)\
-                .maybe_single()\
-                .execute()
+                )
+                .eq("id", operation_id)
+                .maybe_single()
+                .execute(),
+            )
             operacao = operation_result.data or {}
             from app.services.eligibility_params_service import get_eligibility_config
 
@@ -1510,11 +1528,15 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
                 "pct_max_contrato"
             ]
 
-            result = supabase.table("component_snapshots")\
-                .select("component, parsed_result, status")\
-                .eq("operation_id", operation_id)\
-                .in_("status", ["completed"])\
-                .execute()
+            result = _execute_db(
+                operation_id,
+                "load_completed_snapshots_for_score",
+                lambda: supabase.table("component_snapshots")
+                .select("component, parsed_result, status")
+                .eq("operation_id", operation_id)
+                .in_("status", ["completed"])
+                .execute(),
+            )
 
             for snap in result.data or []:
                 if snap.get("parsed_result"):
@@ -1540,11 +1562,15 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
                 score_contrib = result.get("dimensoes", {}).get(dim, {}).get("score_contrib")
                 if score_contrib is None:
                     continue
-                supabase.table("component_snapshots")\
-                    .update({"score_contrib": score_contrib})\
-                    .eq("operation_id", operation_id)\
-                    .eq("component", component)\
-                    .execute()
+                _execute_db(
+                    operation_id,
+                    f"save_score_contrib_{component}",
+                    lambda: supabase.table("component_snapshots")
+                    .update({"score_contrib": score_contrib})
+                    .eq("operation_id", operation_id)
+                    .eq("component", component)
+                    .execute(),
+                )
             except Exception as exc:
                 logger.error(
                     "score_engine.score_contrib_error",

@@ -167,6 +167,35 @@ def test_orchestrator_database_calls_retry_transient_disconnect(monkeypatch):
     assert len(attempts) == 3
 
 
+def test_score_preconditions_retry_transient_disconnect(monkeypatch):
+    snapshots = [
+        {"component": component, "status": "completed", "started_at": None}
+        for component in score_engine.ESSENTIAL_COMPONENTS
+    ]
+
+    class TransientQuery(Query):
+        def execute(self):
+            self.database.attempts += 1
+            if self.database.attempts < 3:
+                raise httpx.RemoteProtocolError("Server disconnected")
+            return SimpleNamespace(data=snapshots)
+
+    class TransientSupabase(FakeSupabase):
+        def __init__(self):
+            super().__init__()
+            self.attempts = 0
+
+        def table(self, name):
+            return TransientQuery(self, name)
+
+    database = TransientSupabase()
+    monkeypatch.setattr("app.workers.base.time.sleep", lambda _delay: None)
+
+    score_engine.validate_score_preconditions("op-1", database)
+
+    assert database.attempts == 3
+
+
 def test_start_analysis_persists_unhandled_failure_with_stage(monkeypatch):
     persisted = []
 
