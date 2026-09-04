@@ -27,26 +27,45 @@ class OperationService:
     async def create(
         self,
         cnpj: str,
+        origem_dados: str,
+        cotacao_id: Optional[str] = None,
         valor_solicitado: Optional[float] = None,
+        valor_enquadrado: Optional[float] = None,
         contrato_id: Optional[str] = None,
         contrato_saldo: Optional[float] = None,
+        margem_disponivel: Optional[float] = None,
         prazo_dias: Optional[int] = None,
+        prazo_vincendo_meses: Optional[int] = None,
+        prazo_final_meses: Optional[int] = None,
+        prazo_vincendo_indisponivel: bool = False,
         source: str = "frontend_mvp",
     ) -> dict:
         """Cria nova operação com status 'pending'."""
         data = {
             "cnpj": cnpj,
+            "origem_dados": origem_dados,
             "status": "pending",
             "source": source,
+            "prazo_vincendo_indisponivel": prazo_vincendo_indisponivel,
         }
-        if valor_solicitado:
+        if cotacao_id is not None:
+            data["cotacao_id"] = cotacao_id
+        if valor_solicitado is not None:
             data["valor_solicitado"] = valor_solicitado
-        if contrato_id:
+        if valor_enquadrado is not None:
+            data["valor_enquadrado"] = valor_enquadrado
+        if contrato_id is not None:
             data["contrato_id"] = contrato_id
-        if contrato_saldo:
+        if contrato_saldo is not None:
             data["contrato_saldo"] = contrato_saldo
-        if prazo_dias:
+        if margem_disponivel is not None:
+            data["margem_disponivel"] = margem_disponivel
+        if prazo_dias is not None:
             data["prazo_dias"] = prazo_dias
+        if prazo_vincendo_meses is not None:
+            data["prazo_vincendo_meses"] = prazo_vincendo_meses
+        if prazo_final_meses is not None:
+            data["prazo_final_meses"] = prazo_final_meses
 
         result = supabase.table("operations").insert(data).execute()
         operation = result.data[0]

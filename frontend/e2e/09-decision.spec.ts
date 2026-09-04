@@ -64,7 +64,13 @@ test.describe("Módulo 9 - Detalhe da operação e decisão @slow", () => {
 
   test("9.7 - decisão só em operação concluída", async ({ apiDiretor, diretorPage }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
-    const created = await apiDiretor.post("/api/v1/operations/", { data: { cnpj: "03012610000101", source: "playwright_e2e" } });
+    const created = await apiDiretor.post("/api/v1/operations/", {
+      data: {
+        cnpj: "03012610000101",
+        origem_dados: "MANUAL",
+        source: "playwright_e2e",
+      },
+    });
     const { operation_id } = await created.json() as { operation_id: string };
     await diretorPage.goto(`/operations/${operation_id}`);
     await expect(diretorPage.getByTestId("action-approve")).toHaveCount(0);

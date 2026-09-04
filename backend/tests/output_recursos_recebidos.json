@@ -1,20 +1,20 @@
 {
   "total_registros": 75,
-  "valor_total_recebido": 4358792.16,
-  "periodo_inicio": "05/2025",
-  "periodo_fim": "05/2026",
+  "valor_total_recebido": 4261658.3,
+  "periodo_inicio": "06/2025",
+  "periodo_fim": "06/2026",
   "orgaos_pagadores": [
     "Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira",
-    "Instituto Brasileiro de Museus",
-    "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
-    "Ministério da Saúde - Unidades com vínculo direto",
     "Ministério das Comunicações - Unidades com vínculo direto",
     "Instituto Nacional de Colonização e Reforma Agrária",
-    "Instituto do Patrimônio Histórico e Artístico Nacional"
+    "Instituto Brasileiro de Museus",
+    "Instituto do Patrimônio Histórico e Artístico Nacional",
+    "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
+    "Ministério da Saúde - Unidades com vínculo direto"
   ],
   "valor_por_ano": {
-    "2026": 1435855.4099999995,
-    "2025": 2922936.75
+    "2026": 1794946.2099999993,
+    "2025": 2466712.09
   },
   "recursos_detalhe": [
     {
@@ -72,6 +72,12 @@
       "acao": null
     },
     {
+      "mes": 202606,
+      "valor": 30752.79,
+      "orgao": "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
+      "acao": null
+    },
+    {
       "mes": 202601,
       "valor": 101701.66,
       "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
@@ -86,12 +92,6 @@
     {
       "mes": 202605,
       "valor": 551.0,
-      "orgao": "Instituto Brasileiro de Museus",
-      "acao": null
-    },
-    {
-      "mes": 202505,
-      "valor": 15493.46,
       "orgao": "Instituto Brasileiro de Museus",
       "acao": null
     },
@@ -120,12 +120,6 @@
       "acao": null
     },
     {
-      "mes": 202505,
-      "valor": 421455.19,
-      "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
-      "acao": null
-    },
-    {
       "mes": 202509,
       "valor": 81157.33,
       "orgao": "Instituto Brasileiro de Museus",
@@ -138,15 +132,15 @@
       "acao": null
     },
     {
-      "mes": 202604,
-      "valor": 66587.28,
-      "orgao": "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
-      "acao": null
-    },
-    {
       "mes": 202507,
       "valor": 413073.87,
       "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
+      "acao": null
+    },
+    {
+      "mes": 202604,
+      "valor": 66587.28,
+      "orgao": "Fundação Coordenação de Aperfeiçoamento de Pessoal de Nível Superior",
       "acao": null
     },
     {
@@ -229,8 +223,14 @@
     },
     {
       "mes": 202605,
-      "valor": 23781.46,
+      "valor": 211014.62,
       "orgao": "Instituto Nacional de Colonização e Reforma Agrária",
+      "acao": null
+    },
+    {
+      "mes": 202605,
+      "valor": 57767.91,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
       "acao": null
     },
     {
@@ -282,21 +282,9 @@
       "acao": null
     },
     {
-      "mes": 202505,
-      "valor": 3429.15,
-      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
-      "acao": null
-    },
-    {
       "mes": 202507,
       "valor": 16459.65,
       "orgao": "Instituto Brasileiro de Museus",
-      "acao": null
-    },
-    {
-      "mes": 202505,
-      "valor": 29970.35,
-      "orgao": "Ministério das Comunicações - Unidades com vínculo direto",
       "acao": null
     },
     {
@@ -306,15 +294,27 @@
       "acao": null
     },
     {
-      "mes": 202505,
-      "valor": 21812.08,
-      "orgao": "Ministério da Saúde - Unidades com vínculo direto",
-      "acao": null
-    },
-    {
       "mes": 202511,
       "valor": 44627.52,
       "orgao": "Instituto Brasileiro de Museus",
+      "acao": null
+    },
+    {
+      "mes": 202508,
+      "valor": 40325.03,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "acao": null
+    },
+    {
+      "mes": 202509,
+      "valor": 61400.45,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
+      "acao": null
+    },
+    {
+      "mes": 202603,
+      "valor": 48159.53,
+      "orgao": "Instituto do Patrimônio Histórico e Artístico Nacional",
       "acao": null
     }
   ],

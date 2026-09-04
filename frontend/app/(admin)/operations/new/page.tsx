@@ -236,6 +236,7 @@ export default function NewOperationPage() {
 
     const payload: PropostaInput = {
       cnpj: digitsOnly(values.cnpj),
+      origem_dados: "MANUAL",
       source: "admin_ui",
     };
     const value = parseCurrency(values.valor_solicitado);

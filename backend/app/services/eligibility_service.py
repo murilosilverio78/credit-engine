@@ -1,11 +1,11 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
+import structlog
 
-VALOR_MINIMO = 10_000.0
-PRAZO_MINIMO_DIAS = 60
-CNPJ_IDADE_MINIMA_MESES = 12
-LIMITE_MAXIMO_PCT = 0.70
+
+PCT_MARGEM_SOBRE_SALDO = 0.70
+logger = structlog.get_logger()
 
 
 @dataclass
@@ -13,56 +13,103 @@ class EligibilityResult:
     elegivel: bool
     motivo: Optional[str] = None
     campo: Optional[str] = None
+    valor_enquadrado: Optional[float] = None
+    margem_base: Optional[float] = None
+    prazo_final_meses: Optional[int] = None
+    flags: list[str] = field(default_factory=list)
 
 
 def check_eligibility(
     cnpj: str,
     valor_solicitado: Optional[float],
-    contrato_saldo: Optional[float],
-    prazo_dias: Optional[int],
+    contrato_saldo: Optional[float] = None,
+    margem_disponivel: Optional[float] = None,
+    prazo_dias: Optional[int] = None,
+    prazo_vincendo_meses: Optional[int] = None,
+    params: Optional[dict[str, float]] = None,
 ) -> EligibilityResult:
-    """
-    Gate síncrono de elegibilidade. Verifica apenas os dados do input,
-    sem consulta a APIs externas. Rápido e determinístico.
+    """Aplica enquadramento antes das consultas pagas do pipeline."""
+    if params is None:
+        from app.services.eligibility_params_service import get_eligibility_config
 
-    Regras:
-    1. Valor solicitado abaixo do mínimo operacional.
-    2. Valor solicitado acima de 70% do saldo do contrato informado.
-    3. Prazo informado abaixo do mínimo operacional.
+        params = get_eligibility_config()
 
-    A verificação de CNPJ ativo e sanções permanece no pipeline completo.
-    """
-    if valor_solicitado is not None and valor_solicitado < VALOR_MINIMO:
+    ticket_minimo = float(params["ticket_minimo"])
+    ticket_maximo = float(params["ticket_maximo"])
+    pct_max_margem = float(params["pct_max_margem"])
+    prazo_padrao_meses = int(params["prazo_padrao_meses"])
+    prazo_minimo_dias = int(params["prazo_minimo_dias"])
+
+    flags: list[str] = []
+    if margem_disponivel is not None:
+        margem_base = float(margem_disponivel)
+        if contrato_saldo is not None:
+            logger.warning(
+                "eligibility.both_margin_sources",
+                cnpj=cnpj,
+                margem_disponivel=margem_disponivel,
+                contrato_saldo=contrato_saldo,
+            )
+            flags.append("margem_disponivel_prevalece_sobre_contrato_saldo")
+    elif contrato_saldo is not None:
+        margem_base = round(float(contrato_saldo) * PCT_MARGEM_SOBRE_SALDO, 2)
+    else:
+        margem_base = None
+
+    valor_enquadrado = None
+    if valor_solicitado is not None:
+        valor_enquadrado = float(valor_solicitado)
+        if margem_base is not None:
+            valor_enquadrado = min(
+                valor_enquadrado,
+                round(margem_base * pct_max_margem, 2),
+            )
+        valor_enquadrado = round(valor_enquadrado, 2)
+
+    if prazo_vincendo_meses is None:
+        prazo_final_meses = prazo_padrao_meses
+        flags.append("prazo_vincendo_indisponivel")
+    else:
+        prazo_final_meses = min(prazo_padrao_meses, int(prazo_vincendo_meses))
+
+    result_data = {
+        "valor_enquadrado": valor_enquadrado,
+        "margem_base": margem_base,
+        "prazo_final_meses": prazo_final_meses,
+        "flags": flags,
+    }
+
+    if valor_enquadrado is not None and valor_enquadrado < ticket_minimo:
         return EligibilityResult(
             elegivel=False,
             motivo=(
-                f"Valor solicitado (R$ {valor_solicitado:,.2f}) abaixo do "
-                f"mínimo operacional de R$ {VALOR_MINIMO:,.0f}."
+                f"Valor enquadrado (R$ {valor_enquadrado:,.2f}) abaixo do "
+                f"ticket minimo de R$ {ticket_minimo:,.2f}."
             ),
-            campo="valor_solicitado",
+            campo="valor_enquadrado",
+            **result_data,
         )
 
-    if contrato_saldo is not None and valor_solicitado is not None:
-        limite_maximo = contrato_saldo * LIMITE_MAXIMO_PCT
-        if valor_solicitado > limite_maximo:
-            return EligibilityResult(
-                elegivel=False,
-                motivo=(
-                    f"Valor solicitado (R$ {valor_solicitado:,.2f}) excede o "
-                    f"limite máximo de 70% do saldo do contrato "
-                    f"(R$ {limite_maximo:,.2f})."
-                ),
-                campo="valor_solicitado",
-            )
-
-    if prazo_dias is not None and prazo_dias < PRAZO_MINIMO_DIAS:
+    if valor_enquadrado is not None and valor_enquadrado > ticket_maximo:
         return EligibilityResult(
             elegivel=False,
             motivo=(
-                f"Prazo de {prazo_dias} dias abaixo do mínimo operacional de "
-                f"{PRAZO_MINIMO_DIAS} dias."
+                f"Valor enquadrado (R$ {valor_enquadrado:,.2f}) acima do "
+                f"ticket maximo de R$ {ticket_maximo:,.2f}."
+            ),
+            campo="valor_enquadrado",
+            **result_data,
+        )
+
+    if prazo_dias is not None and prazo_dias < prazo_minimo_dias:
+        return EligibilityResult(
+            elegivel=False,
+            motivo=(
+                f"Prazo de {prazo_dias} dias abaixo do minimo operacional de "
+                f"{prazo_minimo_dias} dias."
             ),
             campo="prazo_dias",
+            **result_data,
         )
 
-    return EligibilityResult(elegivel=True)
+    return EligibilityResult(elegivel=True, **result_data)

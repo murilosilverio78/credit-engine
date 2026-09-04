@@ -27,27 +27,30 @@ test.describe("Módulo 4 - Nova operação e gate de elegibilidade", () => {
     skipIfNoCredentials(testInfo, "diretor");
     const response = await apiPost(apiDiretor, "/api/v1/operations/", {
       cnpj: env("E2E_CNPJ_VALIDO", "03012610000101"),
+      origem_dados: "MANUAL",
       valor_solicitado: 9999,
     });
     expect(response.status()).toBe(422);
     expect(await response.text()).toMatch(/ELIGIBILITY_FAILED|valor/i);
   });
 
-  test("4.4 - gate de elegibilidade — excede 70% do saldo", async ({ apiDiretor }, testInfo) => {
+  test("4.4 - enquadra pedido acima da margem sem descartar", async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
     const response = await apiPost(apiDiretor, "/api/v1/operations/", {
       cnpj: env("E2E_CNPJ_VALIDO", "03012610000101"),
       contrato_saldo: 800000,
+      origem_dados: "MANUAL",
       valor_solicitado: 600000,
     });
-    expect(response.status()).toBe(422);
-    expect(await response.text()).toMatch(/70|limite/i);
+    expect(response.status()).toBe(201);
+    expect((await response.json()).valor_enquadrado).toBe(280000);
   });
 
   test("4.5 - gate de elegibilidade — prazo abaixo do mínimo", async ({ apiDiretor }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
     const response = await apiPost(apiDiretor, "/api/v1/operations/", {
       cnpj: env("E2E_CNPJ_VALIDO", "03012610000101"),
+      origem_dados: "MANUAL",
       prazo_dias: 59,
       valor_solicitado: 10000,
     });
@@ -60,6 +63,7 @@ test.describe("Módulo 4 - Nova operação e gate de elegibilidade", () => {
     const response = await apiPost(apiDiretor, "/api/v1/operations/", {
       cnpj: env("E2E_CNPJ_VALIDO", "03012610000101"),
       contrato_saldo: 800000,
+      origem_dados: "MANUAL",
       valor_solicitado: 560000,
     });
     expect(response.status()).toBe(201);
@@ -69,6 +73,7 @@ test.describe("Módulo 4 - Nova operação e gate de elegibilidade", () => {
     skipIfNoCredentials(testInfo, "diretor");
     const response = await apiPost(apiDiretor, "/api/v1/operations/", {
       cnpj: env("E2E_CNPJ_VALIDO", "03012610000101"),
+      origem_dados: "MANUAL",
       valor_solicitado: 10000,
     });
     expect(response.status()).toBe(201);

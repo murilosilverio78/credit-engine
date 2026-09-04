@@ -5,6 +5,7 @@ import { credentialsFor, env, type E2ERole, loadE2EEnv } from "./env";
 
 export type OperationPayload = {
   cnpj: string;
+  origem_dados?: "API_BROADFACTOR" | "MANUAL";
   contrato_id?: string;
   contrato_saldo?: number;
   prazo_dias?: number;
@@ -39,6 +40,7 @@ export async function createOperation(
 ) {
   const response = await requestContext.post("/api/v1/operations/", {
     data: {
+      origem_dados: "MANUAL",
       source: "playwright_e2e",
       ...payload,
     },

@@ -919,16 +919,30 @@ DIMENSION_LABELS = {
 def _limite_aprovado(snapshots: dict[str, Any], operacao: dict[str, Any]) -> tuple[float, list[str]]:
     contratos = _first_snapshot(snapshots, "contratos")
     valor_total_ativo = _as_float(contratos.get("valor_total_ativo"))
-    if valor_total_ativo and valor_total_ativo > 0:
-        return round(valor_total_ativo * LIMITE_PCT_CONTRATO, 2), []
-
+    margem_disponivel = _as_float(operacao.get("margem_disponivel")) or 0
     contrato_saldo = _as_float(operacao.get("contrato_saldo")) or 0
     valor_solicitado = _as_float(operacao.get("valor_solicitado")) or 0
-    base = contrato_saldo if contrato_saldo > 0 else valor_solicitado
-    if base <= 0:
+    valor_enquadrado = _as_float(operacao.get("valor_enquadrado")) or 0
+
+    if margem_disponivel > 0:
+        if contrato_saldo > 0:
+            logger.warning(
+                "score_engine.both_margin_sources",
+                margem_disponivel=margem_disponivel,
+                contrato_saldo=contrato_saldo,
+            )
+        limite = round(margem_disponivel, 2)
+    elif valor_total_ativo and valor_total_ativo > 0:
+        limite = round(valor_total_ativo * LIMITE_PCT_CONTRATO, 2)
+    elif contrato_saldo > 0:
+        limite = round(contrato_saldo * LIMITE_PCT_CONTRATO, 2)
+    elif valor_solicitado > 0:
+        limite = round(valor_solicitado * LIMITE_PCT_CONTRATO, 2)
+    else:
         return 0.0, ["limite_sem_base_contrato"]
-    limite = round(base * LIMITE_PCT_CONTRATO, 2)
-    return min(limite, valor_solicitado) if valor_solicitado > 0 else limite, []
+
+    teto_operacao = valor_enquadrado if valor_enquadrado > 0 else valor_solicitado
+    return min(limite, teto_operacao) if teto_operacao > 0 else limite, []
 
 
 def _flags_relevantes(
@@ -1187,7 +1201,10 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
             validate_score_preconditions(operation_id, supabase)
 
             operation_result = supabase.table("operations")\
-                .select("valor_solicitado,prazo_dias,contrato_saldo")\
+                .select(
+                    "valor_solicitado,valor_enquadrado,prazo_dias,"
+                    "contrato_saldo,margem_disponivel,origem_dados"
+                )\
                 .eq("id", operation_id)\
                 .maybe_single()\
                 .execute()

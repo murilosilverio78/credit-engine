@@ -26,8 +26,15 @@ export interface Operation {
   taxa_sugerida: number | null;
   taxa_breakdown?: Record<string, unknown> | null;
   valor_solicitado?: number | null;
+  valor_enquadrado?: number | null;
   prazo_dias?: number | null;
+  prazo_final_meses?: number | null;
+  prazo_vincendo_meses?: number | null;
+  prazo_vincendo_indisponivel?: boolean | null;
   contrato_saldo?: number | null;
+  margem_disponivel?: number | null;
+  origem_dados?: "API_BROADFACTOR" | "MANUAL" | null;
+  cotacao_id?: string | null;
   pricing_skipped_reason?: string | null;
   dado_cadastral_degradado?: boolean | null;
   source: string;
@@ -79,10 +86,14 @@ export interface OverrideCreateResult {
 
 export interface PropostaInput {
   cnpj: string;
+  origem_dados: "API_BROADFACTOR" | "MANUAL";
+  cotacao_id?: string;
   valor_solicitado?: number;
   contrato_id?: string;
   contrato_saldo?: number;
+  margem_disponivel?: number;
   prazo_dias?: number;
+  prazo_vincendo_meses?: number;
   source?: string;
 }
 

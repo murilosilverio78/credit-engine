@@ -23,10 +23,14 @@ VALID_TRANSITIONS = {
 
 class PropostaInput(BaseModel):
     cnpj: str
+    origem_dados: Literal["API_BROADFACTOR", "MANUAL"]
+    cotacao_id: Optional[str] = None
     valor_solicitado: Optional[float] = None
     contrato_id: Optional[str] = None
     contrato_saldo: Optional[float] = None
+    margem_disponivel: Optional[float] = None
     prazo_dias: Optional[int] = None
+    prazo_vincendo_meses: Optional[int] = None
     source: str = "frontend_mvp"
 
     @field_validator("cnpj")
@@ -150,6 +154,7 @@ def _check_alcada(operation: dict, alcada: dict):
 @router.post("/", status_code=201)
 async def create_operation(payload: PropostaInput, background_tasks: BackgroundTasks):
     from app.services.eligibility_service import check_eligibility
+    from app.services.ingestion_discard_service import record_ingestion_discard
     from app.services.operation_service import OperationService
     from app.workers.tasks.orchestrator import start_analysis
 
@@ -157,9 +162,20 @@ async def create_operation(payload: PropostaInput, background_tasks: BackgroundT
         cnpj=payload.cnpj,
         valor_solicitado=payload.valor_solicitado,
         contrato_saldo=payload.contrato_saldo,
+        margem_disponivel=payload.margem_disponivel,
         prazo_dias=payload.prazo_dias,
+        prazo_vincendo_meses=payload.prazo_vincendo_meses,
     )
     if not eligibility.elegivel:
+        record_ingestion_discard(
+            cotacao_id=payload.cotacao_id,
+            cnpj=payload.cnpj,
+            valor_solicitado=payload.valor_solicitado,
+            margem_disponivel=payload.margem_disponivel,
+            valor_enquadrado=eligibility.valor_enquadrado,
+            motivo=eligibility.motivo or "Falha de elegibilidade",
+            estagio="elegibilidade",
+        )
         raise HTTPException(
             status_code=422,
             detail={
@@ -172,10 +188,19 @@ async def create_operation(payload: PropostaInput, background_tasks: BackgroundT
     svc = OperationService()
     operation = await svc.create(
         cnpj=payload.cnpj,
+        origem_dados=payload.origem_dados,
+        cotacao_id=payload.cotacao_id,
         valor_solicitado=payload.valor_solicitado,
+        valor_enquadrado=eligibility.valor_enquadrado,
         contrato_id=payload.contrato_id,
         contrato_saldo=payload.contrato_saldo,
+        margem_disponivel=payload.margem_disponivel,
         prazo_dias=payload.prazo_dias,
+        prazo_vincendo_meses=payload.prazo_vincendo_meses,
+        prazo_final_meses=eligibility.prazo_final_meses,
+        prazo_vincendo_indisponivel=(
+            "prazo_vincendo_indisponivel" in eligibility.flags
+        ),
         source=payload.source,
     )
 
@@ -184,6 +209,9 @@ async def create_operation(payload: PropostaInput, background_tasks: BackgroundT
     return {
         "operation_id": operation["id"],
         "cnpj": payload.cnpj,
+        "valor_enquadrado": eligibility.valor_enquadrado,
+        "prazo_final_meses": eligibility.prazo_final_meses,
+        "flags": eligibility.flags,
         "status": "pending",
         "message": "Análise iniciada. Acompanhe via /api/v1/operations/{id}",
     }
