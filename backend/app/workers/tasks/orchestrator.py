@@ -563,6 +563,11 @@ async def _phase3_4(
     from app.workers.tasks.score_engine import run_score_engine
     from app.workers.tasks.web_research import run_web_research
 
+    if reusable_components is None:
+        reusable_components = _completed_components(operation_id)
+        # Uploads alteram os insumos do score, mas nao invalidam a pesquisa web.
+        reusable_components.discard("score_engine")
+
     incomplete = _incomplete_components(operation_id, PHASE2_COMPONENTS)
     if incomplete:
         if len(incomplete) == len(PHASE2_COMPONENTS):
@@ -580,7 +585,6 @@ async def _phase3_4(
             incomplete_components=incomplete,
         )
 
-    reusable_components = reusable_components or set()
     web_result = await _run_or_reuse_component(
         "web_research",
         run_web_research,

@@ -185,7 +185,11 @@ def test_after_phase2_does_not_reset_completed_manual_certificate(monkeypatch):
     ) in waiting_update.filters
 
 
-def test_completed_component_is_reused_without_running_worker():
+@pytest.mark.parametrize(
+    "component",
+    (*orchestrator.PHASE1_COMPONENTS, *orchestrator.PHASE2_COMPONENTS, "web_research"),
+)
+def test_completed_component_is_reused_without_running_worker(component):
     calls = []
 
     def worker(_operation_id):
@@ -193,15 +197,52 @@ def test_completed_component_is_reused_without_running_worker():
 
     result = asyncio.run(
         orchestrator._run_or_reuse_component(
-            "web_research",
+            component,
             worker,
             "op-1",
-            {"web_research"},
+            {component},
         )
     )
 
     assert result == {"status": "completed", "reused": True}
     assert calls == []
+
+
+def test_phase3_4_resume_reuses_web_research_and_recalculates_score(monkeypatch):
+    calls = []
+
+    def web_worker(_operation_id):
+        calls.append("web_research")
+        return {"status": "completed"}
+
+    def score_worker(_operation_id):
+        calls.append("score_engine")
+        return {"status": "completed"}
+
+    async def complete_analysis(_operation_id):
+        calls.append("complete_analysis")
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_completed_components",
+        lambda _operation_id: {"web_research", "score_engine"},
+    )
+    monkeypatch.setattr(orchestrator, "_incomplete_components", lambda *_args: [])
+    monkeypatch.setattr(orchestrator, "_update_heartbeat", lambda _operation_id: None)
+    monkeypatch.setattr(orchestrator, "_complete_analysis", complete_analysis)
+    monkeypatch.setattr(
+        "app.workers.tasks.web_research.run_web_research",
+        web_worker,
+    )
+    monkeypatch.setattr(
+        "app.workers.tasks.score_engine.run_score_engine",
+        score_worker,
+    )
+
+    result = asyncio.run(orchestrator._phase3_4("op-1"))
+
+    assert result == {"operation_id": "op-1", "status": "completed"}
+    assert calls == ["score_engine", "complete_analysis"]
 
 
 def test_orchestrator_database_calls_retry_transient_disconnect(monkeypatch):
