@@ -4,6 +4,8 @@ from typing import Optional
 import structlog
 
 
+# Broadfactor exposes margem_disponivel as exactly 70% of the gross remaining
+# contract balance. If that external rule changes, this derivation must change.
 PCT_MARGEM_SOBRE_SALDO = 0.70
 logger = structlog.get_logger()
 
@@ -14,7 +16,7 @@ class EligibilityResult:
     motivo: Optional[str] = None
     campo: Optional[str] = None
     valor_enquadrado: Optional[float] = None
-    margem_base: Optional[float] = None
+    saldo_vincendo: Optional[float] = None
     prazo_final_meses: Optional[int] = None
     flags: list[str] = field(default_factory=list)
 
@@ -36,13 +38,17 @@ def check_eligibility(
 
     ticket_minimo = float(params["ticket_minimo"])
     ticket_maximo = float(params["ticket_maximo"])
-    pct_max_margem = float(params["pct_max_margem"])
+    pct_max_contrato = float(params["pct_max_contrato"])
     prazo_padrao_meses = int(params["prazo_padrao_meses"])
     prazo_minimo_dias = int(params["prazo_minimo_dias"])
 
     flags: list[str] = []
     if margem_disponivel is not None:
-        margem_base = float(margem_disponivel)
+        saldo_vincendo = round(
+            float(margem_disponivel) / PCT_MARGEM_SOBRE_SALDO,
+            2,
+        )
+        flags.append("saldo_vincendo_derivado")
         if contrato_saldo is not None:
             logger.warning(
                 "eligibility.both_margin_sources",
@@ -52,17 +58,17 @@ def check_eligibility(
             )
             flags.append("margem_disponivel_prevalece_sobre_contrato_saldo")
     elif contrato_saldo is not None:
-        margem_base = round(float(contrato_saldo) * PCT_MARGEM_SOBRE_SALDO, 2)
+        saldo_vincendo = float(contrato_saldo)
     else:
-        margem_base = None
+        saldo_vincendo = None
 
     valor_enquadrado = None
     if valor_solicitado is not None:
         valor_enquadrado = float(valor_solicitado)
-        if margem_base is not None:
+        if saldo_vincendo is not None:
             valor_enquadrado = min(
                 valor_enquadrado,
-                round(margem_base * pct_max_margem, 2),
+                round(saldo_vincendo * pct_max_contrato, 2),
             )
         valor_enquadrado = round(valor_enquadrado, 2)
 
@@ -74,7 +80,7 @@ def check_eligibility(
 
     result_data = {
         "valor_enquadrado": valor_enquadrado,
-        "margem_base": margem_base,
+        "saldo_vincendo": saldo_vincendo,
         "prazo_final_meses": prazo_final_meses,
         "flags": flags,
     }

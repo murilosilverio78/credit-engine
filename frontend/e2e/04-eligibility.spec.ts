@@ -43,7 +43,7 @@ test.describe("Módulo 4 - Nova operação e gate de elegibilidade", () => {
       valor_solicitado: 600000,
     });
     expect(response.status()).toBe(201);
-    expect((await response.json()).valor_enquadrado).toBe(280000);
+    expect((await response.json()).valor_enquadrado).toBe(400000);
   });
 
   test("4.5 - gate de elegibilidade — prazo abaixo do mínimo", async ({ apiDiretor }, testInfo) => {

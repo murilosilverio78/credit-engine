@@ -110,6 +110,7 @@ def main() -> int:
         operacao={
             "valor_solicitado": 500000,
             "contrato_saldo": 800000,
+            "pct_max_contrato": 0.50,
             "prazo_dias": 180,
         },
         porte_dimension=forced_porte_atencao(),

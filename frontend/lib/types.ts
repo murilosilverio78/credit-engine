@@ -27,6 +27,7 @@ export interface Operation {
   taxa_breakdown?: Record<string, unknown> | null;
   valor_solicitado?: number | null;
   valor_enquadrado?: number | null;
+  saldo_vincendo?: number | null;
   prazo_dias?: number | null;
   prazo_final_meses?: number | null;
   prazo_vincendo_meses?: number | null;

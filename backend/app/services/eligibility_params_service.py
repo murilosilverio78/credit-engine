@@ -10,7 +10,7 @@ logger = structlog.get_logger()
 REQUIRED_PARAMS = {
     "ticket_minimo",
     "ticket_maximo",
-    "pct_max_margem",
+    "pct_max_contrato",
     "prazo_padrao_meses",
     "dias_minimos_expiracao",
     "prazo_minimo_dias",

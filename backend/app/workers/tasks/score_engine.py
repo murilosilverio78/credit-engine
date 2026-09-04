@@ -22,6 +22,7 @@ from typing import Any
 import anthropic
 import structlog
 
+from app.services.eligibility_service import PCT_MARGEM_SOBRE_SALDO
 from app.utils.encoding import fix_dict_encoding
 from app.workers.base import BaseComponentTask
 
@@ -57,7 +58,6 @@ SUBPESOS_RELAC = {
     "maturidade": 0.15,
 }
 
-LIMITE_PCT_CONTRATO = 0.70
 PISO_FATOR_REG = 0.75
 CERTIDOES_REGULARIDADE = ("cnd_federal", "cndt_tst", "fgts")
 ESSENTIAL_COMPONENTS = (
@@ -921,8 +921,18 @@ def _limite_aprovado(snapshots: dict[str, Any], operacao: dict[str, Any]) -> tup
     valor_total_ativo = _as_float(contratos.get("valor_total_ativo"))
     margem_disponivel = _as_float(operacao.get("margem_disponivel")) or 0
     contrato_saldo = _as_float(operacao.get("contrato_saldo")) or 0
+    saldo_vincendo = _as_float(operacao.get("saldo_vincendo")) or 0
     valor_solicitado = _as_float(operacao.get("valor_solicitado")) or 0
     valor_enquadrado = _as_float(operacao.get("valor_enquadrado")) or 0
+    pct_max_contrato = _as_float(operacao.get("pct_max_contrato")) or 0
+
+    if valor_enquadrado > 0:
+        return (
+            min(valor_enquadrado, valor_solicitado)
+            if valor_solicitado > 0
+            else valor_enquadrado,
+            [],
+        )
 
     if margem_disponivel > 0:
         if contrato_saldo > 0:
@@ -931,18 +941,23 @@ def _limite_aprovado(snapshots: dict[str, Any], operacao: dict[str, Any]) -> tup
                 margem_disponivel=margem_disponivel,
                 contrato_saldo=contrato_saldo,
             )
-        limite = round(margem_disponivel, 2)
-    elif valor_total_ativo and valor_total_ativo > 0:
-        limite = round(valor_total_ativo * LIMITE_PCT_CONTRATO, 2)
-    elif contrato_saldo > 0:
-        limite = round(contrato_saldo * LIMITE_PCT_CONTRATO, 2)
-    elif valor_solicitado > 0:
-        limite = round(valor_solicitado * LIMITE_PCT_CONTRATO, 2)
-    else:
-        return 0.0, ["limite_sem_base_contrato"]
+        saldo_vincendo = round(
+            margem_disponivel / PCT_MARGEM_SOBRE_SALDO,
+            2,
+        )
+    elif saldo_vincendo <= 0:
+        if valor_total_ativo and valor_total_ativo > 0:
+            saldo_vincendo = valor_total_ativo
+        elif contrato_saldo > 0:
+            saldo_vincendo = contrato_saldo
+        else:
+            return 0.0, ["limite_sem_base_contrato"]
 
-    teto_operacao = valor_enquadrado if valor_enquadrado > 0 else valor_solicitado
-    return min(limite, teto_operacao) if teto_operacao > 0 else limite, []
+    if pct_max_contrato <= 0:
+        return 0.0, ["limite_sem_pct_max_contrato"]
+
+    limite = round(saldo_vincendo * pct_max_contrato, 2)
+    return min(limite, valor_solicitado) if valor_solicitado > 0 else limite, []
 
 
 def _flags_relevantes(
@@ -1094,6 +1109,7 @@ def consolidar_score(
 ) -> dict[str, Any]:
     snapshots = fix_dict_encoding(snapshots or {})
     operacao = operacao or {}
+    pct_max_contrato = _as_float(operacao.get("pct_max_contrato")) or 0
     bloqueios = gates_deterministicos(snapshots)
     if bloqueios:
         dimensoes = {
@@ -1123,7 +1139,7 @@ def consolidar_score(
             "rating": "E",
             "merit": 20,
             "fator_regularidade": 1.00,
-            "limite_sugerido_pct_contrato": LIMITE_PCT_CONTRATO,
+            "limite_sugerido_pct_contrato": pct_max_contrato,
             "limite_aprovado_rs": 0.0,
             "dimensoes": dimensoes,
             "regularidade": {"fator": 1.00, "haircuts": [], "flags": []},
@@ -1177,7 +1193,7 @@ def consolidar_score(
         "rating": rating,
         "merit": merit,
         "fator_regularidade": regularidade["fator"],
-        "limite_sugerido_pct_contrato": LIMITE_PCT_CONTRATO,
+        "limite_sugerido_pct_contrato": pct_max_contrato,
         "limite_aprovado_rs": limite_aprovado_rs,
         "dimensoes": dimensoes,
         "regularidade": regularidade,
@@ -1202,13 +1218,18 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
 
             operation_result = supabase.table("operations")\
                 .select(
-                    "valor_solicitado,valor_enquadrado,prazo_dias,"
+                    "valor_solicitado,valor_enquadrado,saldo_vincendo,prazo_dias,"
                     "contrato_saldo,margem_disponivel,origem_dados"
                 )\
                 .eq("id", operation_id)\
                 .maybe_single()\
                 .execute()
             operacao = operation_result.data or {}
+            from app.services.eligibility_params_service import get_eligibility_config
+
+            operacao["pct_max_contrato"] = get_eligibility_config()[
+                "pct_max_contrato"
+            ]
 
             result = supabase.table("component_snapshots")\
                 .select("component, parsed_result, status")\

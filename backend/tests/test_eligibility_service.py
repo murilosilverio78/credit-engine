@@ -9,7 +9,7 @@ from app.workers.tasks.score_engine import _limite_aprovado
 PARAMS = {
     "ticket_minimo": 10_000,
     "ticket_maximo": 5_000_000,
-    "pct_max_margem": 0.50,
+    "pct_max_contrato": 0.50,
     "prazo_padrao_meses": 12,
     "dias_minimos_expiracao": 5,
     "prazo_minimo_dias": 60,
@@ -26,36 +26,51 @@ def eligibility(**kwargs):
     )
 
 
-def test_broadfactor_margin_does_not_receive_the_70_percent_cap_again():
-    result = eligibility(margem_disponivel=12_636_491)
+def test_broadfactor_margin_derives_gross_remaining_balance():
+    result = eligibility(
+        valor_solicitado=600_000,
+        margem_disponivel=560_000,
+    )
 
-    assert result.margem_base == 12_636_491
-    assert result.valor_enquadrado == 1_000_000
+    assert result.saldo_vincendo == 800_000
+    assert result.valor_enquadrado == 400_000
+    assert "saldo_vincendo_derivado" in result.flags
 
     score_limit, flags = _limite_aprovado(
         {"contratos": {"valor_total_ativo": 18_052_130}},
         {
-            "margem_disponivel": 12_636_491,
-            "valor_solicitado": 20_000_000,
+            "margem_disponivel": 560_000,
+            "valor_solicitado": 600_000,
+            "valor_enquadrado": 400_000,
+            "saldo_vincendo": 800_000,
+            "pct_max_contrato": 0.50,
         },
     )
-    assert score_limit == 12_636_491
+    assert score_limit == 400_000
     assert flags == []
 
 
-def test_manual_contract_balance_receives_the_70_percent_cap_once():
-    result = eligibility(contrato_saldo=18_052_130)
+def test_manual_contract_balance_is_used_without_70_percent_cap():
+    result = eligibility(
+        valor_solicitado=600_000,
+        contrato_saldo=800_000,
+    )
 
-    assert result.margem_base == 12_636_491
+    assert result.saldo_vincendo == 800_000
+    assert result.valor_enquadrado == 400_000
+    assert "saldo_vincendo_derivado" not in result.flags
 
     score_limit, flags = _limite_aprovado(
         {},
         {
             "contrato_saldo": 18_052_130,
             "valor_solicitado": 20_000_000,
+            "valor_enquadrado": 9_026_065,
+            "saldo_vincendo": 18_052_130,
+            "pct_max_contrato": 0.50,
         },
     )
-    assert score_limit == 12_636_491
+    assert score_limit == 9_026_065
     assert flags == []
 
 
@@ -68,7 +83,9 @@ def test_broadfactor_margin_wins_when_both_values_are_present(monkeypatch):
         contrato_saldo=10_000_000,
     )
 
-    assert result.margem_base == 500_000
+    assert result.saldo_vincendo == 714_285.71
+    assert result.valor_enquadrado == 357_142.85
+    assert "saldo_vincendo_derivado" in result.flags
     assert "margem_disponivel_prevalece_sobre_contrato_saldo" in result.flags
     warning.assert_called_once()
 
@@ -86,9 +103,9 @@ def test_enquadramento_never_exceeds_requested_value():
 @pytest.mark.parametrize(
     ("valor_solicitado", "margem_disponivel", "expected_value", "eligible"),
     [
-        (20_000, 10_000, 5_000, False),
-        (8_000_000, 8_000_000, 4_000_000, True),
-        (8_000_000, 12_000_000, 6_000_000, False),
+        (20_000, 10_000, 7_142.85, False),
+        (8_000_000, 5_600_000, 4_000_000, True),
+        (8_000_000, 8_400_000, 6_000_000, False),
     ],
 )
 def test_ticket_limits_apply_to_enquadrado_not_requested(
@@ -139,9 +156,33 @@ def test_score_limit_respects_persisted_enquadrado():
         {
             "margem_disponivel": 12_636_491,
             "valor_solicitado": 20_000_000,
-            "valor_enquadrado": 6_318_245.50,
+            "valor_enquadrado": 9_026_065,
+            "saldo_vincendo": 18_052_130,
+            "pct_max_contrato": 0.50,
         },
     )
 
-    assert score_limit == 6_318_245.50
+    assert score_limit == 9_026_065
+    assert flags == []
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        {
+            "margem_disponivel": 560_000,
+            "valor_solicitado": 600_000,
+            "pct_max_contrato": 0.50,
+        },
+        {
+            "contrato_saldo": 800_000,
+            "valor_solicitado": 600_000,
+            "pct_max_contrato": 0.50,
+        },
+    ],
+)
+def test_score_fallback_uses_50_percent_of_gross_contract_balance(operation):
+    score_limit, flags = _limite_aprovado({}, operation)
+
+    assert score_limit == 400_000
     assert flags == []

@@ -31,6 +31,7 @@ class OperationService:
         cotacao_id: Optional[str] = None,
         valor_solicitado: Optional[float] = None,
         valor_enquadrado: Optional[float] = None,
+        saldo_vincendo: Optional[float] = None,
         contrato_id: Optional[str] = None,
         contrato_saldo: Optional[float] = None,
         margem_disponivel: Optional[float] = None,
@@ -54,6 +55,8 @@ class OperationService:
             data["valor_solicitado"] = valor_solicitado
         if valor_enquadrado is not None:
             data["valor_enquadrado"] = valor_enquadrado
+        if saldo_vincendo is not None:
+            data["saldo_vincendo"] = saldo_vincendo
         if contrato_id is not None:
             data["contrato_id"] = contrato_id
         if contrato_saldo is not None:

@@ -10,7 +10,7 @@ from app.services import eligibility_params_service  # noqa: E402
 PARAMS = {
     "ticket_minimo": 10_000,
     "ticket_maximo": 5_000_000,
-    "pct_max_margem": 0.50,
+    "pct_max_contrato": 0.50,
     "prazo_padrao_meses": 12,
     "dias_minimos_expiracao": 5,
     "prazo_minimo_dias": 60,
