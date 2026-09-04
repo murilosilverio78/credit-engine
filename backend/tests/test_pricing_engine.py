@@ -87,6 +87,16 @@ def test_compute_taxa_increases_with_riskier_rating():
     assert rates == sorted(rates)
 
 
+def test_compute_taxa_applies_pd_volatility_multiplier():
+    base = compute_taxa("B", 1_000_000, 6)
+    adjusted = compute_taxa("B", 1_000_000, 6, pd_multiplier=1.25)
+
+    assert adjusted["pd_base"] == pytest.approx(base["pd"])
+    assert adjusted["pd"] == pytest.approx(base["pd"] * 1.25)
+    assert adjusted["pd_multiplier"] == 1.25
+    assert adjusted["taxa_sugerida_am"] > base["taxa_sugerida_am"]
+
+
 def test_compute_taxa_rejects_rating_e():
     with pytest.raises(ValueError, match="recusado"):
         compute_taxa("E", 1_000_000, 6)

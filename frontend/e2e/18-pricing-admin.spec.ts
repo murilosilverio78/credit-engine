@@ -13,7 +13,7 @@ test.describe("Módulo 18 - Parametrização da precificação", () => {
   test("18.2 - listagem dos parâmetros por grupo", async ({ diretorPage }, testInfo) => {
     skipIfNoCredentials(testInfo, "diretor");
     await diretorPage.goto("/settings/pricing");
-    await expect(diretorPage.getByTestId("pricing-param")).toHaveCount(16);
+    await expect(diretorPage.getByTestId("pricing-param")).toHaveCount(20);
   });
 
   test("18.3 - exibição da matriz de rating", async ({ diretorPage }, testInfo) => {

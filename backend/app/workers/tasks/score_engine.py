@@ -53,10 +53,18 @@ SUBPESOS_CADASTRAL = {
 
 SUBPESOS_RELAC = {
     "volume": 0.30,
-    "diversificacao": 0.30,
+    "concentracao": 0.30,
     "historico": 0.25,
     "maturidade": 0.15,
 }
+
+FATURAMENTO_DECLARADO_KEYS = (
+    "faturamento_anual",
+    "faturamentoAnual",
+    "faturamento",
+    "receita_anual",
+    "receitaAnual",
+)
 
 PISO_FATOR_REG = 0.75
 CERTIDOES_REGULARIDADE = ("cnd_federal", "cndt_tst", "fgts")
@@ -111,7 +119,9 @@ Raciocine NESTA ORDEM, antes de escolher o nível:
    falha de folha = descontinuidade operacional.
 3. Aderência entre o CNAE/atividade declarada e o objeto real dos contratos.
    Divergência = dispersão e risco.
-4. Proxy de capacidade: faturamento estimado, funcionários, estrutura.
+4. Proxy de capacidade: faturamento, funcionários, estrutura. Quando houver
+   faturamento_para_analise, use exclusivamente seu campo valor; a fonte
+   VERIFICADO prevalece sobre DECLARADO.
 
 Âncoras de nível:
 - Excepcional: grande porte, baixa alavancagem, execução comprovada em contratos de
@@ -321,6 +331,148 @@ def _first_snapshot(snapshots: dict[str, Any], *components: str) -> dict[str, An
         if isinstance(data, dict):
             return data
     return {}
+
+
+def _faturamento_context(snapshots: dict[str, Any]) -> dict[str, Any]:
+    recursos = _first_snapshot(snapshots, "recursos_recebidos")
+    verificado = _as_float(recursos.get("faturamento_verificado_12m"))
+    declarado: float | None = None
+    for component in ("brasil_api", "pessoa_juridica"):
+        snapshot = _first_snapshot(snapshots, component)
+        for key in FATURAMENTO_DECLARADO_KEYS:
+            value = _as_float(snapshot.get(key))
+            if value is not None and value > 0:
+                declarado = value
+                break
+        if declarado is not None:
+            break
+
+    flags: list[str] = []
+    divergencia_pct: float | None = None
+    if verificado is not None and verificado > 0:
+        valor = verificado
+        fonte = "VERIFICADO"
+        flags.append("faturamento_verificado_utilizado")
+        if declarado is not None:
+            divergencia_pct = round(abs(verificado - declarado) / declarado * 100, 2)
+            if divergencia_pct > 50:
+                flags.append("faturamento_declarado_divergente")
+    elif declarado is not None:
+        valor = declarado
+        fonte = "DECLARADO"
+        flags.append("faturamento_declarado_utilizado_fallback")
+    else:
+        valor = None
+        fonte = "INDISPONIVEL"
+        flags.append("faturamento_indisponivel")
+
+    return {
+        "valor": valor,
+        "fonte": fonte,
+        "faturamento_verificado_12m": verificado,
+        "faturamento_declarado": declarado,
+        "divergencia_pct": divergencia_pct,
+        "flags": flags,
+    }
+
+
+def _cobertura_exposicao(
+    operacao: dict[str, Any],
+    faturamento: dict[str, Any],
+) -> tuple[float | None, str, list[str]]:
+    valor_enquadrado = _as_float(operacao.get("valor_enquadrado"))
+    verificado = _as_float(faturamento.get("faturamento_verificado_12m"))
+    if not valor_enquadrado or not verificado or verificado <= 0:
+        return None, "INDISPONIVEL", ["cobertura_exposicao_indisponivel"]
+
+    cobertura = round(valor_enquadrado / verificado, 4)
+    if cobertura <= 0.5:
+        faixa = "CONFORTAVEL"
+    elif cobertura <= 1.0:
+        faixa = "MODERADA"
+    else:
+        faixa = "ACIMA_RECEITA_ANUAL"
+    return cobertura, faixa, ["cobertura_exposicao_calculada"]
+
+
+def _ajuste_pd_volatilidade(
+    snapshots: dict[str, Any],
+    rating: str,
+) -> tuple[dict[str, Any], list[str]]:
+    recursos = _first_snapshot(snapshots, "recursos_recebidos")
+    volatilidade = recursos.get("volatilidade") or {}
+    cv = _as_float(volatilidade.get("cv")) if isinstance(volatilidade, dict) else None
+    flags: list[str] = []
+    parametro: str | None = None
+    multiplicador = 1.0
+
+    try:
+        from app.services.pricing_params_service import get_pricing_config
+
+        params, matrix = get_pricing_config()
+    except Exception as exc:
+        logger.warning("score_engine.pricing_params_unavailable", error=str(exc))
+        params, matrix = {}, {}
+
+    corte_moderado = _as_float(params.get("pd_cv_corte_moderado"))
+    corte_alto = _as_float(params.get("pd_cv_corte_alto"))
+    if cv is None:
+        faixa = "INDISPONIVEL"
+        flags.append("pd_volatilidade_indisponivel_sem_ajuste")
+    elif (
+        corte_moderado is None
+        or corte_alto is None
+        or corte_moderado < 0
+        or corte_alto <= corte_moderado
+    ):
+        faixa = "PARAMETROS_INDISPONIVEIS"
+        flags.append("pd_volatilidade_parametro_indisponivel_sem_ajuste")
+    elif cv <= corte_moderado:
+        faixa = "BAIXA"
+        flags.append("pd_volatilidade_baixa_sem_ajuste")
+    else:
+        if cv <= corte_alto:
+            faixa = "MODERADA"
+            parametro = "pd_mult_volatilidade_moderada"
+            flag = "pd_volatilidade_moderada"
+        else:
+            faixa = "ALTA"
+            parametro = "pd_mult_volatilidade_alta"
+            flag = "pd_volatilidade_alta"
+        configured = _as_float(params.get(parametro))
+        if configured is not None and configured > 0:
+            multiplicador = configured
+            flags.append(flag)
+        else:
+            flags.append("pd_volatilidade_parametro_indisponivel_sem_ajuste")
+
+    rating_config = matrix.get(rating, {}) if isinstance(matrix, dict) else {}
+    pd_performada = _as_float(params.get("pd_performada"))
+    pd_rating_mult = _as_float(rating_config.get("pd_mult"))
+    pd_base = (
+        pd_performada * pd_rating_mult
+        if pd_performada is not None and pd_rating_mult is not None
+        else None
+    )
+    pd_ajustada = pd_base * multiplicador if pd_base is not None else None
+    return {
+        "cv": cv,
+        "corte_moderado": corte_moderado,
+        "corte_alto": corte_alto,
+        "faixa_volatilidade": faixa,
+        "parametro": parametro,
+        "multiplicador_volatilidade": multiplicador,
+        "pd_base": round(pd_base, 6) if pd_base is not None else None,
+        "pd_ajustada": round(pd_ajustada, 6) if pd_ajustada is not None else None,
+    }, flags
+
+
+def _flags_historico_recebimentos(snapshots: dict[str, Any]) -> list[str]:
+    recursos = _first_snapshot(snapshots, "recursos_recebidos")
+    meses = _as_float(recursos.get("meses_com_recebimento"))
+    if meses is not None and meses < 12:
+        return ["desembolso_pos_ateste_obrigatorio"]
+    return []
 
 
 def _component_list(data: Any) -> list[Any]:
@@ -604,6 +756,7 @@ def _contract_duration_years(contract: dict[str, Any]) -> float | None:
 
 def score_relacionamento(snapshots: dict[str, Any]) -> dict[str, Any]:
     contratos = _first_snapshot(snapshots, "contratos")
+    recursos = _first_snapshot(snapshots, "recursos_recebidos")
     flags: list[str] = []
 
     active = _active_contracts(contratos)
@@ -632,14 +785,28 @@ def score_relacionamento(snapshots: dict[str, Any]) -> dict[str, Any]:
     else:
         volume = 92
 
-    if org_count <= 1:
-        diversificacao = 45
-    elif org_count == 2:
-        diversificacao = 62
-    elif org_count <= 4:
-        diversificacao = 78
+    concentracao = recursos.get("concentracao") or {}
+    hhi = _as_float(concentracao.get("hhi")) if isinstance(concentracao, dict) else None
+    if hhi is not None and hhi > 0:
+        if hhi < 2500:
+            concentracao_score = 90
+        elif hhi <= 6000:
+            concentracao_score = 70
+        else:
+            concentracao_score = 45
+        flags.append("diversificacao_hhi_utilizada")
+        concentracao_fator = f"HHI de recebimentos: {hhi:.1f}"
     else:
-        diversificacao = 90
+        if org_count <= 1:
+            concentracao_score = 45
+        elif org_count == 2:
+            concentracao_score = 62
+        elif org_count <= 4:
+            concentracao_score = 78
+        else:
+            concentracao_score = 90
+        flags.append("diversificacao_fallback_contagem_orgaos")
+        concentracao_fator = f"Diversificacao por fallback: {org_count} orgaos distintos"
 
     if total_count <= 2:
         historico = 50
@@ -661,14 +828,14 @@ def score_relacionamento(snapshots: dict[str, Any]) -> dict[str, Any]:
 
     score = round(
         SUBPESOS_RELAC["volume"] * volume
-        + SUBPESOS_RELAC["diversificacao"] * diversificacao
+        + SUBPESOS_RELAC["concentracao"] * concentracao_score
         + SUBPESOS_RELAC["historico"] * historico
         + SUBPESOS_RELAC["maturidade"] * maturidade,
         1,
     )
     fatores = [
         f"{ativos_count} contratos ativos",
-        f"{org_count} orgaos distintos",
+        concentracao_fator,
         f"{total_count} contratos no historico",
         f"Maturidade maxima: {max_duration:.1f} anos" if max_duration is not None else "Maturidade nao validada",
     ]
@@ -676,7 +843,7 @@ def score_relacionamento(snapshots: dict[str, Any]) -> dict[str, Any]:
         score,
         PESOS_MERITO["relacionamento_governamental"],
         fatores,
-        "Relacionamento governamental calculado por volume, diversificacao, historico e maturidade dos contratos.",
+        "Relacionamento governamental calculado por volume, concentracao de recebimentos, historico e maturidade dos contratos.",
         flags,
     )
 
@@ -843,11 +1010,13 @@ def score_porte_llm(
     from app.core.config import settings
 
     client = client or anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    faturamento = _faturamento_context(snapshots)
     payload = {
         "brasil_api": snapshots.get("brasil_api"),
         "pessoa_juridica": snapshots.get("pessoa_juridica"),
         "contratos": snapshots.get("contratos"),
         "recursos_recebidos": snapshots.get("recursos_recebidos"),
+        "faturamento_para_analise": faturamento,
     }
     logger.info(
         "score_engine.calling_opus",
@@ -883,7 +1052,7 @@ def score_porte_llm(
         clean = re.sub(r"```json|```", "", text).strip()
         result = fix_dict_encoding(json.loads(clean))
         nivel = _valid_level(result.get("nivel")) or "Atencao"
-        flags = list(result.get("flags") or [])
+        flags = list(result.get("flags") or []) + faturamento["flags"]
         if not _valid_level(result.get("nivel")):
             flags.append("nivel_invalido")
         return _dimension(
@@ -902,7 +1071,7 @@ def score_porte_llm(
             PESOS_MERITO["porte_operacionalidade"],
             [],
             "Nao foi possivel interpretar a resposta de Porte/Operacionalidade.",
-            ["parse_falhou"],
+            ["parse_falhou", *faturamento["flags"]],
             fonte="llm",
             nivel="Atencao",
         )
@@ -1110,6 +1279,12 @@ def consolidar_score(
     snapshots = fix_dict_encoding(snapshots or {})
     operacao = operacao or {}
     pct_max_contrato = _as_float(operacao.get("pct_max_contrato")) or 0
+    faturamento = _faturamento_context(snapshots)
+    cobertura, cobertura_faixa, cobertura_flags = _cobertura_exposicao(
+        operacao,
+        faturamento,
+    )
+    historico_flags = _flags_historico_recebimentos(snapshots)
     bloqueios = gates_deterministicos(snapshots)
     if bloqueios:
         dimensoes = {
@@ -1141,18 +1316,36 @@ def consolidar_score(
             "fator_regularidade": 1.00,
             "limite_sugerido_pct_contrato": pct_max_contrato,
             "limite_aprovado_rs": 0.0,
+            "faturamento": faturamento,
+            "cobertura": cobertura,
+            "cobertura_faixa": cobertura_faixa,
+            "ajuste_pd": None,
             "dimensoes": dimensoes,
             "regularidade": {"fator": 1.00, "haircuts": [], "flags": []},
             "bloqueios": bloqueios,
             "pontos_positivos": [],
             "pontos_atencao": bloqueios,
+            "flags": sorted(
+                set(faturamento["flags"] + cobertura_flags + historico_flags)
+            ),
             "parecer_estruturado": parecer_estruturado,
             "parecer": bloqueios[0],
         }
 
+    porte = porte_dimension or score_porte_llm(
+        cnpj,
+        snapshots,
+        operation_id=operation_id,
+    )
+    if porte_dimension:
+        porte = dict(porte_dimension)
+        porte["flags"] = sorted(
+            set(list(porte.get("flags") or []) + faturamento["flags"])
+        )
+
     dimensoes = {
         "relacionamento_governamental": score_relacionamento(snapshots),
-        "porte_operacionalidade": porte_dimension or score_porte_llm(cnpj, snapshots, operation_id=operation_id),
+        "porte_operacionalidade": porte,
         "saude_cadastral": score_saude_cadastral(snapshots),
         "reputacao_mercado": score_reputacao(snapshots),
     }
@@ -1160,6 +1353,7 @@ def consolidar_score(
     merit = round(sum(dimensoes[dim]["score"] * peso for dim, peso in PESOS_MERITO.items()), 1)
     score_final = round(merit * regularidade["fator"], 1)
     rating = rating_de(score_final)
+    ajuste_pd, pd_flags = _ajuste_pd_volatilidade(snapshots, rating)
 
     pontos_positivos = [
         f"{dim}: {value['nivel']}"
@@ -1177,6 +1371,18 @@ def consolidar_score(
             "(falha de parse) — dimensão avaliada de forma neutra"
         )
     limite_aprovado_rs, limite_flags = _limite_aprovado(snapshots, operacao)
+    flags_extra = sorted(
+        set(
+            limite_flags
+            + faturamento["flags"]
+            + cobertura_flags
+            + historico_flags
+            + pd_flags
+            + list(
+                dimensoes["relacionamento_governamental"].get("flags") or []
+            )
+        )
+    )
     parecer_estruturado = _parecer_estruturado(
         score_final,
         rating,
@@ -1185,7 +1391,7 @@ def consolidar_score(
         regularidade,
         pontos_positivos,
         pontos_atencao,
-        limite_flags,
+        flags_extra,
     )
 
     return {
@@ -1195,9 +1401,13 @@ def consolidar_score(
         "fator_regularidade": regularidade["fator"],
         "limite_sugerido_pct_contrato": pct_max_contrato,
         "limite_aprovado_rs": limite_aprovado_rs,
+        "faturamento": faturamento,
+        "cobertura": cobertura,
+        "cobertura_faixa": cobertura_faixa,
+        "ajuste_pd": ajuste_pd,
         "dimensoes": dimensoes,
         "regularidade": regularidade,
-        "flags": limite_flags,
+        "flags": flags_extra,
         "bloqueios": [],
         "pontos_positivos": pontos_positivos,
         "pontos_atencao": pontos_atencao,

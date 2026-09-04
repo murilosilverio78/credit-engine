@@ -233,7 +233,12 @@ def compute_margem_subordinado(
     return (metrics.custo_sub_rs + sum(flows)) / saldo_subordinado_total
 
 
-def compute_taxa(rating: str, valor: float, prazo_meses: int) -> dict:
+def compute_taxa(
+    rating: str,
+    valor: float,
+    prazo_meses: int,
+    pd_multiplier: float = 1.0,
+) -> dict:
     """
     Calcula taxa a.m. por fluxo de caixa e Goal Seek via bissecao.
 
@@ -244,6 +249,10 @@ def compute_taxa(rating: str, valor: float, prazo_meses: int) -> dict:
     valor = float(valor or 0)
     prazo_meses = max(int(prazo_meses or 1), 1)
     params, _, m = _pricing_inputs(rating, valor, prazo_meses)
+    pd_multiplier = max(float(pd_multiplier or 1.0), 0.0)
+    pd_base = params["pd_performada"] * m["pd_mult"]
+    params = dict(params)
+    params["pd_performada"] *= pd_multiplier
     derived = _derive(params, m, valor, prazo_meses)
 
     taxa_am = _solve_taxa(valor, prazo_meses, params, m)
@@ -275,6 +284,8 @@ def compute_taxa(rating: str, valor: float, prazo_meses: int) -> dict:
         "serpro_am": serpro_am,
         "sub_am": derived["margem_sub_am"],
         "pd": derived["pd"],
+        "pd_base": pd_base,
+        "pd_multiplier": pd_multiplier,
         "lgd": derived["lgd"],
         "el": derived["el"],
         "fluxo_caixa": flows,

@@ -467,7 +467,16 @@ async def _complete_analysis(operation_id: str):
         try:
             from app.services.pricing_engine import compute_taxa
 
-            pricing = compute_taxa(rating, valor, _prazo_meses(prazo_dias))
+            ajuste_pd = score_result.get("ajuste_pd") or {}
+            pd_multiplier = _as_float(
+                ajuste_pd.get("multiplicador_volatilidade")
+            ) or 1.0
+            pricing = compute_taxa(
+                rating,
+                valor,
+                _prazo_meses(prazo_dias),
+                pd_multiplier=pd_multiplier,
+            )
             data["taxa_sugerida"] = pricing.get("taxa_sugerida_am")
             data["taxa_breakdown"] = pricing
         except Exception as exc:
