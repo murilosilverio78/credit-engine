@@ -29,6 +29,9 @@ boto3==1.35.18
 # PDF
 reportlab==4.2.2
 pypdf==4.3.1
+pypdfium2==5.13.0
+pytesseract==0.3.13
+Pillow==12.3.0
 
 # Browser automation (certidões)
 playwright==1.47.0

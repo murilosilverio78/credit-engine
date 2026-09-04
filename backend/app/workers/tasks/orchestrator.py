@@ -18,6 +18,7 @@ MANUAL_COMPONENTS = ("cndt_tst", "cnd_federal", "fgts")
 PHASE1_COMPONENTS = ("brasil_api", "pessoa_juridica")
 PHASE2_COMPONENTS = (
     "contratos",
+    "contrato_extracao",
     "recursos_recebidos",
     "acordos_leniencia",
     "ceis",
@@ -326,6 +327,7 @@ async def _run_analysis(operation_id: str):
     from app.workers.tasks.ceis import run_ceis
     from app.workers.tasks.cepim import run_cepim
     from app.workers.tasks.cnep import run_cnep
+    from app.workers.tasks.contrato_extracao import run_contrato_extracao
     from app.workers.tasks.contratos import run_contratos
     from app.workers.tasks.pessoa_juridica import run_pessoa_juridica
     from app.workers.tasks.recursos_recebidos import run_recursos_recebidos
@@ -406,6 +408,12 @@ async def _run_analysis(operation_id: str):
     phase2_results = await asyncio.gather(
         _run_or_reuse_component(
             "contratos", run_contratos, operation_id, reusable_components
+        ),
+        _run_or_reuse_component(
+            "contrato_extracao",
+            run_contrato_extracao,
+            operation_id,
+            reusable_components,
         ),
         _run_or_reuse_component(
             "recursos_recebidos",
