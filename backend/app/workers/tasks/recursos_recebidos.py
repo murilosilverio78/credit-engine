@@ -1,121 +1,428 @@
-"""
-Componente: recursos_recebidos
-Consulta recursos federais recebidos via despesas no Portal da Transparência.
-Executado apenas se pessoa_juridica.favorecido_despesas = True.
+"""Federal receipts component with Broadfactor/Portal reconciliation."""
 
-Tipo: automatizado | Fila: fast | Cache: 12h
-"""
-import os
+from __future__ import annotations
 
-import httpx
+import statistics
 import time
 from datetime import date
+from typing import Any
+
+import httpx
+import structlog
+
+from app.integrations.broadfactor.client import (
+    BroadfactorClient,
+    ConcentracaoSacado,
+    Recebimento,
+)
 from app.workers.base import BaseComponentTask
 from app.workers.http_utils import fetch_json_with_retry
-import structlog
+
 
 logger = structlog.get_logger()
 
-SSL_VERIFY = os.getenv("SSL_VERIFY", "true").lower() != "false"
 BASE_URL = "https://api.portaldatransparencia.gov.br/api-de-dados"
 MAX_PAGES = 300
 MAX_SECONDS = 180
+BROADFACTOR_PAGE_SIZE = 50
+RECONCILIATION_TOLERANCE_PCT = 10.0
 
 
-def _mes_ano(d: date) -> str:
-    return d.strftime("%m/%Y")
+def _month_key(value: str | int | None) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    try:
+        if len(raw) == 7 and raw[2] == "/":
+            month, year = int(raw[:2]), int(raw[3:])
+        elif len(raw) == 6 and raw.isdigit():
+            year, month = int(raw[:4]), int(raw[4:])
+        else:
+            return None
+    except ValueError:
+        return None
+    if not 1 <= month <= 12:
+        return None
+    return year, month
 
 
-def _fetch(cnpj: str, token: str = None) -> dict:
-    from app.core.config import settings
-    api_token = token or settings.PORTAL_TRANSPARENCIA_TOKEN
+def _format_month(key: tuple[int, int] | None) -> str | None:
+    if key is None:
+        return None
+    year, month = key
+    return f"{month:02d}/{year:04d}"
 
-    headers = {"chave-api-dados": api_token}
 
-    hoje = date.today()
-    mes_fim    = _mes_ano(hoje)
-    mes_inicio = _mes_ano(hoje.replace(year=hoje.year - 1))
+def _shift_month(value: date, months: int) -> date:
+    month_index = value.year * 12 + value.month - 1 + months
+    year, month_zero_based = divmod(month_index, 12)
+    return date(year, month_zero_based + 1, 1)
 
-    recursos = []
 
-    started = time.monotonic()
-    pagina = 1
-    with httpx.Client(timeout=20, verify=SSL_VERIFY) as client:
-        while True:
-            elapsed = time.monotonic() - started
-            if elapsed > MAX_SECONDS:
-                raise TimeoutError(
-                    f"recursos_recebidos excedeu timeout de {MAX_SECONDS}s na pagina {pagina}"
-                )
-            if pagina > MAX_PAGES:
-                logger.warning(
-                    "recursos_recebidos.pagination_cap_reached",
-                    paginas_lidas=pagina,
-                    registros_ate_agora=len(recursos),
-                )
-                break
+def _mature_window(today: date) -> tuple[date, date]:
+    year = today.year - 1
+    return date(year, 1, 1), date(year, 12, 31)
 
-            # URL montada como string para evitar encoding do "/" pelo httpx
-            url = (
-                f"{BASE_URL}/despesas/recursos-recebidos"
-                f"?codigoFavorecido={cnpj}"
-                f"&mesAnoInicio={mes_inicio}"
-                f"&mesAnoFim={mes_fim}"
-                f"&pagina={pagina}"
-            )
-            data = fetch_json_with_retry(client, url, headers=headers)
 
-            if not data:
-                break
-            recursos.extend(data)
-            pagina += 1
+def _portal_receipt(payload: dict[str, Any]) -> Recebimento:
+    return Recebimento(
+        valor=float(payload.get("valor") or 0),
+        orgao=payload.get("nomeOrgao") or "",
+        codigo_orgao=(
+            str(payload.get("codigoOrgao"))
+            if payload.get("codigoOrgao") is not None
+            else None
+        ),
+        orgao_superior=payload.get("nomeOrgaoSuperior"),
+        unidade_gestora=payload.get("nomeUnidadeGestora"),
+        competencia=_format_month(_month_key(payload.get("anoMes"))),
+        acao=payload.get("nomeAcao"),
+    )
 
-    valor_total = sum(float(r.get("valor") or 0) for r in recursos)
-    orgaos = list({r.get("nomeOrgao", "") for r in recursos if r.get("nomeOrgao")})
 
-    por_ano = {}
-    for r in recursos:
-        ano = str(r.get("anoMes") or 0)[:4]
-        if ano:
-            por_ano[ano] = por_ano.get(ano, 0) + float(r.get("valor") or 0)
-
-    atingiu_cap = pagina > MAX_PAGES
-    pagination = {
-        "paginas_lidas": pagina,
-        "registros": len(recursos),
-        "atingiu_cap": atingiu_cap,
-        "motivo_fim": "limite_paginas" if atingiu_cap else "pagina_vazia",
+def _receipt_detail(receipt: Recebimento) -> dict[str, Any]:
+    key = _month_key(receipt.competencia)
+    return {
+        "mes": key[0] * 100 + key[1] if key is not None else None,
+        "competencia": receipt.competencia,
+        "valor": receipt.valor,
+        "orgao": receipt.orgao,
+        "codigo_orgao": receipt.codigo_orgao,
+        "orgao_superior": receipt.orgao_superior,
+        "unidade_gestora": receipt.unidade_gestora,
+        "acao": receipt.acao,
     }
-    if atingiu_cap:
-        logger.warning(
-            "recursos_recebidos.pagination_cap_reached",
-            cnpj=cnpj,
-            max_pages=MAX_PAGES,
-            **pagination,
+
+
+def _receipt_sort_key(receipt: Recebimento) -> tuple[bool, tuple[int, int]]:
+    key = _month_key(receipt.competencia)
+    return key is None, key or (9999, 12)
+
+
+def _annual_series(receipts: list[Recebimento]) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    for receipt in receipts:
+        key = _month_key(receipt.competencia)
+        if key is None:
+            continue
+        year = str(key[0])
+        totals[year] = totals.get(year, 0.0) + receipt.valor
+    return {
+        year: round(total, 2)
+        for year, total in sorted(totals.items(), key=lambda item: int(item[0]))
+    }
+
+
+def _volatility(series: dict[str, float], current_year: int) -> dict[str, float]:
+    complete_years = sorted(
+        (int(year), float(total))
+        for year, total in series.items()
+        if int(year) < current_year
+    )
+    totals = [total for _, total in complete_years]
+    mean = statistics.fmean(totals) if totals else 0.0
+    cv = statistics.pstdev(totals) / mean if len(totals) > 1 and mean else 0.0
+
+    drops = []
+    for (_, previous), (_, current) in zip(complete_years, complete_years[1:]):
+        if previous > 0:
+            drops.append(max((previous - current) / previous * 100, 0.0))
+
+    return {
+        "cv": round(cv, 4),
+        "maior_queda_anual_pct": round(max(drops, default=0.0), 2),
+    }
+
+
+def _derived_metrics(receipts: list[Recebimento], today: date) -> dict[str, Any]:
+    dated = [
+        (key, receipt)
+        for receipt in receipts
+        if (key := _month_key(receipt.competencia)) is not None
+    ]
+    dated.sort(key=lambda item: item[0])
+    rolling_start_date = _shift_month(date(today.year, today.month, 1), -11)
+    rolling_start = (rolling_start_date.year, rolling_start_date.month)
+    current_month = (today.year, today.month)
+    faturamento_12m = sum(
+        receipt.valor
+        for key, receipt in dated
+        if rolling_start <= key <= current_month
+    )
+
+    series = _annual_series(receipts)
+    concentration = ConcentracaoSacado.calcular(receipts)
+    concentration_data = None
+    if concentration is not None:
+        concentration_data = {
+            "hhi": concentration.hhi,
+            "n_orgaos": concentration.n_orgaos,
+            "top_orgao": concentration.top_orgao,
+            "top_participacao": concentration.top_participacao,
+            "faixa": concentration.faixa,
+        }
+
+    competencies = sorted({key for key, _ in dated})
+    return {
+        "faturamento_verificado_12m": round(faturamento_12m, 2),
+        "serie_anual": series,
+        "meses_com_recebimento": len(competencies),
+        "primeira_competencia": _format_month(competencies[0]) if competencies else None,
+        "ultima_competencia": _format_month(competencies[-1]) if competencies else None,
+        "concentracao": concentration_data,
+        "volatilidade": _volatility(series, today.year),
+    }
+
+
+def _window_total(
+    receipts: list[Recebimento],
+    start: date,
+    end: date,
+) -> tuple[float, int]:
+    start_key = (start.year, start.month)
+    end_key = (end.year, end.month)
+    selected = [
+        receipt.valor
+        for receipt in receipts
+        if (key := _month_key(receipt.competencia)) is not None
+        and start_key <= key <= end_key
+    ]
+    return round(sum(selected), 2), len(selected)
+
+
+def _reconcile(
+    broadfactor: list[Recebimento],
+    portal: list[Recebimento],
+    today: date,
+) -> dict[str, Any]:
+    start, end = _mature_window(today)
+    total_broadfactor, count_broadfactor = _window_total(broadfactor, start, end)
+    total_portal, count_portal = _window_total(portal, start, end)
+
+    divergence_pct: float | None = None
+    if count_broadfactor == 0:
+        status = "SEM_DADO_BROADFACTOR"
+    elif count_portal == 0:
+        status = "SEM_DADO_PORTAL"
+    else:
+        if total_broadfactor == 0:
+            divergence_pct = 0.0 if total_portal == 0 else 100.0
+        else:
+            divergence_pct = round(
+                abs(total_broadfactor - total_portal) / total_broadfactor * 100,
+                2,
+            )
+        status = (
+            "DIVERGENTE"
+            if divergence_pct > RECONCILIATION_TOLERANCE_PCT
+            else "CONVERGENTE"
         )
 
     return {
-        "total_registros": len(recursos),
-        "valor_total_recebido": valor_total,
-        "periodo_inicio": mes_inicio,
-        "periodo_fim": mes_fim,
-        "orgaos_pagadores": orgaos,
-        "valor_por_ano": por_ano,
-        "recursos_detalhe": [
-            {
-                "mes": r.get("anoMes"),
-                "valor": r.get("valor"),
-                "orgao": r.get("nomeOrgao"),
-                "acao": r.get("nomeAcao"),
-            }
-            for r in recursos
-        ],
+        "janela_inicio": start.isoformat(),
+        "janela_fim": end.isoformat(),
+        "total_broadfactor": total_broadfactor,
+        "total_portal": total_portal,
+        "divergencia_pct": divergence_pct,
+        "status": status,
+    }
+
+
+def _fetch_portal(
+    cnpj: str,
+    token: str | None = None,
+    today: date | None = None,
+) -> tuple[list[Recebimento], dict[str, Any]]:
+    from app.core.config import settings
+
+    today = today or date.today()
+    mature_start, _ = _mature_window(today)
+    rolling_start = _shift_month(date(today.year, today.month, 1), -11)
+    query_start = min(mature_start, rolling_start)
+    headers = {"chave-api-dados": token or settings.PORTAL_TRANSPARENCIA_TOKEN}
+
+    resources: list[dict[str, Any]] = []
+    started = time.monotonic()
+    page = 1
+    with httpx.Client(timeout=20, verify=settings.HTTPX_VERIFY_SSL) as client:
+        while True:
+            if time.monotonic() - started > MAX_SECONDS:
+                raise TimeoutError(
+                    f"recursos_recebidos excedeu {MAX_SECONDS}s na pagina {page}"
+                )
+            if page > MAX_PAGES:
+                logger.warning(
+                    "recursos_recebidos.portal_pagination_cap_reached",
+                    cnpj=cnpj,
+                    max_pages=MAX_PAGES,
+                    registros=len(resources),
+                )
+                break
+
+            url = (
+                f"{BASE_URL}/despesas/recursos-recebidos"
+                f"?codigoFavorecido={cnpj}"
+                f"&mesAnoInicio={query_start.strftime('%m/%Y')}"
+                f"&mesAnoFim={today.strftime('%m/%Y')}"
+                f"&pagina={page}"
+            )
+            data = fetch_json_with_retry(client, url, headers=headers)
+            if not data:
+                break
+            if not isinstance(data, list):
+                raise ValueError("Resposta inesperada do Portal da Transparencia")
+            resources.extend(item for item in data if isinstance(item, dict))
+            page += 1
+
+    pagination = {
+        "paginas_lidas": page,
+        "registros": len(resources),
+        "atingiu_cap": page > MAX_PAGES,
+        "motivo_fim": "limite_paginas" if page > MAX_PAGES else "pagina_vazia",
+    }
+    return [_portal_receipt(item) for item in resources], pagination
+
+
+def _get_cotacao_id(operation_id: str | None) -> str | None:
+    if not operation_id:
+        return None
+    from app.core.database import supabase
+
+    result = (
+        supabase.table("operations")
+        .select("cotacao_id")
+        .eq("id", operation_id)
+        .single()
+        .execute()
+    )
+    return (result.data or {}).get("cotacao_id")
+
+
+def _fetch_broadfactor(cotacao_id: str) -> list[Recebimento]:
+    client = BroadfactorClient()
+    return client.recebimentos(
+        cotacao_id,
+        paginas=MAX_PAGES,
+        tamanho=BROADFACTOR_PAGE_SIZE,
+        exigir_completo=True,
+    )
+
+
+def _build_snapshot(
+    primary: list[Recebimento],
+    source: str,
+    reconciliation: dict[str, Any] | None,
+    today: date,
+    pagination: dict[str, Any],
+) -> dict[str, Any]:
+    metrics = _derived_metrics(primary, today)
+    details = [
+        _receipt_detail(receipt)
+        for receipt in sorted(primary, key=_receipt_sort_key)
+    ]
+    result = {
+        "fonte_primaria": source,
+        "reconciliacao": reconciliation,
+        "total_registros": len(primary),
+        "valor_total_recebido": round(sum(item.valor for item in primary), 2),
+        "periodo_inicio": metrics["primeira_competencia"],
+        "periodo_fim": metrics["ultima_competencia"],
+        "orgaos_pagadores": sorted({item.orgao for item in primary if item.orgao}),
+        "valor_por_ano": metrics["serie_anual"],
+        "recursos_detalhe": details,
         "_pagination": pagination,
     }
+    result.update(metrics)
+    return result
+
+
+def _fetch(
+    cnpj: str,
+    token: str | None = None,
+    operation_id: str | None = None,
+    today: date | None = None,
+) -> dict[str, Any]:
+    today = today or date.today()
+    cotacao_id = _get_cotacao_id(operation_id)
+    broadfactor: list[Recebimento] = []
+
+    if cotacao_id:
+        try:
+            broadfactor = _fetch_broadfactor(cotacao_id)
+        except Exception as exc:
+            logger.warning(
+                "recursos_recebidos.broadfactor_failed",
+                operation_id=operation_id,
+                cotacao_id=cotacao_id,
+                error=str(exc),
+            )
+
+    try:
+        portal, portal_pagination = _fetch_portal(cnpj, token=token, today=today)
+    except Exception as exc:
+        if not broadfactor:
+            raise
+        portal = []
+        portal_pagination = {
+            "paginas_lidas": 0,
+            "registros": 0,
+            "atingiu_cap": False,
+            "motivo_fim": "erro",
+        }
+        logger.warning(
+            "recursos_recebidos.portal_reconciliation_failed",
+            operation_id=operation_id,
+            cotacao_id=cotacao_id,
+            error=str(exc),
+        )
+
+    if not cotacao_id:
+        return _build_snapshot(
+            portal,
+            "PORTAL_TRANSPARENCIA",
+            None,
+            today,
+            portal_pagination,
+        )
+
+    reconciliation = _reconcile(broadfactor, portal, today)
+    if reconciliation["status"] == "DIVERGENTE":
+        logger.warning(
+            "recursos_recebidos.reconciliation_divergent",
+            operation_id=operation_id,
+            cotacao_id=cotacao_id,
+            total_broadfactor=reconciliation["total_broadfactor"],
+            total_portal=reconciliation["total_portal"],
+            divergencia_pct=reconciliation["divergencia_pct"],
+        )
+
+    if broadfactor:
+        return _build_snapshot(
+            broadfactor,
+            "BROADFACTOR",
+            reconciliation,
+            today,
+            {
+                "paginas_solicitadas": MAX_PAGES,
+                "tamanho_pagina": BROADFACTOR_PAGE_SIZE,
+            },
+        )
+    return _build_snapshot(
+        portal,
+        "PORTAL_TRANSPARENCIA",
+        reconciliation,
+        today,
+        portal_pagination,
+    )
 
 
 _task = BaseComponentTask()
 
 
 def run_recursos_recebidos(operation_id: str):
-    return _task.execute(operation_id, component="recursos_recebidos", handler=_fetch)
+    return _task.execute(
+        operation_id,
+        component="recursos_recebidos",
+        handler=_fetch,
+        use_cache=False,
+    )

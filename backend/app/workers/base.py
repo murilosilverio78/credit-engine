@@ -72,7 +72,13 @@ class BaseComponentTask:
     - Verifica cache antes de executar
     - Registra no audit trail
     """
-    def execute(self, operation_id: str, component: str, handler: Callable) -> dict:
+    def execute(
+        self,
+        operation_id: str,
+        component: str,
+        handler: Callable,
+        use_cache: bool = True,
+    ) -> dict:
         from app.services.snapshot_service import SnapshotService
         from app.services.cache_service import CacheService
         from app.services.audit_service import AuditService
@@ -92,7 +98,7 @@ class BaseComponentTask:
         )
 
         # Verifica cache
-        cached = cache_svc.get(cnpj, component)
+        cached = cache_svc.get(cnpj, component) if use_cache else None
         if cached:
             cached = fix_dict_encoding(cached)
             logger.info("component.cache_hit", component=component, cnpj=cnpj)
@@ -147,7 +153,8 @@ class BaseComponentTask:
             )
 
             # Salva no cache
-            cache_svc.set(cnpj, component, result)
+            if use_cache:
+                cache_svc.set(cnpj, component, result)
 
             audit_svc.log(
                 operation_id,

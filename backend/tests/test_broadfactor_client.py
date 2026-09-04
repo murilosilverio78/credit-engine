@@ -3,11 +3,18 @@ import json
 import os
 import time
 
+import pytest
+
 
 for key in ("SECRET_KEY", "TWOCAPTCHA_API_KEY", "RESEND_API_KEY"):
     os.environ.setdefault(key, "test")
 
-from app.integrations.broadfactor.client import BroadfactorClient, Outcome  # noqa: E402
+from app.integrations.broadfactor.client import (  # noqa: E402
+    BroadfactorClient,
+    BroadfactorError,
+    Outcome,
+    Result,
+)
 
 
 def _jwt(claims: dict) -> str:
@@ -165,3 +172,29 @@ def test_404_distinguishes_missing_route_from_business_not_found():
 
     assert missing_route.outcome is Outcome.NO_ROUTE
     assert business_not_found.outcome is Outcome.NOT_FOUND
+
+
+def test_receipts_strict_mode_rejects_partial_page_failure(monkeypatch):
+    client = BroadfactorClient("client", "secret", "http://broadfactor.test")
+    responses = iter(
+        [
+            Result(
+                Outcome.OK,
+                data={
+                    "content": [
+                        {
+                            "value": 100,
+                            "nameOrganization": "Orgao A",
+                            "competency": "01/2025",
+                        }
+                    ],
+                    "totalPages": 2,
+                },
+            ),
+            Result(Outcome.ERROR, message="network error"),
+        ]
+    )
+    monkeypatch.setattr(client, "_req", lambda *args, **kwargs: next(responses))
+
+    with pytest.raises(BroadfactorError):
+        client.recebimentos("C-1", paginas=10, exigir_completo=True)

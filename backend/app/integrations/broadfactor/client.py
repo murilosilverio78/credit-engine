@@ -388,6 +388,7 @@ class Recebimento:
     orgao_superior: str | None
     unidade_gestora: str | None
     competencia: str | None
+    acao: str | None = None
 
     @classmethod
     def de_json(cls, d: dict) -> "Recebimento":
@@ -427,7 +428,7 @@ class ConcentracaoSacado:
     def faixa(self) -> str:
         if self.hhi < 2500:
             return "PULVERIZADO"
-        if self.hhi < 6000:
+        if self.hhi <= 6000:
             return "MODERADO"
         return "CONCENTRADO"
 
@@ -896,7 +897,8 @@ class BroadfactorClient:
         return out
 
     def recebimentos(self, cid: str, paginas: int = 1,
-                     tamanho: int = 50) -> list[Recebimento]:
+                     tamanho: int = 50,
+                     exigir_completo: bool = False) -> list[Recebimento]:
         """
         Pagamentos do governo ao cedente. POST com page/size no caminho.
         Campos em ingles, ao contrario do resto da API.
@@ -906,11 +908,24 @@ class BroadfactorClient:
             res = self._req("POST", f"/empresa/recebido/{cid}/{pagina}/{tamanho}",
                             body={})
             if not res.ok or not isinstance(res.data, dict):
+                if exigir_completo and res.outcome is not Outcome.EMPTY:
+                    raise BroadfactorError(
+                        f"falha ao paginar recebimentos: {res.outcome.value}",
+                        status=res.status,
+                        endpoint=res.endpoint,
+                        payload=res.data,
+                    )
                 break
             conteudo = res.data.get("content") or []
             out.extend(Recebimento.de_json(d) for d in conteudo)
             if pagina + 1 >= (res.data.get("totalPages") or 1):
                 break
+        else:
+            if exigir_completo:
+                raise BroadfactorError(
+                    f"paginacao de recebimentos excedeu {paginas} paginas",
+                    endpoint=f"/empresa/recebido/{cid}",
+                )
         return out
 
     # ------------------------------------------------------------ propostas
