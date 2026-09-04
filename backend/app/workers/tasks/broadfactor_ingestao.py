@@ -14,6 +14,7 @@ from typing import Any
 import structlog
 
 from app.integrations.broadfactor.client import BroadfactorClient, Cotacao
+from app.workers.base import _execute_snapshot_write as _execute_with_retry
 
 
 logger = structlog.get_logger()
@@ -69,11 +70,14 @@ def _update_quote_status(
     data = {"status_ingestao": status}
     if operation_id is not None:
         data["operation_id"] = operation_id
-    (
-        supabase.table("cotacoes_broadfactor")
+    _execute_with_retry(
+        operation_id or cotacao_id,
+        "broadfactor_ingestao",
+        "update_quote_status",
+        lambda: supabase.table("cotacoes_broadfactor")
         .update(data)
         .eq("cotacao_id", cotacao_id)
-        .execute()
+        .execute(),
     )
 
 
@@ -160,7 +164,7 @@ async def run_broadfactor_ingestao(
             )
 
     operation_service = OperationService()
-    analysis_jobs: list[tuple[str, asyncio.Task]] = []
+    analysis_jobs: list[tuple[str, str, asyncio.Task]] = []
     criadas = 0
     duplicadas = 0
     processadas = 0
@@ -195,7 +199,11 @@ async def run_broadfactor_ingestao(
             )
             operation_id = str(operation["id"])
             analysis_jobs.append(
-                (cotacao.id, asyncio.create_task(_start_analysis(operation_id)))
+                (
+                    cotacao.id,
+                    operation_id,
+                    asyncio.create_task(_start_analysis(operation_id)),
+                )
             )
             criadas += 1
             try:
@@ -230,17 +238,40 @@ async def run_broadfactor_ingestao(
 
     if analysis_jobs:
         results = await asyncio.gather(
-            *(task for _, task in analysis_jobs),
+            *(task for _, _, task in analysis_jobs),
             return_exceptions=True,
         )
-        for (cotacao_id, _), result in zip(analysis_jobs, results):
-            if isinstance(result, Exception):
+        for (cotacao_id, operation_id, _), result in zip(analysis_jobs, results):
+            analysis_failed = isinstance(result, Exception) or (
+                isinstance(result, dict) and result.get("status") == "failed"
+            )
+            if analysis_failed:
                 falhas += 1
+                error = (
+                    str(result)
+                    if isinstance(result, Exception)
+                    else str(result.get("error") or "analysis returned failed")
+                )
                 logger.error(
                     "broadfactor_ingestao.analysis_failed",
                     cotacao_id=cotacao_id,
-                    error=str(result),
+                    operation_id=operation_id,
+                    error=error,
                 )
+                try:
+                    _update_quote_status(
+                        supabase,
+                        cotacao_id,
+                        "ERRO_ANALISE",
+                        operation_id,
+                    )
+                except Exception as status_exc:
+                    logger.error(
+                        "broadfactor_ingestao.analysis_status_update_failed",
+                        cotacao_id=cotacao_id,
+                        operation_id=operation_id,
+                        error=str(status_exc),
+                    )
 
     summary = {
         "status": "completed",

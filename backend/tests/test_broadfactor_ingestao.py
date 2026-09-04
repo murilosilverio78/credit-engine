@@ -289,6 +289,47 @@ async def test_status_update_failure_does_not_block_analysis(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_analysis_failure_is_persisted_on_quote(monkeypatch):
+    approved = quote("C-analysis-fails")
+    discarded = []
+    created = []
+    statuses = []
+
+    class FakeClient:
+        def triar(self, **_):
+            return [approved], []
+
+    install_service_modules(
+        monkeypatch,
+        discarded=discarded,
+        created=created,
+    )
+    monkeypatch.setattr(broadfactor_ingestao, "BroadfactorClient", FakeClient)
+    monkeypatch.setattr(broadfactor_ingestao, "_operation_exists", lambda *_: False)
+    monkeypatch.setattr(broadfactor_ingestao, "_persist_quote", lambda *args: None)
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_update_quote_status",
+        lambda _, cotacao_id, status, operation_id=None: statuses.append(
+            (cotacao_id, status, operation_id)
+        ),
+    )
+
+    async def fail_analysis(_operation_id):
+        raise RuntimeError("phase2_validation: Server disconnected")
+
+    monkeypatch.setattr(broadfactor_ingestao, "_start_analysis", fail_analysis)
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert statuses == [
+        ("C-analysis-fails", "OPERACAO_CRIADA", "operation-C-analysis-fails"),
+        ("C-analysis-fails", "ERRO_ANALISE", "operation-C-analysis-fails"),
+    ]
+    assert result["falhas"] == 1
+
+
+@pytest.mark.asyncio
 async def test_dry_run_only_returns_triage_summary(monkeypatch):
     approved = quote("C-dry")
     rejected = quote("C-dry-rejected", valor=5_000)

@@ -3,6 +3,7 @@ Orchestrator: controls the credit analysis pipeline.
 Each component runs as a synchronous worker function in a background thread.
 """
 import asyncio
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -10,6 +11,7 @@ from uuid import uuid4
 import structlog
 
 from app.core.database import supabase
+from app.workers.base import _execute_snapshot_write as _execute_with_retry
 
 logger = structlog.get_logger()
 MANUAL_COMPONENTS = ("cndt_tst", "cnd_federal", "fgts")
@@ -22,6 +24,14 @@ PHASE2_COMPONENTS = (
     "cepim",
 )
 RUNNING_STALE_MINUTES = 15
+_PIPELINE_STAGE: ContextVar[str] = ContextVar(
+    "pipeline_stage",
+    default="pipeline_initialization",
+)
+
+
+def _execute_db(operation_id: str, action: str, request):
+    return _execute_with_retry(operation_id, "orchestrator", action, request)
 
 
 def _as_float(value) -> float:
@@ -75,11 +85,18 @@ def _phase2_failed_components(results: list[Any]) -> list[tuple[str, Any]]:
 
 
 def _mark_operation_failed(operation_id: str, message: str):
+    stage = _PIPELINE_STAGE.get()
+    if not message.startswith(f"{stage}:"):
+        message = f"{stage}: {message}"
     try:
-        supabase.table("operations")\
-            .update({"status": "failed", "error_message": message})\
-            .eq("id", operation_id)\
-            .execute()
+        _execute_db(
+            operation_id,
+            "mark_operation_failed",
+            lambda: supabase.table("operations")
+            .update({"status": "failed", "error_message": message})
+            .eq("id", operation_id)
+            .execute(),
+        )
         return
     except Exception as exc:
         logger.warning(
@@ -90,10 +107,14 @@ def _mark_operation_failed(operation_id: str, message: str):
         )
 
     try:
-        supabase.table("operations")\
-            .update({"status": "failed"})\
-            .eq("id", operation_id)\
-            .execute()
+        _execute_db(
+            operation_id,
+            "mark_operation_failed_without_message",
+            lambda: supabase.table("operations")
+            .update({"status": "failed"})
+            .eq("id", operation_id)
+            .execute(),
+        )
     except Exception as exc:
         logger.error(
             "pipeline.mark_operation_failed_error",
@@ -106,10 +127,14 @@ def _mark_operation_failed(operation_id: str, message: str):
 def _update_heartbeat(operation_id: str):
     """Atualiza heartbeat_at para evitar que o recovery mate operações em andamento."""
     try:
-        supabase.table("operations")\
-            .update({"heartbeat_at": datetime.now(timezone.utc).isoformat()})\
-            .eq("id", operation_id)\
-            .execute()
+        _execute_db(
+            operation_id,
+            "update_heartbeat",
+            lambda: supabase.table("operations")
+            .update({"heartbeat_at": datetime.now(timezone.utc).isoformat()})
+            .eq("id", operation_id)
+            .execute(),
+        )
     except Exception as exc:
         logger.warning("pipeline.heartbeat_failed", operation_id=operation_id, error=str(exc))
 
@@ -119,11 +144,15 @@ def _mark_stale_components_failed(operation_id: str, components: list[str]):
         return
     message = f"snapshot running ha mais de {RUNNING_STALE_MINUTES} minutos"
     try:
-        supabase.table("component_snapshots")\
-            .update({"status": "failed", "error_message": message})\
-            .eq("operation_id", operation_id)\
-            .in_("component", components)\
-            .execute()
+        _execute_db(
+            operation_id,
+            "mark_stale_components_failed",
+            lambda: supabase.table("component_snapshots")
+            .update({"status": "failed", "error_message": message})
+            .eq("operation_id", operation_id)
+            .in_("component", components)
+            .execute(),
+        )
     except Exception as exc:
         logger.error(
             "pipeline.mark_stale_components_failed_error",
@@ -135,11 +164,15 @@ def _mark_stale_components_failed(operation_id: str, components: list[str]):
 
 def _update_operation_razao_social(operation_id: str):
     try:
-        result = supabase.table("component_snapshots")\
-            .select("component,parsed_result")\
-            .eq("operation_id", operation_id)\
-            .in_("component", ["brasil_api", "pessoa_juridica"])\
-            .execute()
+        result = _execute_db(
+            operation_id,
+            "load_company_name_snapshots",
+            lambda: supabase.table("component_snapshots")
+            .select("component,parsed_result")
+            .eq("operation_id", operation_id)
+            .in_("component", ["brasil_api", "pessoa_juridica"])
+            .execute(),
+        )
         snapshots = {
             row.get("component"): row.get("parsed_result") or {}
             for row in (result.data or [])
@@ -155,10 +188,14 @@ def _update_operation_razao_social(operation_id: str):
         if not razao_social:
             return
 
-        supabase.table("operations")\
-            .update({"razao_social": razao_social})\
-            .eq("id", operation_id)\
-            .execute()
+        _execute_db(
+            operation_id,
+            "update_company_name",
+            lambda: supabase.table("operations")
+            .update({"razao_social": razao_social})
+            .eq("id", operation_id)
+            .execute(),
+        )
         logger.info(
             "operation.razao_social_updated",
             operation_id=operation_id,
@@ -174,11 +211,15 @@ def _update_operation_razao_social(operation_id: str):
 
 def _incomplete_components(operation_id: str, components: tuple[str, ...]) -> list[str]:
     now = datetime.now(timezone.utc)
-    result = supabase.table("component_snapshots")\
-        .select("component,status,started_at,error_message")\
-        .eq("operation_id", operation_id)\
-        .in_("component", list(components))\
-        .execute()
+    result = _execute_db(
+        operation_id,
+        "validate_component_snapshots",
+        lambda: supabase.table("component_snapshots")
+        .select("component,status,started_at,error_message")
+        .eq("operation_id", operation_id)
+        .in_("component", list(components))
+        .execute(),
+    )
     snapshots = {row.get("component"): row for row in (result.data or [])}
 
     incomplete = []
@@ -219,6 +260,26 @@ async def _run_component(run_fn, operation_id: str):
 
 
 async def start_analysis(operation_id: str):
+    """Run the pipeline and persist any unhandled failure with its stage."""
+    stage_token = _PIPELINE_STAGE.set("pipeline_initialization")
+    try:
+        return await _run_analysis(operation_id)
+    except Exception as exc:
+        stage = _PIPELINE_STAGE.get()
+        _mark_operation_failed(operation_id, f"{stage}: {exc}")
+        logger.error(
+            "pipeline.unhandled_failure",
+            operation_id=operation_id,
+            stage=stage,
+            error=str(exc),
+            exc_info=True,
+        )
+        raise
+    finally:
+        _PIPELINE_STAGE.reset(stage_token)
+
+
+async def _run_analysis(operation_id: str):
     """
     Start the analysis.
 
@@ -238,18 +299,24 @@ async def start_analysis(operation_id: str):
     logger.info("pipeline.started", operation_id=operation_id)
 
     # Sinaliza que o pipeline está em execução e registra heartbeat inicial
-    supabase.table("operations")\
+    _execute_db(
+        operation_id,
+        "mark_operation_processing",
+        lambda: supabase.table("operations")
         .update({
             "status": "processing",
             "heartbeat_at": datetime.now(timezone.utc).isoformat(),
-        })\
-        .eq("id", operation_id)\
-        .execute()
+        })
+        .eq("id", operation_id)
+        .execute(),
+    )
 
+    _PIPELINE_STAGE.set("phase1")
     phase1_results = await asyncio.gather(
         _run_component(run_brasil_api, operation_id),
         _run_component(run_pessoa_juridica, operation_id),
     )
+    _PIPELINE_STAGE.set("phase1_finalize")
     phase1_failed = [
         name for name, result in zip(["brasil_api", "pessoa_juridica"], phase1_results)
         if _component_result_failed(result)
@@ -268,10 +335,14 @@ async def start_analysis(operation_id: str):
         )
         # Marcar flag de dado degradado na operação para visibilidade no score
         try:
-            supabase.table("operations")\
-                .update({"dado_cadastral_degradado": True})\
-                .eq("id", operation_id)\
-                .execute()
+            _execute_db(
+                operation_id,
+                "mark_degraded_registry_data",
+                lambda: supabase.table("operations")
+                .update({"dado_cadastral_degradado": True})
+                .eq("id", operation_id)
+                .execute(),
+            )
         except Exception as exc:
             logger.warning(
                 "pipeline.flag_degradado_failed",
@@ -282,6 +353,7 @@ async def start_analysis(operation_id: str):
     _update_operation_razao_social(operation_id)
     _update_heartbeat(operation_id)
 
+    _PIPELINE_STAGE.set("phase2")
     phase2_results = await asyncio.gather(
         _run_component(run_contratos, operation_id),
         _run_component(run_recursos_recebidos, operation_id),
@@ -290,6 +362,7 @@ async def start_analysis(operation_id: str):
         _run_component(run_cnep, operation_id),
         _run_component(run_cepim, operation_id),
     )
+    _PIPELINE_STAGE.set("phase2_validation")
     _update_heartbeat(operation_id)
     failed_phase2 = _phase2_failed_components(list(phase2_results))
     for component, result in failed_phase2:
@@ -322,6 +395,7 @@ async def start_analysis(operation_id: str):
             incomplete_components=incomplete,
         )
 
+    _PIPELINE_STAGE.set("manual_upload_setup")
     after_phase2 = await _after_phase2(operation_id)
     if isinstance(after_phase2, dict) and after_phase2.get("status") == "failed":
         return after_phase2
@@ -330,12 +404,16 @@ async def start_analysis(operation_id: str):
 
 async def _after_phase2(operation_id: str):
     """Prepare optional certificate uploads without blocking the pipeline."""
-    configured = supabase.table("component_config")\
-        .select("component")\
-        .in_("component", list(MANUAL_COMPONENTS))\
-        .eq("enabled", True)\
-        .eq("timeout_seconds", 0)\
-        .execute()
+    configured = _execute_db(
+        operation_id,
+        "load_manual_component_config",
+        lambda: supabase.table("component_config")
+        .select("component")
+        .in_("component", list(MANUAL_COMPONENTS))
+        .eq("enabled", True)
+        .eq("timeout_seconds", 0)
+        .execute(),
+    )
     manual_components = [
         row["component"]
         for row in (configured.data or [])
@@ -346,11 +424,15 @@ async def _after_phase2(operation_id: str):
         logger.info("pipeline.no_manual_uploads", operation_id=operation_id)
         return await _phase3_4(operation_id)
 
-    existing = supabase.table("upload_tasks")\
-        .select("document_type,status")\
-        .eq("operation_id", operation_id)\
-        .in_("document_type", manual_components)\
-        .execute()
+    existing = _execute_db(
+        operation_id,
+        "load_manual_upload_tasks",
+        lambda: supabase.table("upload_tasks")
+        .select("document_type,status")
+        .eq("operation_id", operation_id)
+        .in_("document_type", manual_components)
+        .execute(),
+    )
     existing_components = {
         row["document_type"]
         for row in (existing.data or [])
@@ -369,13 +451,21 @@ async def _after_phase2(operation_id: str):
         if component not in existing_components
     ]
     if pending_tasks:
-        supabase.table("upload_tasks").insert(pending_tasks).execute()
+        _execute_db(
+            operation_id,
+            "create_manual_upload_tasks",
+            lambda: supabase.table("upload_tasks").insert(pending_tasks).execute(),
+        )
 
-    supabase.table("component_snapshots")\
-        .update({"status": "waiting_upload"})\
-        .eq("operation_id", operation_id)\
-        .in_("component", manual_components)\
-        .execute()
+    _execute_db(
+        operation_id,
+        "mark_manual_components_waiting_upload",
+        lambda: supabase.table("component_snapshots")
+        .update({"status": "waiting_upload"})
+        .eq("operation_id", operation_id)
+        .in_("component", manual_components)
+        .execute(),
+    )
 
     logger.info(
         "pipeline.manual_uploads_non_blocking",
@@ -387,6 +477,7 @@ async def _after_phase2(operation_id: str):
 
 async def _phase3_4(operation_id: str):
     """Fase 3 (web research) e Fase 4 (score) em sequencia."""
+    _PIPELINE_STAGE.set("phase3_4")
     from app.workers.tasks.score_engine import run_score_engine
     from app.workers.tasks.web_research import run_web_research
 
@@ -423,24 +514,33 @@ async def _phase3_4(operation_id: str):
         logger.error("pipeline.score_engine_failed", operation_id=operation_id, result=score_result)
         return {"operation_id": operation_id, "status": "failed", "error": message}
 
+    _PIPELINE_STAGE.set("analysis_completion")
     await _complete_analysis(operation_id)
     return {"operation_id": operation_id, "status": "completed"}
 
 
 async def _complete_analysis(operation_id: str):
     """Persist the final score output and terminate the pipeline."""
-    result = supabase.table("component_snapshots")\
-        .select("parsed_result")\
-        .eq("operation_id", operation_id)\
-        .eq("component", "score_engine")\
-        .single()\
-        .execute()
+    result = _execute_db(
+        operation_id,
+        "load_score_result",
+        lambda: supabase.table("component_snapshots")
+        .select("parsed_result")
+        .eq("operation_id", operation_id)
+        .eq("component", "score_engine")
+        .single()
+        .execute(),
+    )
 
-    operation_result = supabase.table("operations")\
-        .select("valor_solicitado,prazo_dias")\
-        .eq("id", operation_id)\
-        .maybe_single()\
-        .execute()
+    operation_result = _execute_db(
+        operation_id,
+        "load_operation_for_completion",
+        lambda: supabase.table("operations")
+        .select("valor_solicitado,prazo_dias")
+        .eq("id", operation_id)
+        .maybe_single()
+        .execute(),
+    )
 
     score_result = (result.data or {}).get("parsed_result") or {}
     operation = operation_result.data or {}
@@ -500,10 +600,14 @@ async def _complete_analysis(operation_id: str):
             motivo=motivo_str,
         )
 
-    supabase.table("operations")\
-        .update(data)\
-        .eq("id", operation_id)\
-        .execute()
+    _execute_db(
+        operation_id,
+        "complete_operation",
+        lambda: supabase.table("operations")
+        .update(data)
+        .eq("id", operation_id)
+        .execute(),
+    )
 
     logger.info(
         "pipeline.completed",
@@ -516,15 +620,19 @@ async def _complete_analysis(operation_id: str):
 
 async def resume_after_upload(operation_id: str):
     """Reprocess analysis once all configured certificate uploads are complete."""
-    resumed = supabase.table("operations")\
+    resumed = _execute_db(
+        operation_id,
+        "resume_operation_after_upload",
+        lambda: supabase.table("operations")
         .update({
             "status": "processing",
             "heartbeat_at": datetime.now(timezone.utc).isoformat(),
             "completed_at": None,
-        })\
-        .eq("id", operation_id)\
-        .in_("status", ["manual_review", "completed"])\
-        .execute()
+        })
+        .eq("id", operation_id)
+        .in_("status", ["manual_review", "completed"])
+        .execute(),
+    )
     if not resumed.data:
         logger.info("pipeline.resume_skipped", operation_id=operation_id)
         return {"operation_id": operation_id, "status": "already_resumed"}

@@ -2,6 +2,9 @@ import asyncio
 import os
 from types import SimpleNamespace
 
+import httpx
+import pytest
+
 
 for key in ("SECRET_KEY", "TWOCAPTCHA_API_KEY", "RESEND_API_KEY"):
     os.environ.setdefault(key, "test")
@@ -147,6 +150,41 @@ def test_after_phase2_keeps_waiting_upload_and_continues_pipeline(monkeypatch):
         for query in database.queries
     )
     assert not any(query.table == "operations" for query in database.queries)
+
+
+def test_orchestrator_database_calls_retry_transient_disconnect(monkeypatch):
+    attempts = []
+
+    def request():
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise httpx.RemoteProtocolError("Server disconnected")
+        return "ok"
+
+    monkeypatch.setattr("app.workers.base.time.sleep", lambda _delay: None)
+
+    assert orchestrator._execute_db("op-1", "test_request", request) == "ok"
+    assert len(attempts) == 3
+
+
+def test_start_analysis_persists_unhandled_failure_with_stage(monkeypatch):
+    persisted = []
+
+    async def fail_analysis(_operation_id):
+        orchestrator._PIPELINE_STAGE.set("phase2_validation")
+        raise httpx.RemoteProtocolError("Server disconnected")
+
+    monkeypatch.setattr(orchestrator, "_run_analysis", fail_analysis)
+    monkeypatch.setattr(
+        orchestrator,
+        "_mark_operation_failed",
+        lambda operation_id, message: persisted.append((operation_id, message)),
+    )
+
+    with pytest.raises(httpx.RemoteProtocolError, match="Server disconnected"):
+        asyncio.run(orchestrator.start_analysis("op-1"))
+
+    assert persisted == [("op-1", "phase2_validation: Server disconnected")]
 
 
 def test_score_preconditions_ignore_waiting_manual_certificates():
