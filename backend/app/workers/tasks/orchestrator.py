@@ -15,6 +15,7 @@ from app.workers.base import _execute_snapshot_write as _execute_with_retry
 
 logger = structlog.get_logger()
 MANUAL_COMPONENTS = ("cndt_tst", "cnd_federal", "fgts")
+PHASE1_COMPONENTS = ("brasil_api", "pessoa_juridica")
 PHASE2_COMPONENTS = (
     "contratos",
     "recursos_recebidos",
@@ -259,6 +260,39 @@ async def _run_component(run_fn, operation_id: str):
         return {"error": str(exc)}
 
 
+def _completed_components(operation_id: str) -> set[str]:
+    result = _execute_db(
+        operation_id,
+        "load_reusable_components",
+        lambda: supabase.table("component_snapshots")
+        .select("component")
+        .eq("operation_id", operation_id)
+        .eq("status", "completed")
+        .execute(),
+    )
+    return {
+        row["component"]
+        for row in (result.data or [])
+        if row.get("component")
+    }
+
+
+async def _run_or_reuse_component(
+    component: str,
+    run_fn,
+    operation_id: str,
+    reusable_components: set[str],
+):
+    if component in reusable_components:
+        logger.info(
+            "pipeline.component_reused",
+            operation_id=operation_id,
+            component=component,
+        )
+        return {"status": "completed", "reused": True}
+    return await _run_component(run_fn, operation_id)
+
+
 async def start_analysis(operation_id: str):
     """Run the pipeline and persist any unhandled failure with its stage."""
     stage_token = _PIPELINE_STAGE.set("pipeline_initialization")
@@ -311,14 +345,29 @@ async def _run_analysis(operation_id: str):
         .execute(),
     )
 
+    reusable_components = _completed_components(operation_id)
+    upstream_complete_before_run = all(
+        component in reusable_components
+        for component in (*PHASE1_COMPONENTS, *PHASE2_COMPONENTS)
+    )
+    if not upstream_complete_before_run:
+        reusable_components.discard("score_engine")
+
     _PIPELINE_STAGE.set("phase1")
     phase1_results = await asyncio.gather(
-        _run_component(run_brasil_api, operation_id),
-        _run_component(run_pessoa_juridica, operation_id),
+        _run_or_reuse_component(
+            "brasil_api", run_brasil_api, operation_id, reusable_components
+        ),
+        _run_or_reuse_component(
+            "pessoa_juridica",
+            run_pessoa_juridica,
+            operation_id,
+            reusable_components,
+        ),
     )
     _PIPELINE_STAGE.set("phase1_finalize")
     phase1_failed = [
-        name for name, result in zip(["brasil_api", "pessoa_juridica"], phase1_results)
+        name for name, result in zip(PHASE1_COMPONENTS, phase1_results)
         if _component_result_failed(result)
     ]
     if len(phase1_failed) == 2:
@@ -355,12 +404,24 @@ async def _run_analysis(operation_id: str):
 
     _PIPELINE_STAGE.set("phase2")
     phase2_results = await asyncio.gather(
-        _run_component(run_contratos, operation_id),
-        _run_component(run_recursos_recebidos, operation_id),
-        _run_component(run_acordos_leniencia, operation_id),
-        _run_component(run_ceis, operation_id),
-        _run_component(run_cnep, operation_id),
-        _run_component(run_cepim, operation_id),
+        _run_or_reuse_component(
+            "contratos", run_contratos, operation_id, reusable_components
+        ),
+        _run_or_reuse_component(
+            "recursos_recebidos",
+            run_recursos_recebidos,
+            operation_id,
+            reusable_components,
+        ),
+        _run_or_reuse_component(
+            "acordos_leniencia",
+            run_acordos_leniencia,
+            operation_id,
+            reusable_components,
+        ),
+        _run_or_reuse_component("ceis", run_ceis, operation_id, reusable_components),
+        _run_or_reuse_component("cnep", run_cnep, operation_id, reusable_components),
+        _run_or_reuse_component("cepim", run_cepim, operation_id, reusable_components),
     )
     _PIPELINE_STAGE.set("phase2_validation")
     _update_heartbeat(operation_id)
@@ -396,13 +457,19 @@ async def _run_analysis(operation_id: str):
         )
 
     _PIPELINE_STAGE.set("manual_upload_setup")
-    after_phase2 = await _after_phase2(operation_id)
+    after_phase2 = await _after_phase2(
+        operation_id,
+        reusable_components=reusable_components,
+    )
     if isinstance(after_phase2, dict) and after_phase2.get("status") == "failed":
         return after_phase2
     return {"operation_id": operation_id, "status": "pipeline_started"}
 
 
-async def _after_phase2(operation_id: str):
+async def _after_phase2(
+    operation_id: str,
+    reusable_components: set[str] | None = None,
+):
     """Prepare optional certificate uploads without blocking the pipeline."""
     configured = _execute_db(
         operation_id,
@@ -422,7 +489,10 @@ async def _after_phase2(operation_id: str):
 
     if not manual_components:
         logger.info("pipeline.no_manual_uploads", operation_id=operation_id)
-        return await _phase3_4(operation_id)
+        return await _phase3_4(
+            operation_id,
+            reusable_components=reusable_components,
+        )
 
     existing = _execute_db(
         operation_id,
@@ -457,25 +527,37 @@ async def _after_phase2(operation_id: str):
             lambda: supabase.table("upload_tasks").insert(pending_tasks).execute(),
         )
 
-    _execute_db(
-        operation_id,
-        "mark_manual_components_waiting_upload",
-        lambda: supabase.table("component_snapshots")
-        .update({"status": "waiting_upload"})
-        .eq("operation_id", operation_id)
-        .in_("component", manual_components)
-        .execute(),
-    )
+    waiting_components = [
+        component
+        for component in manual_components
+        if component not in (reusable_components or set())
+    ]
+    if waiting_components:
+        _execute_db(
+            operation_id,
+            "mark_manual_components_waiting_upload",
+            lambda: supabase.table("component_snapshots")
+            .update({"status": "waiting_upload"})
+            .eq("operation_id", operation_id)
+            .in_("component", waiting_components)
+            .execute(),
+        )
 
     logger.info(
         "pipeline.manual_uploads_non_blocking",
         operation_id=operation_id,
         components=manual_components,
     )
-    return await _phase3_4(operation_id)
+    return await _phase3_4(
+        operation_id,
+        reusable_components=reusable_components,
+    )
 
 
-async def _phase3_4(operation_id: str):
+async def _phase3_4(
+    operation_id: str,
+    reusable_components: set[str] | None = None,
+):
     """Fase 3 (web research) e Fase 4 (score) em sequencia."""
     _PIPELINE_STAGE.set("phase3_4")
     from app.workers.tasks.score_engine import run_score_engine
@@ -498,7 +580,13 @@ async def _phase3_4(operation_id: str):
             incomplete_components=incomplete,
         )
 
-    web_result = await _run_component(run_web_research, operation_id)
+    reusable_components = reusable_components or set()
+    web_result = await _run_or_reuse_component(
+        "web_research",
+        run_web_research,
+        operation_id,
+        reusable_components,
+    )
     if _component_result_failed(web_result):
         message = "pipeline abortado: falha em web_research"
         _mark_operation_failed(operation_id, message)
@@ -507,7 +595,12 @@ async def _phase3_4(operation_id: str):
 
     _update_heartbeat(operation_id)
 
-    score_result = await _run_component(run_score_engine, operation_id)
+    score_result = await _run_or_reuse_component(
+        "score_engine",
+        run_score_engine,
+        operation_id,
+        reusable_components,
+    )
     if _component_result_failed(score_result):
         message = "pipeline abortado: falha em score_engine"
         _mark_operation_failed(operation_id, message)

@@ -1,5 +1,7 @@
 import os
+import sys
 from datetime import date
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -327,3 +329,73 @@ def test_broadfactor_fetch_requires_complete_pagination(monkeypatch):
         "tamanho": recursos_recebidos.BROADFACTOR_PAGE_SIZE,
         "exigir_completo": True,
     }
+
+
+def test_quote_lookup_uses_shared_retry(monkeypatch):
+    captured = {}
+
+    class Query:
+        def select(self, *_args):
+            return self
+
+        def eq(self, *_args):
+            return self
+
+        def single(self):
+            return self
+
+        def execute(self):
+            return SimpleNamespace(data={"cotacao_id": "C-1"})
+
+    class Supabase:
+        def table(self, name):
+            assert name == "operations"
+            return Query()
+
+    fake_database = ModuleType("app.core.database")
+    fake_database.supabase = Supabase()
+    monkeypatch.setitem(sys.modules, "app.core.database", fake_database)
+
+    def fake_retry(operation_id, component, action, request):
+        captured.update({
+            "operation_id": operation_id,
+            "component": component,
+            "action": action,
+        })
+        return request()
+
+    monkeypatch.setattr(recursos_recebidos, "_execute_with_retry", fake_retry)
+
+    assert recursos_recebidos._get_cotacao_id("op-1") == "C-1"
+    assert captured == {
+        "operation_id": "op-1",
+        "component": "recursos_recebidos",
+        "action": "load_operation_quote_id",
+    }
+
+
+def test_snapshot_size_log_includes_both_json_columns(monkeypatch):
+    events = []
+    snapshot = recursos_recebidos._build_snapshot(
+        [receipt(100, "Orgao A", "01/2026")],
+        "BROADFACTOR",
+        None,
+        TODAY,
+        {},
+    )
+    monkeypatch.setattr(
+        recursos_recebidos,
+        "logger",
+        SimpleNamespace(info=lambda event, **fields: events.append((event, fields))),
+    )
+
+    recursos_recebidos._log_snapshot_size(snapshot, "op-1")
+
+    event, fields = events[0]
+    assert event == "recursos_recebidos.snapshot_built"
+    assert fields["total_registros"] == 1
+    assert fields["detalhes"] == 1
+    assert fields["parsed_result_bytes"] > 0
+    assert fields["estimated_snapshot_write_bytes"] == (
+        fields["parsed_result_bytes"] * 2
+    )

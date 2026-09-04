@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import statistics
 import time
 from datetime import date
@@ -16,6 +17,7 @@ from app.integrations.broadfactor.client import (
     Recebimento,
 )
 from app.workers.base import BaseComponentTask
+from app.workers.base import _execute_snapshot_write as _execute_with_retry
 from app.workers.http_utils import fetch_json_with_retry
 
 
@@ -295,12 +297,15 @@ def _get_cotacao_id(operation_id: str | None) -> str | None:
         return None
     from app.core.database import supabase
 
-    result = (
-        supabase.table("operations")
+    result = _execute_with_retry(
+        operation_id,
+        "recursos_recebidos",
+        "load_operation_quote_id",
+        lambda: supabase.table("operations")
         .select("cotacao_id")
         .eq("id", operation_id)
         .single()
-        .execute()
+        .execute(),
     )
     return (result.data or {}).get("cotacao_id")
 
@@ -341,6 +346,26 @@ def _build_snapshot(
     }
     result.update(metrics)
     return result
+
+
+def _log_snapshot_size(snapshot: dict[str, Any], operation_id: str | None) -> None:
+    serialized_bytes = len(
+        json.dumps(
+            snapshot,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    )
+    logger.info(
+        "recursos_recebidos.snapshot_built",
+        operation_id=operation_id,
+        fonte_primaria=snapshot.get("fonte_primaria"),
+        total_registros=snapshot.get("total_registros"),
+        detalhes=len(snapshot.get("recursos_detalhe") or []),
+        parsed_result_bytes=serialized_bytes,
+        estimated_snapshot_write_bytes=serialized_bytes * 2,
+    )
 
 
 def _fetch(
@@ -398,13 +423,15 @@ def _fetch(
         )
 
     if not cotacao_id:
-        return _build_snapshot(
+        snapshot = _build_snapshot(
             portal,
             "PORTAL_TRANSPARENCIA",
             None,
             today,
             portal_pagination,
         )
+        _log_snapshot_size(snapshot, operation_id)
+        return snapshot
 
     reconciliation = _reconcile(
         broadfactor,
@@ -423,7 +450,7 @@ def _fetch(
         )
 
     if broadfactor:
-        return _build_snapshot(
+        snapshot = _build_snapshot(
             broadfactor,
             "BROADFACTOR",
             reconciliation,
@@ -433,13 +460,16 @@ def _fetch(
                 "tamanho_pagina": BROADFACTOR_PAGE_SIZE,
             },
         )
-    return _build_snapshot(
-        portal,
-        "PORTAL_TRANSPARENCIA",
-        reconciliation,
-        today,
-        portal_pagination,
-    )
+    else:
+        snapshot = _build_snapshot(
+            portal,
+            "PORTAL_TRANSPARENCIA",
+            reconciliation,
+            today,
+            portal_pagination,
+        )
+    _log_snapshot_size(snapshot, operation_id)
+    return snapshot
 
 
 _task = BaseComponentTask()

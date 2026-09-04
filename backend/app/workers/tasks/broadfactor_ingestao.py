@@ -20,17 +20,52 @@ from app.workers.base import _execute_snapshot_write as _execute_with_retry
 logger = structlog.get_logger()
 SCHEDULE_BRT = ("08:05", "14:15")
 INGESTION_STAGE = "S0_INGESTAO"
+MAX_ANALYSIS_ATTEMPTS = 3
 
 
-def _operation_exists(supabase: Any, cotacao_id: str) -> bool:
-    result = (
-        supabase.table("operations")
-        .select("id")
+def _get_existing_operation(supabase: Any, cotacao_id: str) -> dict[str, Any] | None:
+    result = _execute_with_retry(
+        cotacao_id,
+        "broadfactor_ingestao",
+        "load_existing_operation",
+        lambda: supabase.table("operations")
+        .select("id,status,analysis_attempts")
         .eq("cotacao_id", cotacao_id)
         .limit(1)
-        .execute()
+        .execute(),
     )
-    return bool(result.data)
+    return result.data[0] if result.data else None
+
+
+def _claim_failed_operation(
+    supabase: Any,
+    operation: dict[str, Any],
+) -> dict[str, Any] | None:
+    operation_id = str(operation["id"])
+    attempts = int(operation.get("analysis_attempts") or 1)
+    if attempts >= MAX_ANALYSIS_ATTEMPTS:
+        return None
+
+    next_attempt = attempts + 1
+    result = _execute_with_retry(
+        operation_id,
+        "broadfactor_ingestao",
+        "claim_failed_operation",
+        lambda: supabase.table("operations")
+        .update({
+            "status": "processing",
+            "analysis_attempts": next_attempt,
+            "error_message": None,
+            "completed_at": None,
+        })
+        .eq("id", operation_id)
+        .eq("status", "failed")
+        .eq("analysis_attempts", attempts)
+        .execute(),
+    )
+    if not result.data:
+        return None
+    return {**result.data[0], "analysis_attempts": next_attempt}
 
 
 def _persist_quote(
@@ -119,7 +154,9 @@ async def run_broadfactor_ingestao(
             "descartadas": 0,
             "descartadas_por_motivo": {},
             "criadas": 0,
+            "reprocessadas": 0,
             "duplicadas": 0,
+            "tentativas_esgotadas": 0,
             "falhas": 1,
         }
 
@@ -134,7 +171,9 @@ async def run_broadfactor_ingestao(
             "descartadas": len(descartadas),
             "descartadas_por_motivo": dict(sorted(motivos.items())),
             "criadas": 0,
+            "reprocessadas": 0,
             "duplicadas": 0,
+            "tentativas_esgotadas": 0,
             "falhas": 0,
         }
         logger.info("broadfactor_ingestao.dry_run_completed", **summary)
@@ -164,24 +203,92 @@ async def run_broadfactor_ingestao(
             )
 
     operation_service = OperationService()
-    analysis_jobs: list[tuple[str, str, asyncio.Task]] = []
+    analysis_jobs: list[tuple[str, str, int, asyncio.Task]] = []
     criadas = 0
+    reprocessadas = 0
     duplicadas = 0
+    tentativas_esgotadas = 0
     processadas = 0
 
     for cotacao in aprovadas:
         try:
-            if _operation_exists(supabase, cotacao.id):
+            existing = _get_existing_operation(supabase, cotacao.id)
+            if existing and existing.get("status") != "failed":
                 duplicadas += 1
                 logger.info(
                     "broadfactor_ingestao.duplicate_skipped",
                     cotacao_id=cotacao.id,
+                    operation_id=existing.get("id"),
+                    operation_status=existing.get("status"),
                 )
                 continue
 
             if limit is not None and processadas >= limit:
                 break
-            processadas += 1
+
+            if existing:
+                attempts = int(existing.get("analysis_attempts") or 1)
+                if attempts >= MAX_ANALYSIS_ATTEMPTS:
+                    tentativas_esgotadas += 1
+                    logger.error(
+                        "broadfactor_ingestao.retry_exhausted",
+                        cotacao_id=cotacao.id,
+                        operation_id=existing.get("id"),
+                        analysis_attempts=attempts,
+                    )
+                    _update_quote_status(
+                        supabase,
+                        cotacao.id,
+                        "ERRO_ANALISE_FINAL",
+                        str(existing["id"]),
+                    )
+                    continue
+
+                claimed = _claim_failed_operation(supabase, existing)
+                if not claimed:
+                    duplicadas += 1
+                    logger.info(
+                        "broadfactor_ingestao.retry_claim_skipped",
+                        cotacao_id=cotacao.id,
+                        operation_id=existing.get("id"),
+                    )
+                    continue
+
+                operation_id = str(claimed["id"])
+                attempt = int(claimed["analysis_attempts"])
+                analysis_jobs.append(
+                    (
+                        cotacao.id,
+                        operation_id,
+                        attempt,
+                        asyncio.create_task(_start_analysis(operation_id)),
+                    )
+                )
+                reprocessadas += 1
+                processadas += 1
+                try:
+                    _update_quote_status(
+                        supabase,
+                        cotacao.id,
+                        "REPROCESSANDO",
+                        operation_id,
+                    )
+                except Exception as status_exc:
+                    falhas += 1
+                    logger.error(
+                        "broadfactor_ingestao.status_update_failed",
+                        cotacao_id=cotacao.id,
+                        operation_id=operation_id,
+                        error=str(status_exc),
+                    )
+                logger.info(
+                    "broadfactor_ingestao.retry_started",
+                    cotacao_id=cotacao.id,
+                    operation_id=operation_id,
+                    analysis_attempt=attempt,
+                    max_analysis_attempts=MAX_ANALYSIS_ATTEMPTS,
+                )
+                continue
 
             valor_enquadrado = cotacao.enquadrar(pct_max_contrato)
             _persist_quote(supabase, cotacao, valor_enquadrado)
@@ -202,10 +309,12 @@ async def run_broadfactor_ingestao(
                 (
                     cotacao.id,
                     operation_id,
+                    1,
                     asyncio.create_task(_start_analysis(operation_id)),
                 )
             )
             criadas += 1
+            processadas += 1
             try:
                 _update_quote_status(
                     supabase,
@@ -238,10 +347,13 @@ async def run_broadfactor_ingestao(
 
     if analysis_jobs:
         results = await asyncio.gather(
-            *(task for _, _, task in analysis_jobs),
+            *(task for _, _, _, task in analysis_jobs),
             return_exceptions=True,
         )
-        for (cotacao_id, operation_id, _), result in zip(analysis_jobs, results):
+        for (cotacao_id, operation_id, attempt, _), result in zip(
+            analysis_jobs,
+            results,
+        ):
             analysis_failed = isinstance(result, Exception) or (
                 isinstance(result, dict) and result.get("status") == "failed"
             )
@@ -259,10 +371,28 @@ async def run_broadfactor_ingestao(
                     error=error,
                 )
                 try:
+                    exhausted = attempt >= MAX_ANALYSIS_ATTEMPTS
+                    if exhausted:
+                        tentativas_esgotadas += 1
                     _update_quote_status(
                         supabase,
                         cotacao_id,
-                        "ERRO_ANALISE",
+                        "ERRO_ANALISE_FINAL" if exhausted else "ERRO_ANALISE",
+                        operation_id,
+                    )
+                except Exception as status_exc:
+                    logger.error(
+                        "broadfactor_ingestao.analysis_status_update_failed",
+                        cotacao_id=cotacao_id,
+                        operation_id=operation_id,
+                        error=str(status_exc),
+                    )
+            else:
+                try:
+                    _update_quote_status(
+                        supabase,
+                        cotacao_id,
+                        "ANALISE_CONCLUIDA",
                         operation_id,
                     )
                 except Exception as status_exc:
@@ -280,11 +410,13 @@ async def run_broadfactor_ingestao(
         "descartadas": len(descartadas),
         "descartadas_por_motivo": dict(sorted(motivos.items())),
         "criadas": criadas,
+        "reprocessadas": reprocessadas,
         "duplicadas": duplicadas,
+        "tentativas_esgotadas": tentativas_esgotadas,
         "falhas": falhas,
     }
     logger.info("broadfactor_ingestao.completed", **summary)
     return summary
 
 
-__all__ = ["SCHEDULE_BRT", "run_broadfactor_ingestao"]
+__all__ = ["MAX_ANALYSIS_ATTEMPTS", "SCHEDULE_BRT", "run_broadfactor_ingestao"]

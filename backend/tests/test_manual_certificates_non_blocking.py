@@ -132,7 +132,7 @@ def test_after_phase2_keeps_waiting_upload_and_continues_pipeline(monkeypatch):
     })
     phase_calls = []
 
-    async def fake_phase3_4(operation_id):
+    async def fake_phase3_4(operation_id, **_kwargs):
         phase_calls.append(operation_id)
         return {"operation_id": operation_id, "status": "completed"}
 
@@ -150,6 +150,58 @@ def test_after_phase2_keeps_waiting_upload_and_continues_pipeline(monkeypatch):
         for query in database.queries
     )
     assert not any(query.table == "operations" for query in database.queries)
+
+
+def test_after_phase2_does_not_reset_completed_manual_certificate(monkeypatch):
+    database = FakeSupabase({
+        "component_config": [
+            {"component": component} for component in orchestrator.MANUAL_COMPONENTS
+        ],
+        "upload_tasks": [],
+    })
+
+    async def fake_phase3_4(operation_id, **_kwargs):
+        return {"operation_id": operation_id, "status": "completed"}
+
+    monkeypatch.setattr(orchestrator, "supabase", database)
+    monkeypatch.setattr(orchestrator, "_phase3_4", fake_phase3_4)
+
+    asyncio.run(
+        orchestrator._after_phase2(
+            "op-1",
+            reusable_components={"cndt_tst"},
+        )
+    )
+
+    waiting_update = next(
+        query
+        for query in database.queries
+        if query.table == "component_snapshots" and query.action == "update"
+    )
+    assert (
+        "in",
+        "component",
+        ["cnd_federal", "fgts"],
+    ) in waiting_update.filters
+
+
+def test_completed_component_is_reused_without_running_worker():
+    calls = []
+
+    def worker(_operation_id):
+        calls.append(1)
+
+    result = asyncio.run(
+        orchestrator._run_or_reuse_component(
+            "web_research",
+            worker,
+            "op-1",
+            {"web_research"},
+        )
+    )
+
+    assert result == {"status": "completed", "reused": True}
+    assert calls == []
 
 
 def test_orchestrator_database_calls_retry_transient_disconnect(monkeypatch):

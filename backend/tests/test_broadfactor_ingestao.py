@@ -95,6 +95,52 @@ def test_persist_quote_keeps_raw_payload():
     assert saved["on_conflict"] == "cotacao_id"
 
 
+def test_failed_operation_claim_is_conditional_and_increments_attempts(monkeypatch):
+    captured = {"filters": []}
+
+    class Query:
+        def update(self, data):
+            captured["data"] = data
+            return self
+
+        def eq(self, field, value):
+            captured["filters"].append((field, value))
+            return self
+
+        def execute(self):
+            return type(
+                "Result",
+                (),
+                {"data": [{"id": "op-1", "status": "processing"}]},
+            )()
+
+    class Supabase:
+        def table(self, name):
+            assert name == "operations"
+            return Query()
+
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_execute_with_retry",
+        lambda _operation_id, _component, _action, request: request(),
+    )
+
+    claimed = broadfactor_ingestao._claim_failed_operation(
+        Supabase(),
+        {"id": "op-1", "status": "failed", "analysis_attempts": 1},
+    )
+
+    assert claimed["analysis_attempts"] == 2
+    assert captured["data"] == {
+        "status": "processing",
+        "analysis_attempts": 2,
+        "error_message": None,
+        "completed_at": None,
+    }
+    assert ("status", "failed") in captured["filters"]
+    assert ("analysis_attempts", 1) in captured["filters"]
+
+
 @pytest.mark.asyncio
 async def test_ingestion_persists_and_starts_analysis(monkeypatch):
     approved = quote("C-1")
@@ -121,7 +167,7 @@ async def test_ingestion_persists_and_starts_analysis(monkeypatch):
         created=created,
     )
     monkeypatch.setattr(broadfactor_ingestao, "BroadfactorClient", FakeClient)
-    monkeypatch.setattr(broadfactor_ingestao, "_operation_exists", lambda *_: False)
+    monkeypatch.setattr(broadfactor_ingestao, "_get_existing_operation", lambda *_: None)
     monkeypatch.setattr(
         broadfactor_ingestao,
         "_persist_quote",
@@ -159,7 +205,10 @@ async def test_ingestion_persists_and_starts_analysis(monkeypatch):
         "prazo_vincendo_indisponivel": True,
         "source": "broadfactor_ingestao",
     }
-    assert statuses == [("C-1", "OPERACAO_CRIADA", "operation-C-1")]
+    assert statuses == [
+        ("C-1", "OPERACAO_CRIADA", "operation-C-1"),
+        ("C-1", "ANALISE_CONCLUIDA", "operation-C-1"),
+    ]
     assert analyses == ["operation-C-1"]
     assert discarded[0]["estagio"] == "S0_INGESTAO"
     assert discarded[0]["motivo"] == "abaixo_ticket_minimo"
@@ -170,7 +219,9 @@ async def test_ingestion_persists_and_starts_analysis(monkeypatch):
         "descartadas": 1,
         "descartadas_por_motivo": {"abaixo_ticket_minimo": 1},
         "criadas": 1,
+        "reprocessadas": 0,
         "duplicadas": 0,
+        "tentativas_esgotadas": 0,
         "falhas": 0,
     }
 
@@ -194,7 +245,7 @@ async def test_one_quote_failure_does_not_block_the_next(monkeypatch):
         created=created,
     )
     monkeypatch.setattr(broadfactor_ingestao, "BroadfactorClient", FakeClient)
-    monkeypatch.setattr(broadfactor_ingestao, "_operation_exists", lambda *_: False)
+    monkeypatch.setattr(broadfactor_ingestao, "_get_existing_operation", lambda *_: None)
 
     def persist(_, cotacao, __):
         if cotacao.id == "C-fails":
@@ -238,13 +289,138 @@ async def test_existing_operation_is_skipped(monkeypatch):
         created=created,
     )
     monkeypatch.setattr(broadfactor_ingestao, "BroadfactorClient", FakeClient)
-    monkeypatch.setattr(broadfactor_ingestao, "_operation_exists", lambda *_: True)
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_get_existing_operation",
+        lambda *_: {
+            "id": "operation-C-existing",
+            "status": "completed",
+            "analysis_attempts": 1,
+        },
+    )
 
     result = await broadfactor_ingestao.run_broadfactor_ingestao()
 
     assert created == []
     assert result["duplicadas"] == 1
     assert result["criadas"] == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_operation_is_reprocessed_without_creating_another(monkeypatch):
+    existing = quote("C-retry")
+    discarded = []
+    created = []
+    statuses = []
+    analyzed = []
+
+    class FakeClient:
+        def triar(self, **_):
+            return [existing], []
+
+    install_service_modules(
+        monkeypatch,
+        discarded=discarded,
+        created=created,
+    )
+    monkeypatch.setattr(broadfactor_ingestao, "BroadfactorClient", FakeClient)
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_get_existing_operation",
+        lambda *_: {
+            "id": "operation-C-retry",
+            "status": "failed",
+            "analysis_attempts": 1,
+        },
+    )
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_claim_failed_operation",
+        lambda *_: {
+            "id": "operation-C-retry",
+            "status": "processing",
+            "analysis_attempts": 2,
+        },
+    )
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_persist_quote",
+        lambda *_: pytest.fail("retry attempted to create another quote"),
+    )
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_update_quote_status",
+        lambda _, cotacao_id, status, operation_id=None: statuses.append(
+            (cotacao_id, status, operation_id)
+        ),
+    )
+
+    async def fake_start_analysis(operation_id):
+        analyzed.append(operation_id)
+        return {"operation_id": operation_id, "status": "completed"}
+
+    monkeypatch.setattr(broadfactor_ingestao, "_start_analysis", fake_start_analysis)
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert created == []
+    assert analyzed == ["operation-C-retry"]
+    assert statuses == [
+        ("C-retry", "REPROCESSANDO", "operation-C-retry"),
+        ("C-retry", "ANALISE_CONCLUIDA", "operation-C-retry"),
+    ]
+    assert result["reprocessadas"] == 1
+    assert result["criadas"] == 0
+    assert result["tentativas_esgotadas"] == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_operation_stops_after_maximum_attempts(monkeypatch):
+    existing = quote("C-exhausted")
+    discarded = []
+    created = []
+    statuses = []
+
+    class FakeClient:
+        def triar(self, **_):
+            return [existing], []
+
+    install_service_modules(
+        monkeypatch,
+        discarded=discarded,
+        created=created,
+    )
+    monkeypatch.setattr(broadfactor_ingestao, "BroadfactorClient", FakeClient)
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_get_existing_operation",
+        lambda *_: {
+            "id": "operation-C-exhausted",
+            "status": "failed",
+            "analysis_attempts": broadfactor_ingestao.MAX_ANALYSIS_ATTEMPTS,
+        },
+    )
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_claim_failed_operation",
+        lambda *_: pytest.fail("exhausted operation was claimed"),
+    )
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_update_quote_status",
+        lambda _, cotacao_id, status, operation_id=None: statuses.append(
+            (cotacao_id, status, operation_id)
+        ),
+    )
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert created == []
+    assert statuses == [
+        ("C-exhausted", "ERRO_ANALISE_FINAL", "operation-C-exhausted")
+    ]
+    assert result["reprocessadas"] == 0
+    assert result["tentativas_esgotadas"] == 1
 
 
 @pytest.mark.asyncio
@@ -264,7 +440,7 @@ async def test_status_update_failure_does_not_block_analysis(monkeypatch):
         created=created,
     )
     monkeypatch.setattr(broadfactor_ingestao, "BroadfactorClient", FakeClient)
-    monkeypatch.setattr(broadfactor_ingestao, "_operation_exists", lambda *_: False)
+    monkeypatch.setattr(broadfactor_ingestao, "_get_existing_operation", lambda *_: None)
     monkeypatch.setattr(broadfactor_ingestao, "_persist_quote", lambda *args: None)
 
     def fail_status(*args):
@@ -305,7 +481,7 @@ async def test_analysis_failure_is_persisted_on_quote(monkeypatch):
         created=created,
     )
     monkeypatch.setattr(broadfactor_ingestao, "BroadfactorClient", FakeClient)
-    monkeypatch.setattr(broadfactor_ingestao, "_operation_exists", lambda *_: False)
+    monkeypatch.setattr(broadfactor_ingestao, "_get_existing_operation", lambda *_: None)
     monkeypatch.setattr(broadfactor_ingestao, "_persist_quote", lambda *args: None)
     monkeypatch.setattr(
         broadfactor_ingestao,
@@ -368,7 +544,9 @@ async def test_dry_run_only_returns_triage_summary(monkeypatch):
         "descartadas": 1,
         "descartadas_por_motivo": {"abaixo_ticket_minimo": 1},
         "criadas": 0,
+        "reprocessadas": 0,
         "duplicadas": 0,
+        "tentativas_esgotadas": 0,
         "falhas": 0,
     }
 
@@ -394,8 +572,16 @@ async def test_limit_does_not_count_duplicates(monkeypatch):
     monkeypatch.setattr(broadfactor_ingestao, "BroadfactorClient", FakeClient)
     monkeypatch.setattr(
         broadfactor_ingestao,
-        "_operation_exists",
-        lambda _, cotacao_id: cotacao_id == "C-existing",
+        "_get_existing_operation",
+        lambda _, cotacao_id: (
+            {
+                "id": "operation-C-existing",
+                "status": "completed",
+                "analysis_attempts": 1,
+            }
+            if cotacao_id == "C-existing"
+            else None
+        ),
     )
     monkeypatch.setattr(
         broadfactor_ingestao,
