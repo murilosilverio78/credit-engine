@@ -35,7 +35,7 @@ async def list_pending_uploads(operation_id: Optional[str] = None):
 
 @router.post("/operations/{operation_id}/resume")
 async def resume_operation(operation_id: str, background_tasks: BackgroundTasks):
-    """Resume the pipeline only after every manual certificate is uploaded."""
+    """Reprocess the score after at least one certificate is uploaded."""
     from app.services.upload_service import UploadService
     from app.workers.tasks.orchestrator import resume_after_upload
 
@@ -44,11 +44,10 @@ async def resume_operation(operation_id: str, background_tasks: BackgroundTasks)
     if not tasks:
         raise HTTPException(status_code=400, detail="Nenhuma certidão configurada")
 
-    pending = await upload_svc.incomplete_document_types(operation_id)
-    if pending:
+    if not any(task.get("status") == "completed" for task in tasks):
         raise HTTPException(
             status_code=400,
-            detail=f"Certidões pendentes: {pending}",
+            detail="Nenhuma certidão concluída para reprocessamento",
         )
 
     background_tasks.add_task(resume_after_upload, operation_id)

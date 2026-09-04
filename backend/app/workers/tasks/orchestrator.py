@@ -329,7 +329,7 @@ async def start_analysis(operation_id: str):
 
 
 async def _after_phase2(operation_id: str):
-    """Pause when enabled manual components require certificate uploads."""
+    """Prepare optional certificate uploads without blocking the pipeline."""
     configured = supabase.table("component_config")\
         .select("component")\
         .in_("component", list(MANUAL_COMPONENTS))\
@@ -376,21 +376,13 @@ async def _after_phase2(operation_id: str):
         .eq("operation_id", operation_id)\
         .in_("component", manual_components)\
         .execute()
-    supabase.table("operations")\
-        .update({"status": "manual_review"})\
-        .eq("id", operation_id)\
-        .execute()
 
     logger.info(
-        "pipeline.waiting_upload",
+        "pipeline.manual_uploads_non_blocking",
         operation_id=operation_id,
         components=manual_components,
     )
-    return {
-        "operation_id": operation_id,
-        "status": "manual_review",
-        "components": manual_components,
-    }
+    return await _phase3_4(operation_id)
 
 
 async def _phase3_4(operation_id: str):
@@ -523,14 +515,15 @@ async def _complete_analysis(operation_id: str):
 
 
 async def resume_after_upload(operation_id: str):
-    """Continue analysis once all required certificate uploads are complete."""
+    """Reprocess analysis once all configured certificate uploads are complete."""
     resumed = supabase.table("operations")\
         .update({
             "status": "processing",
             "heartbeat_at": datetime.now(timezone.utc).isoformat(),
+            "completed_at": None,
         })\
         .eq("id", operation_id)\
-        .eq("status", "manual_review")\
+        .in_("status", ["manual_review", "completed"])\
         .execute()
     if not resumed.data:
         logger.info("pipeline.resume_skipped", operation_id=operation_id)

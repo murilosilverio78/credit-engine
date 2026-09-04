@@ -68,6 +68,14 @@ FATURAMENTO_DECLARADO_KEYS = (
 
 PISO_FATOR_REG = 0.75
 CERTIDOES_REGULARIDADE = ("cnd_federal", "cndt_tst", "fgts")
+CERTIDAO_AUSENCIA_CONFIG = {
+    "cnd_federal": (
+        "penalidade_cnd_federal_ausente",
+        "certidao_cnd_federal_pendente",
+    ),
+    "cndt_tst": ("penalidade_cndt_ausente", "certidao_cndt_pendente"),
+    "fgts": ("penalidade_fgts_ausente", "certidao_fgts_pendente"),
+}
 ESSENTIAL_COMPONENTS = (
     "brasil_api",
     "pessoa_juridica",
@@ -934,14 +942,55 @@ def _certidao_estado(certidao: dict[str, Any]) -> tuple[str, float, list[str]]:
 def score_regularidade(snapshots: dict[str, Any]) -> dict[str, Any]:
     haircuts = []
     flags: list[str] = []
-    total = 0.0
+    pendencias_rating = []
+    total_haircuts = 0.0
+    penalizacao_total = 0.0
+    try:
+        from app.services.pricing_params_service import get_pricing_config
+
+        params, _ = get_pricing_config()
+    except Exception as exc:
+        logger.warning("score_engine.regularidade_params_unavailable", error=str(exc))
+        params = {}
+
     for component in CERTIDOES_REGULARIDADE:
-        estado, haircut, cert_flags = _certidao_estado(_first_snapshot(snapshots, component))
-        total += haircut
+        certidao = _first_snapshot(snapshots, component)
+        estado, haircut, cert_flags = _certidao_estado(certidao)
+        penalizacao = 0.0
+        if not certidao:
+            parametro, flag = CERTIDAO_AUSENCIA_CONFIG[component]
+            configured = _as_float(params.get(parametro))
+            flags.append(flag)
+            if configured is None or configured < 0:
+                flags.append(f"{parametro}_indisponivel")
+                desconto = None
+            else:
+                penalizacao = configured
+                penalizacao_total += penalizacao
+                desconto = round(penalizacao, 2)
+            pendencias_rating.append({
+                "certidao": component,
+                "penalizacao": desconto,
+            })
+
+        total_haircuts += haircut
         flags.extend(cert_flags)
-        haircuts.append({"certidao": component, "estado": estado, "haircut": round(haircut, 2)})
-    fator = round(max(PISO_FATOR_REG, 1 - total), 2)
-    return {"fator": fator, "haircuts": haircuts, "flags": sorted(set(flags))}
+        haircuts.append({
+            "certidao": component,
+            "estado": estado,
+            "haircut": round(haircut + (penalizacao / 100), 2),
+        })
+
+    fator_potencial = round(max(PISO_FATOR_REG, 1 - total_haircuts), 2)
+    fator = round(max(0.0, fator_potencial - (penalizacao_total / 100)), 2)
+    return {
+        "fator": fator,
+        "fator_potencial": fator_potencial,
+        "haircuts": haircuts,
+        "penalizacao_total": round(penalizacao_total, 2),
+        "pendencias_rating": pendencias_rating,
+        "flags": sorted(set(flags)),
+    }
 
 
 def _is_active_record(record: dict[str, Any]) -> bool:
@@ -1171,6 +1220,8 @@ def _parecer_estruturado(
         }
 
     fator = regularidade.get("fator", 1.0)
+    fator_potencial = regularidade.get("fator_potencial", fator)
+    penalizacao_total = regularidade.get("penalizacao_total", 0)
     haircuts = regularidade.get("haircuts", [])
     haircut_textos = [
         f"{item.get('certidao')}: {item.get('estado')} ({float(item.get('haircut') or 0):.2f})"
@@ -1208,8 +1259,10 @@ def _parecer_estruturado(
         "dimensoes": dimensoes_lista,
         "regularidade": {
             "fator": fator,
+            "fator_potencial": fator_potencial,
             "texto": (
                 f"Regularidade aplicada como multiplicador {fator:.2f}. "
+                f"Penalizacao por certidoes ausentes: {penalizacao_total:.1f} pontos. "
                 + (
                     "Haircuts aplicados: " + "; ".join(haircut_textos) + "."
                     if haircut_textos
@@ -1217,6 +1270,8 @@ def _parecer_estruturado(
                 )
             ),
             "haircuts": haircuts,
+            "penalizacao_total": penalizacao_total,
+            "pendencias_rating": regularidade.get("pendencias_rating", []),
             "flags": regularidade.get("flags", []),
         },
         "pontos_positivos": pontos_positivos,
@@ -1285,6 +1340,7 @@ def consolidar_score(
         faturamento,
     )
     historico_flags = _flags_historico_recebimentos(snapshots)
+    regularidade = score_regularidade(snapshots)
     bloqueios = gates_deterministicos(snapshots)
     if bloqueios:
         dimensoes = {
@@ -1304,7 +1360,7 @@ def consolidar_score(
             "E",
             20,
             dimensoes,
-            {"fator": 1.00, "haircuts": [], "flags": []},
+            regularidade,
             [],
             bloqueios,
             bloqueios=bloqueios,
@@ -1312,8 +1368,11 @@ def consolidar_score(
         return {
             "score": 20,
             "rating": "E",
+            "rating_potencial": "E",
+            "penalizacao_total": regularidade["penalizacao_total"],
+            "pendencias_rating": regularidade["pendencias_rating"],
             "merit": 20,
-            "fator_regularidade": 1.00,
+            "fator_regularidade": regularidade["fator"],
             "limite_sugerido_pct_contrato": pct_max_contrato,
             "limite_aprovado_rs": 0.0,
             "faturamento": faturamento,
@@ -1321,12 +1380,17 @@ def consolidar_score(
             "cobertura_faixa": cobertura_faixa,
             "ajuste_pd": None,
             "dimensoes": dimensoes,
-            "regularidade": {"fator": 1.00, "haircuts": [], "flags": []},
+            "regularidade": regularidade,
             "bloqueios": bloqueios,
             "pontos_positivos": [],
             "pontos_atencao": bloqueios,
             "flags": sorted(
-                set(faturamento["flags"] + cobertura_flags + historico_flags)
+                set(
+                    faturamento["flags"]
+                    + cobertura_flags
+                    + historico_flags
+                    + regularidade["flags"]
+                )
             ),
             "parecer_estruturado": parecer_estruturado,
             "parecer": bloqueios[0],
@@ -1349,9 +1413,10 @@ def consolidar_score(
         "saude_cadastral": score_saude_cadastral(snapshots),
         "reputacao_mercado": score_reputacao(snapshots),
     }
-    regularidade = score_regularidade(snapshots)
     merit = round(sum(dimensoes[dim]["score"] * peso for dim, peso in PESOS_MERITO.items()), 1)
+    score_potencial = round(merit * regularidade["fator_potencial"], 1)
     score_final = round(merit * regularidade["fator"], 1)
+    rating_potencial = rating_de(score_potencial)
     rating = rating_de(score_final)
     ajuste_pd, pd_flags = _ajuste_pd_volatilidade(snapshots, rating)
 
@@ -1378,6 +1443,7 @@ def consolidar_score(
             + cobertura_flags
             + historico_flags
             + pd_flags
+            + regularidade["flags"]
             + list(
                 dimensoes["relacionamento_governamental"].get("flags") or []
             )
@@ -1397,6 +1463,9 @@ def consolidar_score(
     return {
         "score": score_final,
         "rating": rating,
+        "rating_potencial": rating_potencial,
+        "penalizacao_total": regularidade["penalizacao_total"],
+        "pendencias_rating": regularidade["pendencias_rating"],
         "merit": merit,
         "fator_regularidade": regularidade["fator"],
         "limite_sugerido_pct_contrato": pct_max_contrato,
