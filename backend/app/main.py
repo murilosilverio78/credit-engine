@@ -4,7 +4,7 @@ import structlog
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1.endpoints import admin, alcadas, auth, components, escaladas, operations, overrides, pricing, uploads
+from app.api.v1.endpoints import admin, alcadas, auth, components, escaladas, internal, operations, overrides, pricing, uploads
 from app.api.v1.endpoints.uploads import public_router as uploads_public_router
 from app.core.auth import get_current_user
 from app.core.config import settings
@@ -46,6 +46,9 @@ app.include_router(auth.router,       prefix="/api/v1/auth",       tags=["auth"]
 app.include_router(alcadas.router,    prefix="/api/v1/alcadas",    tags=["alcadas"],    dependencies=_auth_dep)
 app.include_router(escaladas.router,  prefix="/api/v1/escaladas",  tags=["escaladas"],  dependencies=_auth_dep)
 app.include_router(pricing.router,    prefix="/api/v1/pricing",    tags=["pricing"],    dependencies=_auth_dep)
+
+# Rota de maquina com autenticacao propria via X-Internal-Token.
+app.include_router(internal.router, prefix="/api/v1/internal", tags=["internal"])
 
 # Rotas públicas por design (link de upload enviado ao fornecedor — sem auth)
 app.include_router(uploads_public_router, prefix="/api/v1/uploads", tags=["uploads-public"])

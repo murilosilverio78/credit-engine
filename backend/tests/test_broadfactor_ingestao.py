@@ -286,3 +286,95 @@ async def test_status_update_failure_does_not_block_analysis(monkeypatch):
     assert analyzed == ["operation-C-status-fails"]
     assert result["criadas"] == 1
     assert result["falhas"] == 1
+
+
+@pytest.mark.asyncio
+async def test_dry_run_only_returns_triage_summary(monkeypatch):
+    approved = quote("C-dry")
+    rejected = quote("C-dry-rejected", valor=5_000)
+    discarded = []
+    created = []
+
+    class FakeClient:
+        def triar(self, **_):
+            return [approved], [(rejected, "abaixo_ticket_minimo")]
+
+    install_service_modules(
+        monkeypatch,
+        discarded=discarded,
+        created=created,
+    )
+    monkeypatch.setattr(broadfactor_ingestao, "BroadfactorClient", FakeClient)
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_persist_quote",
+        lambda *args: pytest.fail("dry-run attempted to persist a quote"),
+    )
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_start_analysis",
+        lambda *args: pytest.fail("dry-run attempted to start analysis"),
+    )
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao(dry_run=True)
+
+    assert created == []
+    assert discarded == []
+    assert result == {
+        "status": "dry_run",
+        "total": 2,
+        "aprovadas": 1,
+        "descartadas": 1,
+        "descartadas_por_motivo": {"abaixo_ticket_minimo": 1},
+        "criadas": 0,
+        "duplicadas": 0,
+        "falhas": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_limit_does_not_count_duplicates(monkeypatch):
+    existing = quote("C-existing")
+    first_new = quote("C-first-new")
+    second_new = quote("C-second-new")
+    discarded = []
+    created = []
+    persisted = []
+
+    class FakeClient:
+        def triar(self, **_):
+            return [existing, first_new, second_new], []
+
+    install_service_modules(
+        monkeypatch,
+        discarded=discarded,
+        created=created,
+    )
+    monkeypatch.setattr(broadfactor_ingestao, "BroadfactorClient", FakeClient)
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_operation_exists",
+        lambda _, cotacao_id: cotacao_id == "C-existing",
+    )
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_persist_quote",
+        lambda _, cotacao, __: persisted.append(cotacao.id),
+    )
+    monkeypatch.setattr(broadfactor_ingestao, "_update_quote_status", lambda *args: None)
+
+    async def fake_start_analysis(operation_id):
+        return {"operation_id": operation_id}
+
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_start_analysis",
+        fake_start_analysis,
+    )
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao(limit=1)
+
+    assert persisted == ["C-first-new"]
+    assert [item["cotacao_id"] for item in created] == ["C-first-new"]
+    assert result["duplicadas"] == 1
+    assert result["criadas"] == 1

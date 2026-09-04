@@ -1,8 +1,8 @@
 """Broadfactor quote ingestion job.
 
-There is no scheduler in the current asyncio deployment. Invoke
-``run_broadfactor_ingestao`` externally at 08:05 and 14:15 America/Sao_Paulo.
-The module never calls Broadfactor during import.
+There is no scheduler in the current asyncio deployment. Trigger the internal
+HTTP endpoint at 08:05 and 14:15 America/Sao_Paulo. The module never calls
+Broadfactor during import.
 """
 
 from __future__ import annotations
@@ -83,12 +83,16 @@ async def _start_analysis(operation_id: str):
     return await start_analysis(operation_id)
 
 
-async def run_broadfactor_ingestao() -> dict[str, Any]:
-    """Triage current quotes, persist accepted ones and start their analyses."""
-    from app.core.database import supabase
+async def run_broadfactor_ingestao(
+    *,
+    dry_run: bool = False,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Triage quotes and, unless dry-running, create and analyze operations."""
     from app.services.eligibility_params_service import get_eligibility_config
-    from app.services.ingestion_discard_service import record_ingestion_discard
-    from app.services.operation_service import OperationService
+
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be greater than zero")
 
     params = get_eligibility_config()
     pct_max_contrato = float(params["pct_max_contrato"])
@@ -118,6 +122,24 @@ async def run_broadfactor_ingestao() -> dict[str, Any]:
     motivos = Counter(motivo for _, motivo in descartadas)
     falhas = 0
 
+    if dry_run:
+        summary = {
+            "status": "dry_run",
+            "total": len(aprovadas) + len(descartadas),
+            "aprovadas": len(aprovadas),
+            "descartadas": len(descartadas),
+            "descartadas_por_motivo": dict(sorted(motivos.items())),
+            "criadas": 0,
+            "duplicadas": 0,
+            "falhas": 0,
+        }
+        logger.info("broadfactor_ingestao.dry_run_completed", **summary)
+        return summary
+
+    from app.core.database import supabase
+    from app.services.ingestion_discard_service import record_ingestion_discard
+    from app.services.operation_service import OperationService
+
     for cotacao, motivo in descartadas:
         try:
             record_ingestion_discard(
@@ -141,6 +163,7 @@ async def run_broadfactor_ingestao() -> dict[str, Any]:
     analysis_jobs: list[tuple[str, asyncio.Task]] = []
     criadas = 0
     duplicadas = 0
+    processadas = 0
 
     for cotacao in aprovadas:
         try:
@@ -151,6 +174,10 @@ async def run_broadfactor_ingestao() -> dict[str, Any]:
                     cotacao_id=cotacao.id,
                 )
                 continue
+
+            if limit is not None and processadas >= limit:
+                break
+            processadas += 1
 
             valor_enquadrado = cotacao.enquadrar(pct_max_contrato)
             _persist_quote(supabase, cotacao, valor_enquadrado)
