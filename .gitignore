@@ -49,3 +49,8 @@ tmp/
 # Celery
 celerybeat-schedule
 celerybeat.pid
+
+codex_vps_temp
+codex_vps_temp.pub
+pncp_test.json
+test-results/
