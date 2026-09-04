@@ -194,13 +194,16 @@ def _reconcile(
     broadfactor: list[Recebimento],
     portal: list[Recebimento],
     today: date,
+    portal_error: str | None = None,
 ) -> dict[str, Any]:
     start, end = _mature_window(today)
     total_broadfactor, count_broadfactor = _window_total(broadfactor, start, end)
     total_portal, count_portal = _window_total(portal, start, end)
 
     divergence_pct: float | None = None
-    if count_broadfactor == 0:
+    if portal_error is not None:
+        status = "ERRO_PORTAL"
+    elif count_broadfactor == 0:
         status = "SEM_DADO_BROADFACTOR"
     elif count_portal == 0:
         status = "SEM_DADO_PORTAL"
@@ -225,6 +228,7 @@ def _reconcile(
         "total_portal": total_portal,
         "divergencia_pct": divergence_pct,
         "status": status,
+        "erro_portal": portal_error,
     }
 
 
@@ -232,13 +236,16 @@ def _fetch_portal(
     cnpj: str,
     token: str | None = None,
     today: date | None = None,
+    period_start: date | None = None,
+    period_end: date | None = None,
 ) -> tuple[list[Recebimento], dict[str, Any]]:
     from app.core.config import settings
 
     today = today or date.today()
-    mature_start, _ = _mature_window(today)
-    rolling_start = _shift_month(date(today.year, today.month, 1), -11)
-    query_start = min(mature_start, rolling_start)
+    query_start = period_start or _shift_month(
+        date(today.year, today.month, 1), -11
+    )
+    query_end = period_end or today
     headers = {"chave-api-dados": token or settings.PORTAL_TRANSPARENCIA_TOKEN}
 
     resources: list[dict[str, Any]] = []
@@ -263,7 +270,7 @@ def _fetch_portal(
                 f"{BASE_URL}/despesas/recursos-recebidos"
                 f"?codigoFavorecido={cnpj}"
                 f"&mesAnoInicio={query_start.strftime('%m/%Y')}"
-                f"&mesAnoFim={today.strftime('%m/%Y')}"
+                f"&mesAnoFim={query_end.strftime('%m/%Y')}"
                 f"&pagina={page}"
             )
             data = fetch_json_with_retry(client, url, headers=headers)
@@ -345,6 +352,7 @@ def _fetch(
     today = today or date.today()
     cotacao_id = _get_cotacao_id(operation_id)
     broadfactor: list[Recebimento] = []
+    portal_error: str | None = None
 
     if cotacao_id:
         try:
@@ -358,11 +366,24 @@ def _fetch(
             )
 
     try:
-        portal, portal_pagination = _fetch_portal(cnpj, token=token, today=today)
+        portal_period: dict[str, date] = {}
+        if cotacao_id and broadfactor:
+            period_start, period_end = _mature_window(today)
+            portal_period = {
+                "period_start": period_start,
+                "period_end": period_end,
+            }
+        portal, portal_pagination = _fetch_portal(
+            cnpj,
+            token=token,
+            today=today,
+            **portal_period,
+        )
     except Exception as exc:
         if not broadfactor:
             raise
         portal = []
+        portal_error = str(exc)
         portal_pagination = {
             "paginas_lidas": 0,
             "registros": 0,
@@ -385,7 +406,12 @@ def _fetch(
             portal_pagination,
         )
 
-    reconciliation = _reconcile(broadfactor, portal, today)
+    reconciliation = _reconcile(
+        broadfactor,
+        portal,
+        today,
+        portal_error=portal_error,
+    )
     if reconciliation["status"] == "DIVERGENTE":
         logger.warning(
             "recursos_recebidos.reconciliation_divergent",

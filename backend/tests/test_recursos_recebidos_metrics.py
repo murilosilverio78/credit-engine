@@ -51,6 +51,26 @@ def test_competency_is_sorted_by_year_then_month():
     assert metrics["faturamento_verificado_12m"] == 300
 
 
+def test_portal_integer_month_is_included_in_mature_window():
+    item = recursos_recebidos._portal_receipt(
+        {
+            "anoMes": 202505,
+            "valor": 123.45,
+            "nomeOrgao": "Orgao Portal",
+        }
+    )
+
+    total, count = recursos_recebidos._window_total(
+        [item],
+        date(2025, 1, 1),
+        date(2025, 12, 31),
+    )
+
+    assert item.competencia == "05/2025"
+    assert total == 123.45
+    assert count == 1
+
+
 def test_resource_detail_preserves_legacy_fields_and_month_type():
     item = receipt(125.5, "Orgao A", "11/2025")
     item.acao = "Acao A"
@@ -153,6 +173,23 @@ def test_reconciliation_uses_ten_percent_tolerance(
     assert result["status"] == expected_status
 
 
+def test_reconciliation_distinguishes_empty_portal_from_portal_error():
+    broadfactor = [receipt(100, "Orgao A", "06/2025")]
+
+    empty = recursos_recebidos._reconcile(broadfactor, [], TODAY)
+    failed = recursos_recebidos._reconcile(
+        broadfactor,
+        [],
+        TODAY,
+        portal_error="400 periodo deve ser de no maximo 12 meses",
+    )
+
+    assert empty["status"] == "SEM_DADO_PORTAL"
+    assert empty["erro_portal"] is None
+    assert failed["status"] == "ERRO_PORTAL"
+    assert failed["erro_portal"] == "400 periodo deve ser de no maximo 12 meses"
+
+
 def test_broadfactor_failure_falls_back_to_portal(monkeypatch):
     portal = [receipt(150, "Orgao Portal", "06/2025")]
     monkeypatch.setattr(recursos_recebidos, "_get_cotacao_id", lambda _: "C-1")
@@ -187,8 +224,68 @@ def test_portal_failure_does_not_fail_broadfactor_snapshot(monkeypatch):
     result = recursos_recebidos._fetch("03012610000101", operation_id="op-1", today=TODAY)
 
     assert result["fonte_primaria"] == "BROADFACTOR"
-    assert result["reconciliacao"]["status"] == "SEM_DADO_PORTAL"
+    assert result["reconciliacao"]["status"] == "ERRO_PORTAL"
+    assert result["reconciliacao"]["erro_portal"] == "Portal offline"
     assert result["valor_total_recebido"] == 200
+
+
+def test_broadfactor_reconciliation_queries_only_complete_previous_year(monkeypatch):
+    captured = {}
+    broadfactor = [receipt(200, "Orgao Broadfactor", "06/2025")]
+    monkeypatch.setattr(recursos_recebidos, "_get_cotacao_id", lambda _: "C-1")
+    monkeypatch.setattr(recursos_recebidos, "_fetch_broadfactor", lambda _: broadfactor)
+
+    def fake_fetch_portal(*args, **kwargs):
+        captured.update(kwargs)
+        return [], portal_pagination()
+
+    monkeypatch.setattr(recursos_recebidos, "_fetch_portal", fake_fetch_portal)
+
+    recursos_recebidos._fetch(
+        "31822605000191",
+        operation_id="op-1",
+        today=TODAY,
+    )
+
+    assert captured["period_start"] == date(2025, 1, 1)
+    assert captured["period_end"] == date(2025, 12, 31)
+
+
+def test_portal_query_uses_explicit_reconciliation_window(monkeypatch):
+    urls = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+    monkeypatch.setattr(recursos_recebidos.httpx, "Client", FakeClient)
+
+    def fake_fetch_json(client, url, headers):
+        urls.append(url)
+        return []
+
+    monkeypatch.setattr(
+        recursos_recebidos,
+        "fetch_json_with_retry",
+        fake_fetch_json,
+    )
+
+    recursos_recebidos._fetch_portal(
+        "31822605000191",
+        token="test",
+        today=TODAY,
+        period_start=date(2025, 1, 1),
+        period_end=date(2025, 12, 31),
+    )
+
+    assert "mesAnoInicio=01/2025" in urls[0]
+    assert "mesAnoFim=12/2025" in urls[0]
 
 
 def test_manual_operation_uses_only_portal(monkeypatch):
