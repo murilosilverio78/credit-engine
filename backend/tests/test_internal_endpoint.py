@@ -101,3 +101,18 @@ def test_live_ingestion_returns_202_and_uses_background_task(monkeypatch):
         "limit": 3,
     }
     assert calls == [{"dry_run": False, "limit": 3}]
+
+
+def test_watchdog_endpoint_returns_summary_with_internal_token(monkeypatch):
+    expected = {"status": "completed", "candidatas": 1, "marcadas": 1}
+
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    monkeypatch.setattr(internal, "run_operation_watchdog", lambda: expected)
+
+    response = make_client().post(
+        "/api/v1/internal/watchdog/operacoes",
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == expected

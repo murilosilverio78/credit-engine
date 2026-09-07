@@ -133,6 +133,17 @@ async def run_broadfactor_ingestao(
     if limit is not None and limit < 1:
         raise ValueError("limit must be greater than zero")
 
+    try:
+        from app.services.operation_watchdog_service import run_operation_watchdog
+
+        watchdog_summary = await asyncio.to_thread(run_operation_watchdog)
+        logger.info(
+            "broadfactor_ingestao.watchdog_completed",
+            watchdog=watchdog_summary,
+        )
+    except Exception as exc:
+        logger.error("broadfactor_ingestao.watchdog_failed", error=str(exc))
+
     params = get_eligibility_config()
     pct_max_contrato = float(params["pct_max_contrato"])
 

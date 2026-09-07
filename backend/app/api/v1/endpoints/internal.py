@@ -1,3 +1,4 @@
+import asyncio
 import secrets
 from typing import Annotated
 
@@ -5,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
+from app.services.operation_watchdog_service import run_operation_watchdog
 from app.workers.tasks.broadfactor_ingestao import run_broadfactor_ingestao
 
 
@@ -28,6 +30,13 @@ def verify_internal_token(
         configured_token,
     ):
         raise HTTPException(status_code=401, detail="Token interno invalido.")
+
+
+@router.post("/watchdog/operacoes")
+async def trigger_operation_watchdog(
+    _: None = Depends(verify_internal_token),
+):
+    return await asyncio.to_thread(run_operation_watchdog)
 
 
 @router.post("/ingestao/broadfactor")

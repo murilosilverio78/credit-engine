@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+import asyncio
 
 import structlog
 from fastapi import Depends, FastAPI
@@ -8,7 +8,7 @@ from app.api.v1.endpoints import admin, alcadas, auth, components, escaladas, in
 from app.api.v1.endpoints.uploads import public_router as uploads_public_router
 from app.core.auth import get_current_user
 from app.core.config import settings
-from app.core.database import supabase
+from app.services.operation_watchdog_service import run_operation_watchdog
 
 logger = structlog.get_logger()
 
@@ -56,47 +56,8 @@ app.include_router(uploads_public_router, prefix="/api/v1/uploads", tags=["uploa
 
 async def _recover_stale_operations():
     try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
-
-        # Operações sem heartbeat nos últimos 10 min (ou nunca tiveram heartbeat e têm > 10min)
-        result = supabase.table("operations")\
-            .select("id,status")\
-            .in_("status", ["pending", "processing"])\
-            .or_(
-                f"heartbeat_at.is.null,heartbeat_at.lt.{cutoff}"
-            )\
-            .lt("created_at", cutoff)\
-            .execute()
-
-        total = 0
-        for operation in result.data or []:
-            operation_id = operation.get("id")
-            status_anterior = operation.get("status")
-            if not operation_id:
-                continue
-            try:
-                supabase.table("operations")\
-                    .update({
-                        "status": "failed",
-                        "error_message": "operacao interrompida por restart do container",
-                    })\
-                    .eq("id", operation_id)\
-                    .execute()
-                total += 1
-                logger.warning(
-                    "startup.operation_recovered",
-                    operation_id=operation_id,
-                    status_anterior=status_anterior,
-                )
-            except Exception as exc:
-                logger.error(
-                    "startup.operation_recovery_update_failed",
-                    operation_id=operation_id,
-                    status_anterior=status_anterior,
-                    error=str(exc),
-                )
-
-        logger.info("startup.recovery_complete", total=total)
+        summary = await asyncio.to_thread(run_operation_watchdog)
+        logger.info("startup.recovery_complete", **summary)
     except Exception as exc:
         logger.error("startup.recovery_failed", error=str(exc))
 
