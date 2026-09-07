@@ -201,6 +201,25 @@ function formatCurrency(value: unknown) {
   }).format(numberValue(value));
 }
 
+function formatOptionalCurrency(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+  return formatCurrency(value);
+}
+
+function operationTerm(operation: OperationDetails) {
+  if (operation.prazo_final_meses !== null && operation.prazo_final_meses !== undefined) {
+    return `${numberValue(operation.prazo_final_meses).toLocaleString("pt-BR")} meses`;
+  }
+  if (operation.prazo_dias !== null && operation.prazo_dias !== undefined) {
+    return `${(numberValue(operation.prazo_dias) / 30).toLocaleString("pt-BR", {
+      maximumFractionDigits: 1,
+    })} meses`;
+  }
+  return "—";
+}
+
 function formatDate(value: unknown) {
   if (!value) {
     return "—";
@@ -325,6 +344,79 @@ function Metric({
       <p className="mb-1 text-[10px] text-muted-foreground">{label}</p>
       <p className="font-mono text-xl font-medium text-foreground">{children}</p>
     </div>
+  );
+}
+
+function OperationConferencePanel({ operation }: { operation: OperationDetails }) {
+  const balance = operation.saldo_vincendo ?? operation.contrato_saldo;
+  return (
+    <section className="report-section mt-3 rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
+      <h2 className="mb-3 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+        Conferência da operação
+      </h2>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        <Metric label="Valor solicitado">
+          <span className="text-sm">{formatOptionalCurrency(operation.valor_solicitado)}</span>
+        </Metric>
+        <Metric label="Valor enquadrado">
+          <span className="text-sm">{formatOptionalCurrency(operation.valor_enquadrado)}</span>
+        </Metric>
+        <Metric label="Saldo vincendo">
+          <span className="text-sm">{formatOptionalCurrency(balance)}</span>
+        </Metric>
+        <Metric label="Prazo final">
+          <span className="text-sm">{operationTerm(operation)}</span>
+          {operation.fonte_prazo_vincendo === "COMPRASNET" ? (
+            <span className="ml-1.5 rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-normal text-blue-700">
+              Comprasnet
+            </span>
+          ) : null}
+        </Metric>
+        <Metric label="Taxa sugerida">
+          <span className="text-sm">
+            {operation.taxa_sugerida == null ? "—" : formatTaxaAm(operation.taxa_sugerida)}
+          </span>
+        </Metric>
+      </div>
+    </section>
+  );
+}
+
+function ConcentrationPanel({ resources }: { resources: JsonRecord }) {
+  const concentration = asRecord(resources.concentracao);
+  const hhi = numberValue(concentration.hhi);
+  const topParticipation = numberValue(concentration.top_participacao);
+  const topAgency = stringValue(concentration.top_orgao, "órgão não identificado");
+  const range = stringValue(concentration.faixa, "NÃO CLASSIFICADO");
+  const agencyCount = numberValue(concentration.n_orgaos);
+
+  if (!hhi && !topParticipation && !agencyCount) {
+    return null;
+  }
+
+  const participationLabel = (topParticipation * 100).toLocaleString("pt-BR", {
+    maximumFractionDigits: 1,
+  });
+  return (
+    <section className="report-section mt-3 border-l-[3px] border-l-amber-500 bg-background px-4 py-3.5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-medium text-foreground">Concentração de sacado</h2>
+          <p className="mt-1 text-[13px] leading-5 text-foreground">
+            <strong>{participationLabel}% da receita</strong> vem de {topAgency}.
+          </p>
+        </div>
+        <span className="rounded bg-muted px-2 py-1 text-[10px] font-medium text-foreground">
+          {range}
+        </span>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-xs sm:grid-cols-4">
+        <DetailRow label="HHI" value={hhi.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} />
+        <DetailRow label="Órgãos pagadores" value={agencyCount.toLocaleString("pt-BR")} />
+        <DetailRow label="Principal órgão" value={topAgency} />
+        <DetailRow label="Participação principal" value={`${participationLabel}%`} />
+      </div>
+    </section>
   );
 }
 
@@ -542,14 +634,20 @@ function ScorecardPanel({ dimensions }: { dimensions: [string, Dimension][] }) {
 function RegularityPanel({
   regularidade,
   merit,
+  meritPotential,
+  balancePenalty,
   score,
 }: {
+  balancePenalty: unknown;
   merit: unknown;
+  meritPotential: unknown;
   regularidade: JsonRecord;
   score: unknown;
 }) {
   const fator = regularidade.fator === undefined ? 1 : numberValue(regularidade.fator);
   const meritValue = numberValue(merit) || numberValue(score);
+  const meritPotentialValue = numberValue(meritPotential) || meritValue;
+  const balancePenaltyValue = numberValue(balancePenalty);
   const haircuts = asArray(regularidade.haircuts).map((item) => asRecord(item));
 
   return (
@@ -572,10 +670,12 @@ function RegularityPanel({
         </div>
       </div>
       <p className="mb-3 rounded-md bg-muted/60 px-3 py-2 font-mono text-xs text-foreground">
-        Mérito {meritValue.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} ×
+        Mérito potencial {meritPotentialValue.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} ×
         {" "}
-        {fator.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} =
-        {" "}
+        {fator.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        {balancePenaltyValue > 0
+          ? ` = ${(numberValue(score) + balancePenaltyValue).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} − balanço ${balancePenaltyValue.toLocaleString("pt-BR")} = `
+          : " = "}
         {numberValue(score).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}
       </p>
       <div className="grid gap-2 md:grid-cols-3">
@@ -1503,6 +1603,7 @@ function Report({ operation }: { operation: OperationDetails }) {
   );
   const company = asRecord(snapshots.get("brasil_api")?.parsed_result);
   const contracts = asRecord(snapshots.get("contratos")?.parsed_result);
+  const resources = asRecord(snapshots.get("recursos_recebidos")?.parsed_result);
   const engine = asRecord(snapshots.get("score_engine")?.parsed_result);
   const rawDimensions = asRecord(engine.dimensoes);
   const regularidade = asRecord(engine.regularidade);
@@ -1649,13 +1750,18 @@ function Report({ operation }: { operation: OperationDetails }) {
           </div>
         </section>
 
+        <OperationConferencePanel operation={operation} />
+        <ConcentrationPanel resources={resources} />
+
         <SectionTitle>Scorecard — 4 dimensões de mérito</SectionTitle>
         {taxa > 0 && Object.keys(taxaBreakdown).length ? (
           <PricingBreakdownPanel breakdown={taxaBreakdown} />
         ) : null}
         <ScorecardPanel dimensions={dimensions} />
         <RegularityPanel
+          balancePenalty={engine.penalizacao_balanco}
           merit={engine.merit}
+          meritPotential={engine.merit_potencial}
           regularidade={regularidade}
           score={engine.score ?? operation.score}
         />

@@ -145,6 +145,28 @@ function formatValue(value: unknown, type?: string): string {
   return String(value);
 }
 
+function formatOptionalCurrency(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  return value.toLocaleString("pt-BR", {
+    currency: "BRL",
+    style: "currency",
+  });
+}
+
+function proposalTerm(operation: OperationDetails) {
+  if (operation.prazo_final_meses !== null && operation.prazo_final_meses !== undefined) {
+    return `${operation.prazo_final_meses.toLocaleString("pt-BR")} meses`;
+  }
+  if (operation.prazo_dias !== null && operation.prazo_dias !== undefined) {
+    return `${(operation.prazo_dias / 30).toLocaleString("pt-BR", {
+      maximumFractionDigits: 1,
+    })} meses`;
+  }
+  return "—";
+}
+
 function taxaPercentInput(value: number | null | undefined) {
   if (value === null || value === undefined) {
     return "";
@@ -854,33 +876,36 @@ function CompletedView({
         <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Dados da Proposta
         </h3>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
           <div>
             <p className="text-xs text-muted-foreground">Valor Solicitado</p>
             <p className="text-sm font-medium">
-              {operation.valor_solicitado != null
-                ? operation.valor_solicitado.toLocaleString("pt-BR", {
-                    currency: "BRL",
-                    style: "currency",
-                  })
-                : "—"}
+              {formatOptionalCurrency(operation.valor_solicitado)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Valor Enquadrado</p>
+            <p className="text-sm font-medium">
+              {formatOptionalCurrency(operation.valor_enquadrado)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Saldo Vincendo</p>
+            <p className="text-sm font-medium">
+              {formatOptionalCurrency(
+                operation.saldo_vincendo ?? operation.contrato_saldo,
+              )}
             </p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Prazo</p>
-            <p className="text-sm font-medium">
-              {operation.prazo_dias != null ? `${operation.prazo_dias} dias` : "—"}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Saldo do Contrato</p>
-            <p className="text-sm font-medium">
-              {operation.contrato_saldo != null
-                ? operation.contrato_saldo.toLocaleString("pt-BR", {
-                    currency: "BRL",
-                    style: "currency",
-                  })
-                : "—"}
+            <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+              <span>{proposalTerm(operation)}</span>
+              {operation.fonte_prazo_vincendo === "COMPRASNET" ? (
+                <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-normal text-blue-700">
+                  Comprasnet
+                </span>
+              ) : null}
             </p>
           </div>
           <div>

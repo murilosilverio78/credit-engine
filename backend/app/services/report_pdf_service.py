@@ -58,12 +58,29 @@ def money(value: Any) -> str:
     return f"R$ {formatted}"
 
 
+def optional_money(value: Any) -> str:
+    return "-" if value is None or value == "" else money(value)
+
+
 def number(value: Any, digits: int = 1) -> str:
     try:
         number_value = float(value or 0)
     except (TypeError, ValueError):
         number_value = 0
     return f"{number_value:.{digits}f}".replace(".", ",")
+
+
+def grouped_number(value: Any, digits: int = 1) -> str:
+    try:
+        number_value = float(value or 0)
+    except (TypeError, ValueError):
+        number_value = 0
+    return (
+        f"{number_value:,.{digits}f}"
+        .replace(",", "X")
+        .replace(".", ",")
+        .replace("X", ".")
+    )
 
 
 def pct_from_fraction(value: Any, digits: int = 0) -> str:
@@ -268,6 +285,8 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
     company = record(snapshots.get("brasil_api", {}).get("parsed_result"))
     legal = record(snapshots.get("pessoa_juridica", {}).get("parsed_result"))
     contracts = record(snapshots.get("contratos", {}).get("parsed_result"))
+    resources = record(snapshots.get("recursos_recebidos", {}).get("parsed_result"))
+    concentration = record(resources.get("concentracao"))
     tax_regimes = array(company.get("regime_tributario"))
     partners = array(company.get("qsa"))
     rows = [
@@ -297,6 +316,52 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
             ),
         ]
     )
+    balance = operation.get("saldo_vincendo")
+    if balance is None:
+        balance = operation.get("contrato_saldo")
+    final_term = operation.get("prazo_final_meses")
+    if final_term is not None:
+        term = f"{grouped_number(final_term, 0)} meses"
+    elif operation.get("prazo_dias") is not None:
+        term = f"{grouped_number(as_float(operation.get('prazo_dias')) / 30, 1)} meses"
+    else:
+        term = "-"
+    if operation.get("fonte_prazo_vincendo") == "COMPRASNET" and term != "-":
+        term += " (Comprasnet)"
+    suggested_rate = (
+        "-"
+        if operation.get("taxa_sugerida") is None
+        else pct_from_fraction(operation.get("taxa_sugerida"), 2)
+    )
+
+    conference = detail_grid(
+        [
+            ("Valor solicitado", optional_money(operation.get("valor_solicitado"))),
+            ("Valor enquadrado", optional_money(operation.get("valor_enquadrado"))),
+            ("Saldo vincendo", optional_money(balance)),
+            ("Prazo final", term),
+            ("Taxa sugerida", suggested_rate),
+        ],
+        5,
+    )
+    concentration_block = ""
+    if concentration:
+        top_share = as_float(concentration.get("top_participacao"))
+        top_agency = text(concentration.get("top_orgao"), "órgão não identificado")
+        concentration_block = f"""
+        <h2>Concentração de sacado</h2>
+        <div class="risk-callout">
+          <strong>{number(top_share * 100, 1)}% da receita vem de {esc(top_agency)}.</strong>
+          <span>HHI {grouped_number(concentration.get('hhi'), 1)} · {esc(concentration.get('faixa'))} · {grouped_number(concentration.get('n_orgaos'), 0)} órgãos</span>
+        </div>
+        {detail_grid([
+            ("Principal órgão", top_agency),
+            ("Participação principal", f"{number(top_share * 100, 1)}%"),
+            ("HHI", grouped_number(concentration.get("hhi"), 1)),
+            ("Faixa", concentration.get("faixa")),
+            ("Órgãos pagadores", grouped_number(concentration.get("n_orgaos"), 0)),
+        ], 5)}
+        """
     rating = esc(operation.get("rating") or engine.get("rating"), "-")
     return f"""
     <section class="cover page-section">
@@ -312,6 +377,9 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
       {detail_grid(rows, 3)}
       <h2>Indicadores</h2>
       <div class="metrics">{metrics}</div>
+      <h2>Conferência da operação</h2>
+      {conference}
+      {concentration_block}
       <div class="split">
         <div>
           <h2>Regime tributário por ano</h2>
@@ -383,7 +451,21 @@ def parecer_section(engine: dict[str, Any]) -> str:
 def regularity_section(engine: dict[str, Any]) -> str:
     regularity = record(engine.get("regularidade"))
     fator = regularity.get("fator", 1)
-    merit = engine.get("merit") or engine.get("score")
+    merit = engine.get("merit_potencial") or engine.get("merit") or engine.get("score")
+    balance_penalty = as_float(engine.get("penalizacao_balanco"))
+    score = as_float(engine.get("score"))
+    score_before_balance = score + balance_penalty
+    calculation = (
+        f"Merito potencial {number(merit, 1)} x fator {number(fator, 2)} "
+        f"= {number(score_before_balance, 1)}"
+    )
+    if balance_penalty > 0:
+        calculation += (
+            f" - balanco ausente {number(balance_penalty, 1)} "
+            f"= score final {number(score, 1)}"
+        )
+    else:
+        calculation += f" = score final {number(score, 1)}"
     haircuts = [
         [item.get("certidao"), item.get("estado"), number(item.get("haircut"), 2)]
         for item in map(record, array(regularity.get("haircuts")))
@@ -391,7 +473,7 @@ def regularity_section(engine: dict[str, Any]) -> str:
     return f"""
     <section class="page-section avoid-break">
       <h1>4. Regularidade</h1>
-      <div class="calc">Merito {number(merit, 1)} x fator {number(fator, 2)} = score final {number(engine.get("score"), 1)}</div>
+      <div class="calc">{calculation}</div>
       {table(["Certidao", "Estado", "Haircut"], haircuts)}
     </section>
     """
@@ -622,6 +704,9 @@ def styles() -> str:
       .mini-grid { color: #647481; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 7px; }
       .note { text-align: left; }
       .calc { background: #eef5e8; border-radius: 6px; color: #244f10; font-size: 15px; font-weight: 700; margin-bottom: 12px; padding: 10px 12px; }
+      .risk-callout { border-left: 3px solid #ba7517; display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; padding: 8px 12px; }
+      .risk-callout strong { color: #633806; font-size: 14px; }
+      .risk-callout span { color: #647481; font-size: 10px; }
     </style>
     """
 

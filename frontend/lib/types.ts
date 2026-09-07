@@ -30,6 +30,7 @@ export interface Operation {
   saldo_vincendo?: number | null;
   prazo_dias?: number | null;
   prazo_final_meses?: number | null;
+  fonte_prazo_vincendo?: string | null;
   prazo_vincendo_meses?: number | null;
   prazo_vincendo_indisponivel?: boolean | null;
   contrato_saldo?: number | null;

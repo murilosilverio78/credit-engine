@@ -25,6 +25,16 @@ class FakeBroadfactorClient:
         assert cotacao_id == "C-1"
         return [SimpleNamespace(numero_contrato="0001", arquivo="arquivo.pdf")]
 
+    def documentos_da_cotacao(self, cotacao_id):
+        assert cotacao_id == "C-1"
+        return [
+            SimpleNamespace(
+                tipo="PENULTIMO_BALANCO",
+                id="doc-1",
+                dono="EMPRESA",
+            )
+        ]
+
     def baixar_contrato(self, cotacao_id, numero_contrato):
         assert (cotacao_id, numero_contrato) == ("C-1", "0001")
         return self.content
@@ -181,6 +191,10 @@ def test_scanned_pdf_limits_ocr_pages_and_sets_truncation_flag(monkeypatch):
     assert "documento_truncado_para_ocr" in result["flags"]
     assert result["razao_saldo_vincendo_valor_global"] == 2.0
     assert "saldo_vincendo_divergente_valor_global" in result["flags"]
+    assert result["documentos_broadfactor"] == [
+        {"tipo": "PENULTIMO_BALANCO", "id": "doc-1", "dono": "EMPRESA"}
+    ]
+    assert result["documentos_broadfactor_status"] == "CONSULTADO"
 
 
 def test_component_timeout_is_recorded_without_raising(monkeypatch):

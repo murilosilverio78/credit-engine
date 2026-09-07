@@ -82,6 +82,8 @@ CERTIDAO_AUSENCIA_CONFIG = {
     "cndt_tst": ("penalidade_cndt_ausente", "certidao_cndt_pendente"),
     "fgts": ("penalidade_fgts_ausente", "certidao_fgts_pendente"),
 }
+BALANCO_DOCUMENT_TYPES = {"PENULTIMO_BALANCO", "BALANCO", "DRE"}
+BALANCO_PENALTY_PARAMETER = "penalidade_balanco_ausente"
 ESSENTIAL_COMPONENTS = (
     "brasil_api",
     "pessoa_juridica",
@@ -543,6 +545,75 @@ def _dimension(
         "fonte": fonte,
         "score_contrib": round(rounded * peso, 2),
     }
+
+
+def _document_types(value: Any) -> set[str]:
+    found: set[str] = set()
+    if isinstance(value, list):
+        for item in value:
+            found.update(_document_types(item))
+        return found
+    if not isinstance(value, dict):
+        return found
+
+    for key, item in value.items():
+        normalized_key = str(key).strip().lower()
+        if normalized_key in {"tipo", "tipo_documento", "document_type"}:
+            if isinstance(item, str) and item.strip():
+                found.add(item.strip().upper())
+        elif isinstance(item, (dict, list)):
+            found.update(_document_types(item))
+    return found
+
+
+def _apply_missing_balance_penalty(
+    porte: dict[str, Any],
+    snapshots: dict[str, Any],
+) -> tuple[dict[str, Any], float, list[dict[str, Any]], list[str]]:
+    if _document_types(snapshots) & BALANCO_DOCUMENT_TYPES:
+        return dict(porte), 0.0, [], []
+
+    flags = ["balanco_ausente"]
+    try:
+        from app.services.pricing_params_service import get_pricing_config
+
+        params, _ = get_pricing_config()
+    except Exception as exc:
+        logger.warning("score_engine.balance_penalty_params_unavailable", error=str(exc))
+        params = {}
+
+    configured = _as_float(params.get(BALANCO_PENALTY_PARAMETER))
+    if configured is None or configured < 0:
+        flags.append(f"{BALANCO_PENALTY_PARAMETER}_indisponivel")
+        penalty = 0.0
+        pending_penalty = None
+    else:
+        penalty = configured
+        pending_penalty = round(configured, 2)
+
+    weight = PESOS_MERITO["porte_operacionalidade"]
+    potential_score = max(_as_float(porte.get("score")) or 0.0, 0.0)
+    applied = min(penalty, potential_score * weight)
+    effective_score = max(0.0, potential_score - (applied / weight))
+    effective = dict(porte)
+    effective["score_potencial"] = round(potential_score, 1)
+    effective["nivel_potencial"] = porte.get("nivel") or nivel_label(potential_score)
+    effective["score"] = round(effective_score, 1)
+    effective["nivel"] = nivel_label(effective_score)
+    effective["score_contrib"] = round(effective_score * weight, 2)
+    effective["penalizacao_balanco"] = round(applied, 2)
+    effective["flags"] = sorted(set(list(porte.get("flags") or []) + flags))
+    if applied > 0:
+        effective["fatores"] = [
+            *list(porte.get("fatores") or []),
+            f"Balanco ou DRE ausente: -{applied:.1f} pontos no score final",
+        ]
+
+    pending = [{
+        "documento": "PENULTIMO_BALANCO",
+        "penalizacao": pending_penalty,
+    }]
+    return effective, round(applied, 2), pending, flags
 
 
 def _idade_score(anos: float) -> int:
@@ -1215,6 +1286,9 @@ def _parecer_estruturado(
     pontos_atencao: list[str],
     flags_extra: list[str] | None = None,
     bloqueios: list[str] | None = None,
+    merit_potencial: float | None = None,
+    penalizacao_balanco: float = 0.0,
+    pendencias_rating: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     bloqueios = bloqueios or []
     if bloqueios:
@@ -1236,6 +1310,12 @@ def _parecer_estruturado(
     fator = regularidade.get("fator", 1.0)
     fator_potencial = regularidade.get("fator_potencial", fator)
     penalizacao_total = regularidade.get("penalizacao_total", 0)
+    merit_base = merit if merit_potencial is None else merit_potencial
+    pendencias = (
+        regularidade.get("pendencias_rating", [])
+        if pendencias_rating is None
+        else pendencias_rating
+    )
     haircuts = regularidade.get("haircuts", [])
     haircut_textos = [
         f"{item.get('certidao')}: {item.get('estado')} ({float(item.get('haircut') or 0):.2f})"
@@ -1266,8 +1346,11 @@ def _parecer_estruturado(
             "fator_regularidade": fator,
             "texto": (
                 f"Rating {rating}, score final {score:.1f}. "
-                f"O resultado combina merito {merit:.1f} com fator de regularidade {fator:.2f} "
-                f"({merit:.1f} x {fator:.2f} = {score:.1f})."
+                f"O resultado combina merito potencial {merit_base:.1f}, "
+                f"fator de regularidade {fator:.2f} e penalizacao por balanco "
+                f"de {penalizacao_balanco:.1f} pontos "
+                f"({merit_base:.1f} x {fator:.2f} - {penalizacao_balanco:.1f} "
+                f"= {score:.1f})."
             ),
         },
         "dimensoes": dimensoes_lista,
@@ -1285,7 +1368,7 @@ def _parecer_estruturado(
             ),
             "haircuts": haircuts,
             "penalizacao_total": penalizacao_total,
-            "pendencias_rating": regularidade.get("pendencias_rating", []),
+            "pendencias_rating": pendencias,
             "flags": regularidade.get("flags", []),
         },
         "pontos_positivos": pontos_positivos,
@@ -1331,10 +1414,18 @@ def _parecer(score: float, rating: str, merit: float, dimensoes: dict[str, Any],
     return _parecer_texto(estruturado)
 
 
-def _parecer_resumo(score: float, rating: str, merit: float, regularidade: dict[str, Any]) -> str:
+def _parecer_resumo(
+    score: float,
+    rating: str,
+    merit: float,
+    regularidade: dict[str, Any],
+    penalizacao_balanco: float = 0.0,
+) -> str:
     return (
         f"Rating {rating}, score final {score:.1f}. "
-        f"Merito {merit:.1f} x fator de regularidade {regularidade.get('fator', 1):.2f}."
+        f"Merito {merit:.1f} x fator de regularidade "
+        f"{regularidade.get('fator', 1):.2f} - penalizacao por balanco "
+        f"{penalizacao_balanco:.1f}."
     )
 
 
@@ -1421,18 +1512,50 @@ def consolidar_score(
             set(list(porte.get("flags") or []) + faturamento["flags"])
         )
 
+    porte_potencial = dict(porte)
+    porte, penalizacao_balanco, pendencia_balanco, balanco_flags = (
+        _apply_missing_balance_penalty(porte, snapshots)
+    )
+
     dimensoes = {
         "relacionamento_governamental": score_relacionamento(snapshots),
         "porte_operacionalidade": porte,
         "saude_cadastral": score_saude_cadastral(snapshots),
         "reputacao_mercado": score_reputacao(snapshots),
     }
+    merit_potencial = round(
+        sum(
+            (
+                porte_potencial["score"]
+                if dim == "porte_operacionalidade"
+                else dimensoes[dim]["score"]
+            )
+            * peso
+            for dim, peso in PESOS_MERITO.items()
+        ),
+        1,
+    )
     merit = round(sum(dimensoes[dim]["score"] * peso for dim, peso in PESOS_MERITO.items()), 1)
-    score_potencial = round(merit * regularidade["fator_potencial"], 1)
-    score_final = round(merit * regularidade["fator"], 1)
+    score_potencial = round(merit_potencial * regularidade["fator_potencial"], 1)
+    score_antes_penalizacao_balanco = round(
+        merit_potencial * regularidade["fator"],
+        1,
+    )
+    score_final = round(
+        max(0.0, score_antes_penalizacao_balanco - penalizacao_balanco),
+        1,
+    )
     rating_potencial = rating_de(score_potencial)
     rating = rating_de(score_final)
     ajuste_pd, pd_flags = _ajuste_pd_volatilidade(snapshots, rating)
+    pendencias_rating = [
+        *regularidade["pendencias_rating"],
+        *pendencia_balanco,
+    ]
+    penalizacao_total = round(
+        regularidade["penalizacao_total"] + penalizacao_balanco,
+        2,
+    )
 
     pontos_positivos = [
         f"{dim}: {value['nivel']}"
@@ -1457,6 +1580,7 @@ def consolidar_score(
             + cobertura_flags
             + historico_flags
             + pd_flags
+            + balanco_flags
             + regularidade["flags"]
             + list(
                 dimensoes["relacionamento_governamental"].get("flags") or []
@@ -1472,15 +1596,21 @@ def consolidar_score(
         pontos_positivos,
         pontos_atencao,
         flags_extra,
+        merit_potencial=merit_potencial,
+        penalizacao_balanco=penalizacao_balanco,
+        pendencias_rating=pendencias_rating,
     )
 
     return {
         "score": score_final,
         "rating": rating,
         "rating_potencial": rating_potencial,
-        "penalizacao_total": regularidade["penalizacao_total"],
-        "pendencias_rating": regularidade["pendencias_rating"],
+        "penalizacao_total": penalizacao_total,
+        "penalizacao_balanco": penalizacao_balanco,
+        "pendencias_rating": pendencias_rating,
         "merit": merit,
+        "merit_potencial": merit_potencial,
+        "score_antes_penalizacao_balanco": score_antes_penalizacao_balanco,
         "fator_regularidade": regularidade["fator"],
         "limite_sugerido_pct_contrato": pct_max_contrato,
         "limite_aprovado_rs": limite_aprovado_rs,
@@ -1496,7 +1626,13 @@ def consolidar_score(
         "pontos_atencao": pontos_atencao,
         "parecer_estruturado": parecer_estruturado,
         "parecer": _parecer_texto(parecer_estruturado),
-        "parecer_resumo": _parecer_resumo(score_final, rating, merit, regularidade),
+        "parecer_resumo": _parecer_resumo(
+            score_final,
+            rating,
+            merit_potencial,
+            regularidade,
+            penalizacao_balanco,
+        ),
     }
 
 
@@ -1541,6 +1677,25 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
             for snap in result.data or []:
                 if snap.get("parsed_result"):
                     snapshots[snap["component"]] = snap["parsed_result"]
+
+            try:
+                document_result = _execute_db(
+                    operation_id,
+                    "load_operation_documents_for_score",
+                    lambda: supabase.table("documents")
+                    .select("document_type")
+                    .eq("operation_id", operation_id)
+                    .execute(),
+                )
+                snapshots["documentos_operacao"] = {
+                    "documentos": document_result.data or [],
+                }
+            except Exception as exc:
+                logger.warning(
+                    "score_engine.operation_documents_unavailable",
+                    operation_id=operation_id,
+                    error=str(exc),
+                )
             snapshots = fix_dict_encoding(snapshots)
 
             logger.info(

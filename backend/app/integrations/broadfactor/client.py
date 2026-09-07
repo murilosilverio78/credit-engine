@@ -818,6 +818,11 @@ class BroadfactorClient:
             )
             return None
 
+    def documentos_da_cotacao(self, cid: str) -> list[DocumentoAnexo]:
+        """Retorna somente o catalogo de documentos da empresa na cotacao."""
+        fornecedor = Fornecedor(cotacao_id=cid)
+        return self._documentos(cid, fornecedor)
+
     # ------------------------------------------------------------ fornecedor
     def _lista(self, caminho: str) -> list[dict]:
         res = self._req("GET", caminho)

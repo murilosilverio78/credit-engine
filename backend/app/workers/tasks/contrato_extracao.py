@@ -507,11 +507,38 @@ def _fetch(
             timeout=max(1, min(30, int(deadline.remaining("broadfactor_inicio"))))
         )
 
+    document_context: dict[str, Any] = {
+        "documentos_broadfactor": [],
+        "documentos_broadfactor_status": "NAO_CONSULTADO",
+    }
+
+    def failure(reason: str, *, flags: list[str] | None = None, **details: Any):
+        return _failure(reason, flags=flags, **document_context, **details)
+
     try:
+        try:
+            documents = broadfactor_client.documentos_da_cotacao(cotacao_id)
+            document_context = {
+                "documentos_broadfactor": [
+                    {"tipo": item.tipo, "id": item.id, "dono": item.dono}
+                    for item in documents
+                ],
+                "documentos_broadfactor_status": "CONSULTADO",
+            }
+        except Exception as exc:
+            document_context["documentos_broadfactor_status"] = "ERRO"
+            document_context["documentos_broadfactor_erro"] = str(exc)[:300]
+            logger.warning(
+                "contrato_extracao.document_catalog_failed",
+                operation_id=operation_id,
+                cotacao_id=cotacao_id,
+                error=str(exc),
+            )
+
         contracts = broadfactor_client.contratos_da_cotacao(cotacao_id)
         deadline.remaining("listar_contratos")
         if not contracts:
-            return _failure(
+            return failure(
                 "contrato_nao_disponivel",
                 cotacao_id=cotacao_id,
             )
@@ -543,12 +570,12 @@ def _fetch(
 
         if selected is None:
             if last_error:
-                return _failure(
+                return failure(
                     last_error.reason,
                     cotacao_id=cotacao_id,
                     **last_error.details,
                 )
-            return _failure(
+            return failure(
                 "download_contrato_indisponivel",
                 cotacao_id=cotacao_id,
             )
@@ -575,7 +602,7 @@ def _fetch(
                     operation_id=operation_id,
                     error=str(exc),
                 )
-                return _failure(
+                return failure(
                     "documento_digitalizado_sem_ocr",
                     cotacao_id=cotacao_id,
                     numero_contrato=contract.numero_contrato,
@@ -586,7 +613,7 @@ def _fetch(
                 flags.append("documento_truncado_para_ocr")
 
         if len("".join(pages).strip()) < MIN_TEXT_CHARS:
-            return _failure(
+            return failure(
                 "texto_insuficiente_apos_extracao",
                 flags=[*flags, "texto_insuficiente_apos_extracao"],
                 cotacao_id=cotacao_id,
@@ -645,6 +672,7 @@ def _fetch(
             "prazo_final_meses": prazo_final,
             "razao_saldo_vincendo_valor_global": ratio,
             "flags": flags,
+            **document_context,
             **extraction,
         }
         logger.info(
@@ -666,7 +694,7 @@ def _fetch(
             cotacao_id=cotacao_id,
             error=str(exc),
         )
-        return _failure(
+        return failure(
             "timeout_extracao_contrato",
             cotacao_id=cotacao_id,
             error=str(exc)[:300],
@@ -679,7 +707,7 @@ def _fetch(
             motivo=exc.reason,
             **exc.details,
         )
-        return _failure(
+        return failure(
             exc.reason,
             cotacao_id=cotacao_id,
             **exc.details,
@@ -691,7 +719,7 @@ def _fetch(
             cotacao_id=cotacao_id,
             error=str(exc),
         )
-        return _failure(
+        return failure(
             "falha_extracao_contrato",
             cotacao_id=cotacao_id,
             error=str(exc)[:300],
