@@ -10,6 +10,7 @@ import { clearAuthToken } from "@/lib/auth-token";
 
 const DIRETOR_ONLY_PREFIXES = [
   "/settings/alcadas",
+  "/settings/elegibilidade",
   "/settings/pricing",
   "/settings/users",
 ];

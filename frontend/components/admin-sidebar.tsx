@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowUpCircle,
   FileSearch,
+  ListChecks,
   Plus,
   SlidersHorizontal,
   Users,
@@ -53,6 +54,12 @@ const navigation: NavigationItem[] = [
     href: "/settings/alcadas",
     icon: SlidersHorizontal,
     label: "Alçadas",
+    directorOnly: true,
+  },
+  {
+    href: "/settings/elegibilidade",
+    icon: ListChecks,
+    label: "Elegibilidade",
     directorOnly: true,
   },
   {

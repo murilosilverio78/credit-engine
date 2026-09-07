@@ -236,6 +236,16 @@ export interface PricingParameter {
   updated_at: string;
 }
 
+export interface EligibilityParameter {
+  key: string;
+  value: number;
+  label: string;
+  unit: "BRL" | "decimal" | "meses" | "dias" | "minutos" | string;
+  grupo: "elegibilidade" | "operacional" | string;
+  updated_by: string | null;
+  updated_at: string;
+}
+
 export interface PricingMatrixRow {
   rating: Rating;
   pd_mult: number;

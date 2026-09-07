@@ -5,6 +5,7 @@ import type {
   BrasilApiCompany,
   Component,
   ComponentToggleResult,
+  EligibilityParameter,
   EscaladaPendente,
   HealthStatus,
   Alcada,
@@ -289,6 +290,24 @@ export function getAlcadaAuditTrail() {
 
 export function getPricingParameters() {
   return request<PricingParameter[]>("/api/v1/pricing/parameters");
+}
+
+export function getEligibilityParameters() {
+  return request<EligibilityParameter[]>("/api/v1/elegibilidade/parameters");
+}
+
+export function updateEligibilityParameter(
+  key: string,
+  value: number,
+  justificativa: string,
+) {
+  return request<EligibilityParameter>(
+    `/api/v1/elegibilidade/parameters/${encodeURIComponent(key)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ justificativa, value }),
+    },
+  );
 }
 
 export function getPricingMatrix() {
