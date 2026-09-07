@@ -7,6 +7,7 @@ for key in ("SECRET_KEY", "TWOCAPTCHA_API_KEY", "RESEND_API_KEY"):
     os.environ.setdefault(key, "test")
 
 from app.integrations.broadfactor.client import Recebimento  # noqa: E402
+from app.workers.tasks import contratos as contratos_portal  # noqa: E402
 from app.workers.tasks import contratos_comprasnet  # noqa: E402
 
 
@@ -86,6 +87,82 @@ def test_receipt_maps_code_ug_and_orders_by_received_value():
     ) == ["158132", "158100"]
 
 
+def test_portal_contract_mapping_adds_codes_without_changing_legacy_fields():
+    raw = {
+        "numero": "00005/2026",
+        "objeto": "Objeto: Servico continuado",
+        "situacaoContrato": "Em execucao",
+        "valorInicialCompra": 100,
+        "valorFinalCompra": 120,
+        "dataAssinatura": "2026-01-01",
+        "dataInicioVigencia": "2026-01-01",
+        "dataFimVigencia": "2099-12-31",
+        "unidadeGestora": {
+            "codigo": "158157",
+            "nome": "INSTITUTO CHICO MENDES - SEDE",
+            "orgaoVinculado": {"codigoSIAFI": "44207"},
+            "orgaoMaximo": {"nome": "MINISTERIO DO MEIO AMBIENTE"},
+        },
+    }
+
+    parsed = contratos_portal._parse_contrato(raw)
+
+    assert parsed["numero"] == "00005/2026"
+    assert parsed["unidade"] == "INSTITUTO CHICO MENDES - SEDE"
+    assert parsed["unidade_codigo"] == "158157"
+    assert parsed["orgao_codigo_siafi"] == "44207"
+    assert parsed["valor_inicial"] == 100
+    assert parsed["valor_final"] == 120
+
+
+def test_uasg_discovery_prefers_same_portal_contract_then_receipts():
+    snapshot = {
+        "contratos_detalhe": [
+            {"numero": "00100/2025", "unidade_codigo": "111111", "ativo": True},
+            {"numero": "00005/2026", "unidade_codigo": "158157", "ativo": True},
+        ]
+    }
+
+    candidates = contratos_comprasnet._discover_uasg_candidates(
+        ["000052026"],
+        snapshot,
+        [receipt(900_000, "999999")],
+    )
+
+    assert [candidate.codigo for candidate in candidates] == ["158157", "999999"]
+    assert [candidate.origem for candidate in candidates] == [
+        "CONTRATOS_NUMERO",
+        "RECEBIDO",
+    ]
+    assert candidates[0].numero_preferido == "000052026"
+
+
+def test_uasg_discovery_uses_other_portal_contracts_active_first():
+    snapshot = {
+        "contratos_detalhe": [
+            {"numero": "00001/2020", "unidade_codigo": "222222", "ativo": False},
+            {"numero": "00002/2026", "unidade_codigo": "111111", "ativo": True},
+        ]
+    }
+
+    candidates = contratos_comprasnet._discover_uasg_candidates(
+        ["000052026"],
+        snapshot,
+        [receipt(900_000, "999999")],
+    )
+
+    assert [candidate.codigo for candidate in candidates] == [
+        "111111",
+        "222222",
+        "999999",
+    ]
+    assert [candidate.origem for candidate in candidates] == [
+        "CONTRATOS_ATIVO",
+        "CONTRATOS_ATIVO",
+        "RECEBIDO",
+    ]
+
+
 def test_direct_lookup_rejects_supplier_mismatch_and_tries_next_uasg():
     client = FakeComprasnet(
         {
@@ -97,12 +174,22 @@ def test_direct_lookup_rejects_supplier_mismatch_and_tries_next_uasg():
     )
 
     contract, diagnostics = contratos_comprasnet._find_contract(
-        client, CNPJ, ["000422026"], ["111111", "222222"]
+        client,
+        CNPJ,
+        ["000422026"],
+        [
+            contratos_comprasnet._UasgCandidate("111111", "CONTRATOS_ATIVO"),
+            contratos_comprasnet._UasgCandidate("222222", "RECEBIDO"),
+        ],
     )
 
     assert contract["id"] == 42
     assert diagnostics["busca"] == "DIRETA"
     assert diagnostics["fallback_usado"] is False
+    assert [item["origem"] for item in diagnostics["tentativas"]] == [
+        "CONTRATOS_ATIVO",
+        "RECEBIDO",
+    ]
     assert len(client.calls) == 2
 
 
@@ -114,13 +201,41 @@ def test_heavy_fallback_runs_once_only_for_highest_value_uasg():
     )
 
     contract, diagnostics = contratos_comprasnet._find_contract(
-        client, CNPJ, ["000422026"], ["111111", "222222"]
+        client,
+        CNPJ,
+        ["000422026"],
+        [
+            contratos_comprasnet._UasgCandidate(
+                "111111",
+                "CONTRATOS_NUMERO",
+                numero_preferido="000422026",
+            ),
+            contratos_comprasnet._UasgCandidate("222222", "RECEBIDO"),
+        ],
     )
 
     assert contract["id"] == 42
     assert diagnostics["busca"] == "FALLBACK_UG"
     fallback_calls = [path for path in client.calls if "/api/contrato/ug/" in path]
     assert fallback_calls == ["/api/contrato/ug/111111"]
+
+
+def test_heavy_fallback_is_not_used_for_received_or_unmatched_portal_uasg():
+    client = FakeComprasnet({})
+
+    contract, diagnostics = contratos_comprasnet._find_contract(
+        client,
+        CNPJ,
+        ["000422026"],
+        [
+            contratos_comprasnet._UasgCandidate("111111", "CONTRATOS_ATIVO"),
+            contratos_comprasnet._UasgCandidate("222222", "RECEBIDO"),
+        ],
+    )
+
+    assert contract is None
+    assert diagnostics["fallback_usado"] is False
+    assert not any("/api/contrato/ug/" in path for path in client.calls)
 
 
 def test_lookup_failure_is_distinct_from_valid_response_without_match(monkeypatch):
@@ -144,6 +259,7 @@ def test_lookup_failure_is_distinct_from_valid_response_without_match(monkeypatc
         "_load_operation",
         lambda _operation_id: {"cotacao_id": "C-1", "margem_disponivel": 100},
     )
+    monkeypatch.setattr(contratos_comprasnet, "_load_contracts_snapshot", lambda _: {})
 
     result = contratos_comprasnet._fetch(
         _digits_cnpj(CNPJ),
@@ -359,7 +475,7 @@ def test_fetch_enriches_match_without_using_heavy_fallback(monkeypatch):
             return [SimpleNamespace(numero_contrato="000422026")]
 
         def recebimentos(self, *_args, **_kwargs):
-            return [receipt(500_000, "158132")]
+            return [receipt(500_000, "999999")]
 
     client = FakeComprasnet(
         {
@@ -376,6 +492,19 @@ def test_fetch_enriches_match_without_using_heavy_fallback(monkeypatch):
             "margem_disponivel": 280_000,
         },
     )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_contracts_snapshot",
+        lambda _operation_id: {
+            "contratos_detalhe": [
+                {
+                    "numero": "00042/2026",
+                    "unidade_codigo": "158132",
+                    "ativo": True,
+                }
+            ]
+        },
+    )
 
     result = contratos_comprasnet._fetch(
         _digits_cnpj(CNPJ),
@@ -389,6 +518,9 @@ def test_fetch_enriches_match_without_using_heavy_fallback(monkeypatch):
     assert result["contrato_comprasnet"]["match_confianca"] == "CNPJ_CONFERIDO"
     assert result["empenhos"]["pago_total"] == 100_000
     assert result["consistencia_margem"]["status"] == "CONSISTENTE"
+    assert result["diagnostico_busca"]["tentativas"][0]["origem"] == (
+        "CONTRATOS_NUMERO"
+    )
     assert not any("/api/contrato/ug/" in path for path in client.calls)
 
 

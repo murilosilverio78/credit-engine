@@ -410,37 +410,62 @@ async def _run_analysis(operation_id: str):
     _update_heartbeat(operation_id)
 
     _PIPELINE_STAGE.set("phase2")
-    phase2_results = await asyncio.gather(
+    contracts_task = asyncio.create_task(
         _run_or_reuse_component(
             "contratos", run_contratos, operation_id, reusable_components
+        )
+    )
+    parallel_tasks = [
+        asyncio.create_task(
+            _run_or_reuse_component(
+                "contrato_extracao",
+                run_contrato_extracao,
+                operation_id,
+                reusable_components,
+            )
         ),
-        _run_or_reuse_component(
-            "contrato_extracao",
-            run_contrato_extracao,
-            operation_id,
-            reusable_components,
+        asyncio.create_task(
+            _run_or_reuse_component(
+                "recursos_recebidos",
+                run_recursos_recebidos,
+                operation_id,
+                reusable_components,
+            )
         ),
-        _run_or_reuse_component(
-            "contratos_comprasnet",
-            run_contratos_comprasnet,
-            operation_id,
-            reusable_components,
+        asyncio.create_task(
+            _run_or_reuse_component(
+                "acordos_leniencia",
+                run_acordos_leniencia,
+                operation_id,
+                reusable_components,
+            )
         ),
-        _run_or_reuse_component(
-            "recursos_recebidos",
-            run_recursos_recebidos,
-            operation_id,
-            reusable_components,
+        asyncio.create_task(
+            _run_or_reuse_component("ceis", run_ceis, operation_id, reusable_components)
         ),
-        _run_or_reuse_component(
-            "acordos_leniencia",
-            run_acordos_leniencia,
-            operation_id,
-            reusable_components,
+        asyncio.create_task(
+            _run_or_reuse_component("cnep", run_cnep, operation_id, reusable_components)
         ),
-        _run_or_reuse_component("ceis", run_ceis, operation_id, reusable_components),
-        _run_or_reuse_component("cnep", run_cnep, operation_id, reusable_components),
-        _run_or_reuse_component("cepim", run_cepim, operation_id, reusable_components),
+        asyncio.create_task(
+            _run_or_reuse_component("cepim", run_cepim, operation_id, reusable_components)
+        ),
+    ]
+
+    # Comprasnet depends on the Portal contract snapshot for the correct UASG.
+    # Other phase-2 components keep running while this dependency is resolved.
+    contracts_result = await contracts_task
+    comprasnet_result = await _run_or_reuse_component(
+        "contratos_comprasnet",
+        run_contratos_comprasnet,
+        operation_id,
+        reusable_components,
+    )
+    parallel_results = await asyncio.gather(*parallel_tasks)
+    phase2_results = (
+        contracts_result,
+        parallel_results[0],
+        comprasnet_result,
+        *parallel_results[1:],
     )
     _PIPELINE_STAGE.set("phase2_validation")
     _update_heartbeat(operation_id)

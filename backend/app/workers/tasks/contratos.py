@@ -38,6 +38,8 @@ def _get_orgao(c: dict) -> str:
 
 
 def _parse_contrato(c: dict) -> dict:
+    unidade_gestora = c.get("unidadeGestora") or {}
+    orgao_vinculado = unidade_gestora.get("orgaoVinculado") or {}
     return {
         "numero": c.get("numero"),
         "objeto": (c.get("objeto") or "").replace("Objeto: ", "").strip(),
@@ -48,7 +50,9 @@ def _parse_contrato(c: dict) -> dict:
         "data_inicio": c.get("dataInicioVigencia"),
         "data_fim": c.get("dataFimVigencia"),
         "orgao": _get_orgao(c),
-        "unidade": (c.get("unidadeGestora") or {}).get("nome"),
+        "unidade": unidade_gestora.get("nome"),
+        "unidade_codigo": unidade_gestora.get("codigo"),
+        "orgao_codigo_siafi": orgao_vinculado.get("codigoSIAFI"),
         "ativo": _is_ativo(c),
     }
 
