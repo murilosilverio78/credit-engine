@@ -1,0 +1,82 @@
+name: Ingestao Broadfactor
+
+on:
+  schedule:
+    # Cron usa UTC: 08:05 e 14:15 em Brasilia (UTC-3), apenas em dias uteis.
+    # Ajustar estes horarios se o Brasil voltar a adotar horario de verao.
+    - cron: "5 11 * * 1-5"
+    - cron: "15 17 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: Limite opcional de cotacoes a processar (1-100)
+        required: false
+        type: string
+      dry_run:
+        description: Executar somente a triagem, sem criar operacoes
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+jobs:
+  trigger-ingestion:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Acionar ingestao Broadfactor
+        timeout-minutes: 5
+        env:
+          INTERNAL_JOB_TOKEN: ${{ secrets.INTERNAL_JOB_TOKEN }}
+          INPUT_LIMIT: ${{ inputs.limit }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${INTERNAL_JOB_TOKEN}" ]]; then
+            echo "::error::O secret INTERNAL_JOB_TOKEN nao esta configurado."
+            exit 1
+          fi
+
+          url="https://credit-engine-production-a0a1.up.railway.app/api/v1/internal/ingestao/broadfactor"
+          query="dry_run=false"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            dry_run="${INPUT_DRY_RUN:-false}"
+            query="dry_run=${dry_run}"
+
+            if [[ -n "${INPUT_LIMIT}" ]]; then
+              if [[ ! "${INPUT_LIMIT}" =~ ^[1-9][0-9]*$ ]] || (( INPUT_LIMIT > 100 )); then
+                echo "::error::limit deve ser um inteiro entre 1 e 100."
+                exit 1
+              fi
+              query="${query}&limit=${INPUT_LIMIT}"
+            fi
+          fi
+
+          response_file="$(mktemp)"
+          trap 'rm -f "${response_file}"' EXIT
+
+          if ! http_code="$(curl \
+            --silent \
+            --show-error \
+            --request POST \
+            --connect-timeout 30 \
+            --max-time 295 \
+            --output "${response_file}" \
+            --write-out "%{http_code}" \
+            --header "X-Internal-Token: ${INTERNAL_JOB_TOKEN}" \
+            "${url}?${query}")"; then
+            echo "::error::Falha ao chamar o endpoint de ingestao."
+            cat "${response_file}"
+            exit 1
+          fi
+
+          cat "${response_file}"
+          echo
+          echo "HTTP ${http_code}"
+
+          if [[ "${http_code}" != "200" && "${http_code}" != "202" ]]; then
+            echo "::error::Endpoint retornou HTTP ${http_code}; esperado 200 ou 202."
+            exit 1
+          fi

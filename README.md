@@ -77,6 +77,18 @@ npm run dev
 
 Ver `backend/.env.example` e `frontend/.env.local.example`.
 
+## Ingestao Broadfactor
+
+A ingestao de cotacoes roda duas vezes por dia util pelo workflow GitHub Actions
+`Ingestao Broadfactor`, as 08:05 e 14:15 no horario de Brasilia. Os crons do
+workflow estao definidos em UTC e devem ser revistos se o Brasil voltar a adotar
+horario de verao.
+
+Para executar manualmente, abra **Actions > Ingestao Broadfactor > Run workflow**.
+O disparo manual aceita `limit` opcional e `dry_run` para executar apenas a
+triagem. O repositorio precisa ter o secret `INTERNAL_JOB_TOKEN` configurado com
+o mesmo valor usado pelo backend.
+
 ## Verificação de encoding
 
 Antes de commitar mudanças no backend, rode:
