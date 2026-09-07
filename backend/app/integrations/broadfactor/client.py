@@ -389,6 +389,7 @@ class Recebimento:
     unidade_gestora: str | None
     competencia: str | None
     acao: str | None = None
+    codigo_ug: str | None = None
 
     @classmethod
     def de_json(cls, d: dict) -> "Recebimento":
@@ -399,6 +400,7 @@ class Recebimento:
             orgao_superior=d.get("nameSuperiorOrganization"),
             unidade_gestora=d.get("nameUG"),
             competencia=d.get("competency"),
+            codigo_ug=(str(d.get("codeUg") or "").strip() or None),
         )
 
 

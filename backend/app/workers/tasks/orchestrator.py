@@ -19,6 +19,7 @@ PHASE1_COMPONENTS = ("brasil_api", "pessoa_juridica")
 PHASE2_COMPONENTS = (
     "contratos",
     "contrato_extracao",
+    "contratos_comprasnet",
     "recursos_recebidos",
     "acordos_leniencia",
     "ceis",
@@ -329,6 +330,10 @@ async def _run_analysis(operation_id: str):
     from app.workers.tasks.cnep import run_cnep
     from app.workers.tasks.contrato_extracao import run_contrato_extracao
     from app.workers.tasks.contratos import run_contratos
+    from app.workers.tasks.contratos_comprasnet import (
+        apply_contract_source_precedence,
+        run_contratos_comprasnet,
+    )
     from app.workers.tasks.pessoa_juridica import run_pessoa_juridica
     from app.workers.tasks.recursos_recebidos import run_recursos_recebidos
 
@@ -416,6 +421,12 @@ async def _run_analysis(operation_id: str):
             reusable_components,
         ),
         _run_or_reuse_component(
+            "contratos_comprasnet",
+            run_contratos_comprasnet,
+            operation_id,
+            reusable_components,
+        ),
+        _run_or_reuse_component(
             "recursos_recebidos",
             run_recursos_recebidos,
             operation_id,
@@ -433,6 +444,14 @@ async def _run_analysis(operation_id: str):
     )
     _PIPELINE_STAGE.set("phase2_validation")
     _update_heartbeat(operation_id)
+    try:
+        await asyncio.to_thread(apply_contract_source_precedence, operation_id)
+    except Exception as exc:
+        logger.warning(
+            "pipeline.contract_source_precedence_failed",
+            operation_id=operation_id,
+            error=str(exc),
+        )
     failed_phase2 = _phase2_failed_components(list(phase2_results))
     for component, result in failed_phase2:
         logger.error(
