@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, Response
 from pydantic import BaseModel, field_validator
 from typing import Literal, Optional
+from datetime import datetime, timedelta, timezone
 import re
 
 from app.core.auth import get_current_user
@@ -12,6 +13,7 @@ router = APIRouter()
 audit = AuditService()
 
 RATING_RANK = {"A": 1, "B": 2, "C": 3, "D": 4, "E": 5}
+SCORE_REPROCESSING_STALE_MINUTES = 15
 
 VALID_TRANSITIONS = {
     "approve":            {"completed"},
@@ -57,6 +59,78 @@ def _operation_snapshot(operation_id: str) -> dict:
     if not result.data:
         raise HTTPException(status_code=404, detail="Operação não encontrada")
     return result.data
+
+
+def _claim_score_reprocessing(operation_id: str) -> None:
+    snapshot = supabase.table("component_snapshots")\
+        .select("status,started_at")\
+        .eq("operation_id", operation_id)\
+        .eq("component", "score_engine")\
+        .maybe_single()\
+        .execute()
+
+    if snapshot.data:
+        current_status = snapshot.data.get("status")
+        if current_status == "running":
+            started_at = snapshot.data.get("started_at")
+            try:
+                started = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+                if started.tzinfo is None:
+                    started = started.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                started = None
+            cutoff = datetime.now(timezone.utc) - timedelta(
+                minutes=SCORE_REPROCESSING_STALE_MINUTES
+            )
+            if started and started >= cutoff:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Reprocessamento de score já está em andamento",
+                )
+        started_at = datetime.now(timezone.utc).isoformat()
+        update_query = supabase.table("component_snapshots")\
+            .update({
+                "status": "running",
+                "started_at": started_at,
+                "error_message": None,
+            })\
+            .eq("operation_id", operation_id)\
+            .eq("component", "score_engine")\
+            .eq("status", current_status)
+        previous_started_at = snapshot.data.get("started_at")
+        if current_status == "running":
+            if previous_started_at is None:
+                update_query = update_query.is_("started_at", "null")
+            else:
+                update_query = update_query.eq("started_at", previous_started_at)
+        claimed = update_query.execute()
+        if not claimed.data:
+            raise HTTPException(
+                status_code=409,
+                detail="Reprocessamento de score já foi iniciado por outra solicitação",
+            )
+        return
+
+    try:
+        supabase.table("component_snapshots").insert({
+            "operation_id": operation_id,
+            "component": "score_engine",
+            "status": "running",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+    except Exception as exc:
+        concurrent = supabase.table("component_snapshots")\
+            .select("status")\
+            .eq("operation_id", operation_id)\
+            .eq("component", "score_engine")\
+            .maybe_single()\
+            .execute()
+        if concurrent.data:
+            raise HTTPException(
+                status_code=409,
+                detail="Reprocessamento de score já foi iniciado por outra solicitação",
+            ) from exc
+        raise
 
 
 def _insert_approval(
@@ -230,6 +304,78 @@ async def get_operation(operation_id: str):
         raise HTTPException(status_code=404, detail="Operação não encontrada")
 
     return operation
+
+
+@router.post("/{operation_id}/reprocessar-score", status_code=202)
+async def reprocess_operation_score(
+    operation_id: str,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user.get("role") != "diretor":
+        raise HTTPException(
+            status_code=403,
+            detail="Somente diretor pode reprocessar o score",
+        )
+
+    operation = _operation_snapshot(operation_id)
+    if operation.get("status") not in {"completed", "failed"}:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "INVALID_STATE_FOR_SCORE_REPROCESSING",
+                "current_status": operation.get("status"),
+                "allowed_statuses": ["completed", "failed"],
+            },
+        )
+
+    _claim_score_reprocessing(operation_id)
+    previous_value = {
+        "score": operation.get("score"),
+        "rating": operation.get("rating"),
+        "taxa_sugerida": operation.get("taxa_sugerida"),
+    }
+
+    from app.workers.tasks.orchestrator import reprocess_score
+
+    background_tasks.add_task(
+        reprocess_score,
+        operation_id,
+        actor_id=current_user.get("id"),
+        actor_type=current_user.get("role", "diretor"),
+        ip_address=request.client.host if request.client else None,
+        previous_value=previous_value,
+    )
+    return {
+        "operation_id": operation_id,
+        "status": "accepted",
+        "previous_value": previous_value,
+        "message": "Reprocessamento do score iniciado",
+    }
+
+
+@router.get("/{operation_id}/score-versions")
+async def list_score_versions(
+    operation_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user.get("role") != "diretor":
+        raise HTTPException(
+            status_code=403,
+            detail="Somente diretor pode consultar o histórico do score",
+        )
+
+    _operation_snapshot(operation_id)
+    result = supabase.table("score_snapshot_versions")\
+        .select(
+            "id,operation_id,snapshot_id,parsed_result,raw_result,score_contrib,"
+            "started_at,completed_at,archived_at,archive_reason"
+        )\
+        .eq("operation_id", operation_id)\
+        .order("archived_at", desc=True)\
+        .execute()
+    return {"items": result.data or [], "total": len(result.data or [])}
 
 
 @router.get("/{operation_id}/report.pdf")

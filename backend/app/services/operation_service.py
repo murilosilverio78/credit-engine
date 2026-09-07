@@ -118,6 +118,24 @@ class OperationService:
         snapshots = await _safe_execute(snapshots_query)
 
         operation["components"] = snapshots.data
+        try:
+            audit_query = supabase.table("audit_trail")\
+                .select("previous_value,new_value,payload,created_at")\
+                .eq("operation_id", operation_id)\
+                .eq("action", "score_reprocessed")\
+                .order("created_at", desc=True)\
+                .limit(1)
+            audit_result = await _safe_execute(audit_query)
+            operation["score_reprocessamento"] = (
+                audit_result.data[0] if audit_result.data else None
+            )
+        except Exception as exc:
+            operation["score_reprocessamento"] = None
+            logger.warning(
+                "operation.score_reprocessing_audit_unavailable",
+                operation_id=operation_id,
+                error=str(exc),
+            )
         return operation
 
     async def list(

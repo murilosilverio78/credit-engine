@@ -921,7 +921,7 @@ function CompletedView({
         </div>
       </div>
 
-      {operation.status === "completed" ? (
+      {operation.status === "completed" || operation.status === "failed" ? (
         <ApprovalActions operation={operation} />
       ) : decisionBadge ? (
         <div className="mb-3.5 rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
@@ -1205,11 +1205,15 @@ export default function OperationDetailPage() {
     queryKey: ["operation", operationId],
     refetchInterval: (query) => {
       const status = query.state.data?.status;
+      const scoreStatus = query.state.data?.components?.find(
+        (component) => component.component === "score_engine",
+      )?.status;
 
       if (
         status === "pending" ||
         status === "processing" ||
         status === "manual_review" ||
+        scoreStatus === "running" ||
         !status
       ) {
         return 5_000;

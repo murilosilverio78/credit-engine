@@ -677,9 +677,42 @@ async def _complete_analysis(operation_id: str):
         .select("parsed_result")
         .eq("operation_id", operation_id)
         .eq("component", "score_engine")
-        .single()
+        .maybe_single()
         .execute(),
     )
+
+    if not result.data:
+        reason = "score_engine snapshot ausente; operacao concluida sem score"
+        data = {
+            "status": "completed",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "score": None,
+            "rating": None,
+            "limite_aprovado": None,
+            "taxa_sugerida": None,
+            "taxa_breakdown": None,
+            "pricing_skipped_reason": reason,
+            "error_message": None,
+        }
+        _execute_db(
+            operation_id,
+            "complete_operation_without_score",
+            lambda: supabase.table("operations")
+            .update(data)
+            .eq("id", operation_id)
+            .execute(),
+        )
+        logger.warning(
+            "pipeline.completed_without_score",
+            operation_id=operation_id,
+            reason=reason,
+        )
+        return {
+            "operation_id": operation_id,
+            "status": "completed",
+            "score_available": False,
+            "reason": reason,
+        }
 
     operation_result = _execute_db(
         operation_id,
@@ -701,6 +734,10 @@ async def _complete_analysis(operation_id: str):
         "score": score_result.get("score"),
         "rating": score_result.get("rating"),
         "limite_aprovado": score_result.get("limite_aprovado_rs"),
+        "taxa_sugerida": None,
+        "taxa_breakdown": None,
+        "pricing_skipped_reason": None,
+        "error_message": None,
     }
     rating = str(data["rating"] or "").upper()
     valor_enquadrado = operation.get("valor_enquadrado")
@@ -790,7 +827,109 @@ async def _complete_analysis(operation_id: str):
         score=data["score"],
         rating=data["rating"],
     )
-    return {"operation_id": operation_id, "status": "completed"}
+    return {
+        "operation_id": operation_id,
+        "status": "completed",
+        "score": data["score"],
+        "rating": data["rating"],
+        "taxa_sugerida": data["taxa_sugerida"],
+    }
+
+
+async def reprocess_score(
+    operation_id: str,
+    *,
+    actor_id: str | None,
+    actor_type: str,
+    ip_address: str | None,
+    previous_value: dict,
+):
+    """Recalculate only score and pricing, preserving all upstream snapshots."""
+    from app.services.audit_service import AuditService
+    from app.workers.tasks.score_engine import run_score_engine
+
+    audit = AuditService()
+    previous_archived_version_id = _latest_archived_score_version_id(operation_id)
+    result = await _run_component(run_score_engine, operation_id)
+    latest_archived_version_id = _latest_archived_score_version_id(operation_id)
+    archived_version_id = (
+        latest_archived_version_id
+        if latest_archived_version_id != previous_archived_version_id
+        else None
+    )
+    if _component_result_failed(result):
+        error = result.get("error", "falha desconhecida")
+        payload = {"status": "failed", "error": error}
+        if archived_version_id:
+            payload["archived_version_id"] = archived_version_id
+        audit.log(
+            operation_id=operation_id,
+            action="score_reprocessed",
+            actor_id=actor_id,
+            actor_type=actor_type,
+            ip_address=ip_address,
+            previous_value=previous_value,
+            payload=payload,
+        )
+        logger.error(
+            "score_reprocessing.failed",
+            operation_id=operation_id,
+            error=error,
+        )
+        return {"operation_id": operation_id, "status": "failed", "error": error}
+
+    completion = await _complete_analysis(operation_id)
+    new_value = {
+        "score": completion.get("score"),
+        "rating": completion.get("rating"),
+        "taxa_sugerida": completion.get("taxa_sugerida"),
+    }
+    payload = {"status": "completed"}
+    if archived_version_id:
+        payload["archived_version_id"] = archived_version_id
+    audit.log(
+        operation_id=operation_id,
+        action="score_reprocessed",
+        actor_id=actor_id,
+        actor_type=actor_type,
+        ip_address=ip_address,
+        previous_value=previous_value,
+        new_value=new_value,
+        payload=payload,
+    )
+    logger.info(
+        "score_reprocessing.completed",
+        operation_id=operation_id,
+        previous_value=previous_value,
+        new_value=new_value,
+    )
+    return completion
+
+
+def _latest_archived_score_version_id(
+    operation_id: str,
+) -> str | None:
+    try:
+        result = _execute_db(
+            operation_id,
+            "load_archived_score_version",
+            lambda: supabase.table("score_snapshot_versions")
+            .select("id")
+            .eq("operation_id", operation_id)
+            .order("archived_at", desc=True)
+            .limit(1)
+            .execute(),
+        )
+    except Exception as exc:
+        logger.warning(
+            "score_reprocessing.archived_version_unavailable",
+            operation_id=operation_id,
+            error=str(exc),
+        )
+        return None
+
+    rows = result.data or []
+    return str(rows[0]["id"]) if rows and rows[0].get("id") else None
 
 
 async def resume_after_upload(operation_id: str):

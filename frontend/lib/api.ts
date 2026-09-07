@@ -19,6 +19,7 @@ import type {
   PricingMatrixRow,
   PricingParameter,
   PropostaInput,
+  ScoreReprocessingAccepted,
   TaxaOverrideValidation,
   UploadDocumentType,
   UploadResetResult,
@@ -128,6 +129,13 @@ export function createOperation(payload: PropostaInput) {
 
 export function getOperation(operationId: string) {
   return request<OperationDetails>(`/api/v1/operations/${operationId}`);
+}
+
+export function reprocessOperationScore(operationId: string) {
+  return request<ScoreReprocessingAccepted>(
+    `/api/v1/operations/${encodeURIComponent(operationId)}/reprocessar-score`,
+    { method: "POST" },
+  );
 }
 
 export async function downloadOperationReportPdf(operationId: string) {

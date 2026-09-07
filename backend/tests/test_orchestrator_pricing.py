@@ -34,10 +34,13 @@ class PricingQuery:
         return self
 
     def maybe_single(self):
+        self.database.used_maybe_single = True
         return self
 
     def execute(self):
         if self.action == "select" and self.table == "component_snapshots":
+            if not self.database.snapshot_exists:
+                return SimpleNamespace(data=None)
             return SimpleNamespace(data={"parsed_result": self.database.score_result})
         if self.action == "select" and self.table == "operations":
             return SimpleNamespace(data=self.database.operation)
@@ -57,6 +60,8 @@ class PricingSupabase:
             "ajuste_pd": {"multiplicador_volatilidade": 1.08},
         }
         self.completed_payload = None
+        self.snapshot_exists = True
+        self.used_maybe_single = False
 
     def table(self, name):
         return PricingQuery(self, name)
@@ -110,3 +115,24 @@ def test_completion_prices_effective_fields_with_legacy_fallback(
 
     assert calls == [("C", expected_value, expected_term, 1.08)]
     assert database.completed_payload["taxa_sugerida"] == 0.025
+
+
+def test_completion_without_score_snapshot_is_recoverable(monkeypatch):
+    database = PricingSupabase({})
+    database.snapshot_exists = False
+    monkeypatch.setattr(orchestrator, "supabase", database)
+
+    result = asyncio.run(orchestrator._complete_analysis("op-1"))
+
+    assert database.used_maybe_single is True
+    assert result == {
+        "operation_id": "op-1",
+        "status": "completed",
+        "score_available": False,
+        "reason": "score_engine snapshot ausente; operacao concluida sem score",
+    }
+    assert database.completed_payload["status"] == "completed"
+    assert database.completed_payload["score"] is None
+    assert database.completed_payload["rating"] is None
+    assert database.completed_payload["taxa_sugerida"] is None
+    assert database.completed_payload["pricing_skipped_reason"] == result["reason"]

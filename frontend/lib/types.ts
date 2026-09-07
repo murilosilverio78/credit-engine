@@ -127,6 +127,31 @@ export interface OperationCreated {
 
 export interface OperationDetails extends Operation {
   components?: ComponentSnapshot[];
+  score_reprocessamento?: ScoreReprocessingAudit | null;
+}
+
+export interface ScoreReprocessingValue {
+  rating: Rating | null;
+  score: number | null;
+  taxa_sugerida: number | null;
+}
+
+export interface ScoreReprocessingAudit {
+  created_at: string;
+  new_value: ScoreReprocessingValue | null;
+  payload: {
+    archived_version_id?: string;
+    error?: string;
+    status: "completed" | "failed";
+  };
+  previous_value: ScoreReprocessingValue | null;
+}
+
+export interface ScoreReprocessingAccepted {
+  message: string;
+  operation_id: string;
+  previous_value: ScoreReprocessingValue;
+  status: "accepted";
 }
 
 export interface ComponentSnapshot {
