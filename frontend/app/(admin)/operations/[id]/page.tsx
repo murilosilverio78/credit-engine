@@ -428,23 +428,23 @@ function ProcessingView({
   );
 }
 
-function ManualReviewView({
+function CertificateUploadSection({
+  isLoading,
   operation,
   operationId,
   onRefresh,
+  uploads,
 }: {
+  isLoading: boolean;
   operation: OperationDetails;
   operationId: string;
   onRefresh: () => Promise<unknown>;
+  uploads: UploadTask[];
 }) {
   const queryClient = useQueryClient();
   const [filenames, setFilenames] = useState<Record<string, string>>({});
   const [resumeRequested, setResumeRequested] = useState(false);
-  const uploadsQuery = useQuery({
-    queryFn: () => getOperationUploads(operationId),
-    queryKey: ["operations", operationId, "uploads"],
-    refetchInterval: 5_000,
-  });
+  const [previousAuditAt, setPreviousAuditAt] = useState<string | null>(null);
   const uploadMutation = useMutation({
     mutationFn: ({
       file,
@@ -475,19 +475,48 @@ function ManualReviewView({
   });
   const resumeMutation = useMutation({
     mutationFn: () => resumeAfterUploads(operationId),
+    onMutate: () => {
+      setPreviousAuditAt(operation.score_reprocessamento?.created_at ?? null);
+    },
     onSuccess: async () => {
       setResumeRequested(true);
       await onRefresh();
     },
   });
-  const uploads = uploadsQuery.data ?? [];
   const completeCount = uploads.filter((upload) => upload.status === "completed").length;
-  const allCompleted =
-    uploads.length > 0 && uploads.every((upload) => upload.status === "completed");
   const progress = uploads.length ? (completeCount / uploads.length) * 100 : 0;
+  const analysisRunning = ["pending", "processing"].includes(operation.status);
+  const canModify = ["completed", "failed", "manual_review"].includes(
+    operation.status,
+  );
+  const decisionLocked = ["approved", "rejected"].includes(operation.status);
+
+  useEffect(() => {
+    if (!resumeRequested) {
+      return;
+    }
+
+    const currentAuditAt = operation.score_reprocessamento?.created_at ?? null;
+    if (currentAuditAt && currentAuditAt !== previousAuditAt) {
+      setResumeRequested(false);
+      return;
+    }
+
+    const interval = window.setInterval(() => void onRefresh(), 3_000);
+    return () => window.clearInterval(interval);
+  }, [
+    onRefresh,
+    operation.score_reprocessamento?.created_at,
+    previousAuditAt,
+    resumeRequested,
+  ]);
+
+  if (!isLoading && uploads.length === 0) {
+    return null;
+  }
 
   return (
-    <section className="flex-1 px-5 py-4">
+    <section className="px-5 pb-4 pt-1" id="certificate-uploads">
       <div className="mb-3.5 flex items-center justify-between rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
         <div>
           <p className="mb-0.5 font-mono text-[10px] text-muted-foreground">
@@ -496,10 +525,25 @@ function ManualReviewView({
           <p className="text-sm font-medium text-foreground">
             {operation.razao_social || formatCnpj(operation.cnpj)}
           </p>
-          <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-700">
-            <AlertTriangle aria-hidden="true" className="h-3 w-3" />
-            Pipeline pausado - faça upload das certidões para continuar
-          </p>
+          {analysisRunning ? (
+            <p className="mt-1 flex items-center gap-1 text-[11px] text-blue-700">
+              <LoaderCircle aria-hidden="true" className="h-3 w-3 animate-spin" />
+              A análise ainda está em andamento; os uploads ficam disponíveis ao concluir.
+            </p>
+          ) : decisionLocked ? (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Operação decidida; certidões recebidas disponíveis somente para consulta.
+            </p>
+          ) : operation.status === "manual_review" ? (
+            <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-700">
+              <AlertTriangle aria-hidden="true" className="h-3 w-3" />
+              Aguardando certidões para retomar a análise.
+            </p>
+          ) : (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Envie uma certidão e reprocesse o score para incorporar a nova evidência.
+            </p>
+          )}
         </div>
         <div className="text-right">
           <p className="mb-1 text-[10px] text-muted-foreground">progresso</p>
@@ -523,13 +567,14 @@ function ManualReviewView({
         Certidões obrigatórias
       </h2>
       <div className="mb-3.5 rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
-        {uploadsQuery.isLoading ? (
+        {isLoading ? (
           <p className="text-xs text-muted-foreground">Carregando certidões...</p>
         ) : uploads.length ? (
           <div className="flex flex-col gap-2.5">
             {uploads.map((task) => {
               const completed = task.status === "completed";
               const failed = task.status === "failed";
+              const pending = task.status === "pending";
               const details = certificateDetails[task.document_type];
               const uploading =
                 uploadMutation.isPending &&
@@ -550,6 +595,7 @@ function ManualReviewView({
                       !failed &&
                       "rounded-l-none border-l-2 border-l-amber-500",
                   )}
+                  id={`certificate-upload-${task.document_type}`}
                   key={task.id}
                 >
                   <div
@@ -604,7 +650,7 @@ function ManualReviewView({
                       </p>
                     ) : null}
                   </div>
-                  {completed || failed ? (
+                  {canModify && (completed || failed) ? (
                     <div className="flex items-center gap-2">
                       <span
                         className={cn(
@@ -631,7 +677,7 @@ function ManualReviewView({
                         {removing ? "removendo..." : "remover"}
                       </button>
                     </div>
-                  ) : (
+                  ) : canModify && pending ? (
                     <label
                       className={cn(
                         "flex h-7 cursor-pointer items-center gap-1 rounded-md border border-border bg-background px-3 text-[11px] text-foreground hover:bg-muted",
@@ -654,6 +700,14 @@ function ManualReviewView({
                         type="file"
                       />
                     </label>
+                  ) : (
+                    <span className="text-[11px] text-muted-foreground">
+                      {completed
+                        ? "recebida"
+                        : task.status === "expired"
+                          ? "tarefa expirada"
+                          : "upload indisponível"}
+                    </span>
                   )}
                 </div>
               );
@@ -678,41 +732,46 @@ function ManualReviewView({
         ) : null}
       </div>
 
-      <h2 className="mb-2 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
-        Retomar pipeline
-      </h2>
-      <div className="rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
-        <p className="mb-3 text-xs leading-5 text-muted-foreground">
-          Após conferir todas as certidões, clique em Retomar análise para continuar com{" "}
-          <span className="font-medium text-foreground">
-            web_research -&gt; score_engine
-          </span>
-          .
-        </p>
-        <button
-          className={cn(
-            "flex h-8 items-center gap-1.5 rounded-md border px-4 text-xs font-medium opacity-40",
-            allCompleted &&
-              !resumeRequested &&
-              "border-emerald-200 text-emerald-700 opacity-100 hover:bg-emerald-50",
-          )}
-          disabled={!allCompleted || resumeRequested || resumeMutation.isPending}
-          onClick={() => resumeMutation.mutate()}
-          type="button"
-        >
-          <Play className="h-3 w-3" />
-          {resumeMutation.isPending
-            ? "Retomando..."
-            : resumeRequested
-              ? "Análise retomada"
-              : "Retomar análise"}
-        </button>
-        {resumeMutation.isError ? (
-          <p className="mt-3 text-xs text-red-700" role="alert">
-            Não foi possível retomar a análise. Verifique as certidões enviadas.
-          </p>
-        ) : null}
-      </div>
+      {canModify ? (
+        <>
+          <h2 className="mb-2 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+            Atualizar análise
+          </h2>
+          <div className="rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
+            <p className="mb-3 text-xs leading-5 text-muted-foreground">
+              Reprocesse o score após validar ao menos uma certidão. Os componentes já
+              concluídos e as consultas externas serão reutilizados.
+            </p>
+            <button
+              className={cn(
+                "flex h-8 items-center gap-1.5 rounded-md border px-4 text-xs font-medium opacity-40",
+                completeCount > 0 &&
+                  !resumeRequested &&
+                  "border-emerald-200 text-emerald-700 opacity-100 hover:bg-emerald-50",
+              )}
+              disabled={
+                completeCount === 0 || resumeRequested || resumeMutation.isPending
+              }
+              onClick={() => resumeMutation.mutate()}
+              type="button"
+            >
+              <Play className="h-3 w-3" />
+              {resumeMutation.isPending
+                ? "Iniciando..."
+                : resumeRequested
+                  ? "Reprocessamento em andamento"
+                  : operation.status === "manual_review"
+                    ? "Retomar análise"
+                    : "Reprocessar score"}
+            </button>
+            {resumeMutation.isError ? (
+              <p className="mt-3 text-xs text-red-700" role="alert">
+                Não foi possível atualizar a análise. Verifique as certidões enviadas.
+              </p>
+            ) : null}
+          </div>
+        </>
+      ) : null}
     </section>
   );
 }
@@ -721,10 +780,12 @@ function CompletedView({
   operation,
   pipeline,
   operationId,
+  uploads,
 }: {
   operation: OperationDetails;
   pipeline: PipelineComponent[];
   operationId: string;
+  uploads: UploadTask[];
 }) {
   const queryClient = useQueryClient();
   const [confirmation, setConfirmation] = useState("");
@@ -946,6 +1007,11 @@ function CompletedView({
           const roadmap = isRoadmap(component);
           const done = isDone(component) && !manual && !roadmap;
           const certificate = certificateStatus(component);
+          const pendingUpload = uploads.find(
+            (upload) =>
+              upload.document_type === component.name &&
+              upload.status !== "completed",
+          );
 
           return (
             <div
@@ -969,7 +1035,7 @@ function CompletedView({
               <p className="mb-1 text-[11px] font-medium text-foreground">
                 {component.name}
               </p>
-              <p
+              <div
                 className={cn(
                   "flex items-center gap-1 text-[10px] text-muted-foreground",
                   done && "text-emerald-700",
@@ -987,12 +1053,22 @@ function CompletedView({
                   ? component.snapshot?.error_message || "falha"
                   : certificate
                     ? certificate.label
-                  : manual
-                    ? "certidão não enviada"
+                  : manual && pendingUpload
+                    ? (
+                      <a
+                        className="inline-flex items-center gap-1 text-amber-700 underline decoration-amber-300 underline-offset-2 hover:text-amber-800 focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        href={`#certificate-upload-${pendingUpload.document_type}`}
+                      >
+                        certidão não enviada
+                        <FileUp aria-hidden="true" className="h-3 w-3" />
+                      </a>
+                    )
+                    : manual
+                      ? "certidão não enviada"
                     : roadmap
                       ? "roadmap"
                       : `ok — ${formatDuration(component.snapshot?.duration_ms)}`}
-              </p>
+              </div>
             </div>
           );
         })}
@@ -1230,7 +1306,16 @@ export default function OperationDetailPage() {
     queryKey: ["components"],
     staleTime: 30_000,
   });
+  const uploadsQuery = useQuery({
+    queryFn: () => getOperationUploads(operationId),
+    queryKey: ["operations", operationId, "uploads"],
+    refetchInterval: (query) =>
+      query.state.data?.some((upload) => upload.status === "pending")
+        ? 5_000
+        : false,
+  });
   const operation = operationQuery.data;
+  const uploads = uploadsQuery.data ?? [];
   const pipeline = useMemo(
     () =>
       operation
@@ -1295,13 +1380,7 @@ export default function OperationDetailPage() {
   return (
     <div className="flex min-h-dvh flex-col bg-muted/40">
       <Topbar operation={operation} />
-      {manualReview ? (
-        <ManualReviewView
-          operation={operation}
-          operationId={operationId}
-          onRefresh={operationQuery.refetch}
-        />
-      ) : processing ? (
+      {manualReview ? null : processing ? (
         <ProcessingView
           operation={operation}
           pipeline={pipeline}
@@ -1312,6 +1391,7 @@ export default function OperationDetailPage() {
           operation={operation}
           operationId={operationId}
           pipeline={pipeline}
+          uploads={uploads}
         />
       ) : (
         <ProcessingView
@@ -1320,6 +1400,13 @@ export default function OperationDetailPage() {
           refreshIn={refreshIn}
         />
       )}
+      <CertificateUploadSection
+        isLoading={uploadsQuery.isLoading}
+        operation={operation}
+        operationId={operationId}
+        onRefresh={operationQuery.refetch}
+        uploads={uploads}
+      />
     </div>
   );
 }

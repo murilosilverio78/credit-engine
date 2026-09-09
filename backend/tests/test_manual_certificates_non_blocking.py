@@ -365,16 +365,41 @@ def test_rating_potential_and_effective_rating_reflect_missing_certificates(monk
     assert none_missing["penalizacao_total"] == 0
 
 
-def test_completed_operation_can_be_reprocessed_after_upload(monkeypatch):
-    database = FakeSupabase()
+def test_completed_or_failed_operation_can_be_reprocessed_after_upload(monkeypatch):
+    database = FakeSupabase({
+        "operations": [
+            {
+                "score": 59.6,
+                "rating": "C",
+                "taxa_sugerida": 0.0624,
+            }
+        ]
+    })
     phase_calls = []
+    audit_entries = []
 
     async def fake_phase3_4(operation_id):
         phase_calls.append(operation_id)
+        database.select_data["operations"][0].update({
+            "score": 65.6,
+            "rating": "C",
+            "taxa_sugerida": 0.058,
+        })
         return {"operation_id": operation_id, "status": "completed"}
+
+    class FakeAudit:
+        def log(self, **kwargs):
+            audit_entries.append(kwargs)
 
     monkeypatch.setattr(orchestrator, "supabase", database)
     monkeypatch.setattr(orchestrator, "_phase3_4", fake_phase3_4)
+    archived_versions = iter([None, "version-after-upload"])
+    monkeypatch.setattr(
+        orchestrator,
+        "_latest_archived_score_version_id",
+        lambda *_args, **_kwargs: next(archived_versions),
+    )
+    monkeypatch.setattr("app.services.audit_service.AuditService", FakeAudit)
 
     result = asyncio.run(orchestrator.resume_after_upload("op-1"))
 
@@ -383,8 +408,34 @@ def test_completed_operation_can_be_reprocessed_after_upload(monkeypatch):
         for query in database.queries
         if query.table == "operations" and query.action == "update"
     )
-    assert ("in", "status", ["manual_review", "completed"]) in operation_update.filters
+    assert (
+        "in",
+        "status",
+        ["manual_review", "completed", "failed"],
+    ) in operation_update.filters
     assert operation_update.payload["status"] == "processing"
     assert operation_update.payload["completed_at"] is None
     assert phase_calls == ["op-1"]
     assert result["status"] == "completed"
+    assert audit_entries == [
+        {
+            "operation_id": "op-1",
+            "action": "score_reprocessed",
+            "actor_type": "system",
+            "previous_value": {
+                "score": 59.6,
+                "rating": "C",
+                "taxa_sugerida": 0.0624,
+            },
+            "new_value": {
+                "score": 65.6,
+                "rating": "C",
+                "taxa_sugerida": 0.058,
+            },
+            "payload": {
+                "status": "completed",
+                "trigger": "certificate_upload",
+                "archived_version_id": "version-after-upload",
+            },
+        }
+    ]

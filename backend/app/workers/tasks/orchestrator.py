@@ -933,7 +933,25 @@ def _latest_archived_score_version_id(
 
 
 async def resume_after_upload(operation_id: str):
-    """Reprocess analysis once all configured certificate uploads are complete."""
+    """Reprocess analysis after one or more certificates are validated."""
+    from app.services.audit_service import AuditService
+
+    previous_result = _execute_db(
+        operation_id,
+        "load_operation_before_certificate_reprocessing",
+        lambda: supabase.table("operations")
+        .select("score,rating,taxa_sugerida")
+        .eq("id", operation_id)
+        .execute(),
+    )
+    previous_rows = previous_result.data or []
+    previous_operation = previous_rows[0] if previous_rows else {}
+    previous_value = {
+        "score": previous_operation.get("score"),
+        "rating": previous_operation.get("rating"),
+        "taxa_sugerida": previous_operation.get("taxa_sugerida"),
+    }
+    previous_archived_version_id = _latest_archived_score_version_id(operation_id)
     resumed = _execute_db(
         operation_id,
         "resume_operation_after_upload",
@@ -944,7 +962,7 @@ async def resume_after_upload(operation_id: str):
             "completed_at": None,
         })
         .eq("id", operation_id)
-        .in_("status", ["manual_review", "completed"])
+        .in_("status", ["manual_review", "completed", "failed"])
         .execute(),
     )
     if not resumed.data:
@@ -952,4 +970,58 @@ async def resume_after_upload(operation_id: str):
         return {"operation_id": operation_id, "status": "already_resumed"}
 
     logger.info("pipeline.resumed_processing", operation_id=operation_id)
-    return await _phase3_4(operation_id)
+    audit = AuditService()
+    try:
+        completion = await _phase3_4(operation_id)
+    except Exception as exc:
+        error = f"certificate_reprocessing: {exc}"
+        _mark_operation_failed(operation_id, error)
+        audit.log(
+            operation_id=operation_id,
+            action="score_reprocessed",
+            actor_type="system",
+            previous_value=previous_value,
+            payload={
+                "status": "failed",
+                "error": str(exc),
+                "trigger": "certificate_upload",
+            },
+        )
+        raise
+
+    latest_archived_version_id = _latest_archived_score_version_id(operation_id)
+    payload = {
+        "status": completion.get("status", "failed"),
+        "trigger": "certificate_upload",
+    }
+    if completion.get("error"):
+        payload["error"] = completion["error"]
+    if latest_archived_version_id != previous_archived_version_id:
+        payload["archived_version_id"] = latest_archived_version_id
+
+    new_value = None
+    if completion.get("status") == "completed":
+        current_result = _execute_db(
+            operation_id,
+            "load_operation_after_certificate_reprocessing",
+            lambda: supabase.table("operations")
+            .select("score,rating,taxa_sugerida")
+            .eq("id", operation_id)
+            .execute(),
+        )
+        current_rows = current_result.data or []
+        current_operation = current_rows[0] if current_rows else {}
+        new_value = {
+            "score": current_operation.get("score"),
+            "rating": current_operation.get("rating"),
+            "taxa_sugerida": current_operation.get("taxa_sugerida"),
+        }
+    audit.log(
+        operation_id=operation_id,
+        action="score_reprocessed",
+        actor_type="system",
+        previous_value=previous_value,
+        new_value=new_value,
+        payload=payload,
+    )
+    return completion
