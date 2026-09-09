@@ -1,11 +1,6 @@
 name: Ingestao Broadfactor
 
 on:
-  schedule:
-    # Cron usa UTC: 08:05 e 14:15 em Brasilia (UTC-3), apenas em dias uteis.
-    # Ajustar estes horarios se o Brasil voltar a adotar horario de verao.
-    - cron: "5 11 * * 1-5"
-    - cron: "15 17 * * 1-5"
   workflow_dispatch:
     inputs:
       limit:
