@@ -87,4 +87,20 @@ test.describe("Módulo 4 - Nova operação e gate de elegibilidade", () => {
     await diretorPage.getByTestId("op-submit").click();
     await expect(diretorPage.getByTestId("op-error")).toContainText("Informe um prazo inteiro maior que zero.");
   });
+
+  test("4.9 - tela exibe motivo da reprovação", async ({ diretorPage }, testInfo) => {
+    skipIfNoCredentials(testInfo, "diretor");
+    await diretorPage.goto("/operations/new");
+    await diretorPage
+      .getByTestId("op-cnpj")
+      .fill(env("E2E_CNPJ_VALIDO", "03012610000101"));
+    await diretorPage.getByTestId("op-valor").fill("R$ 100.000,00");
+    await diretorPage.getByTestId("op-saldo").fill("R$ 800.000,00");
+    await diretorPage.getByTestId("op-prazo").fill("60");
+    await diretorPage.getByTestId("op-submit").click();
+
+    await expect(diretorPage.getByTestId("op-form-error")).toContainText(
+      "ticket minimo",
+    );
+  });
 });

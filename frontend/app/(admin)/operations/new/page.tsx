@@ -4,12 +4,11 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Play } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import {
-  ApiError,
   createOperation,
   getCompanyByCnpj,
   getComponents,
@@ -93,6 +92,131 @@ const formSchema = z.object({
 
 type AnalysisFormValues = z.infer<typeof formSchema>;
 
+type CreateOperationField = keyof AnalysisFormValues;
+
+type CreateOperationErrorResult = {
+  formMessage: string | null;
+  fieldErrors: Array<{ field: CreateOperationField; message: string }>;
+};
+
+const validationFields = new Set<CreateOperationField>([
+  "cnpj",
+  "valor_solicitado",
+  "contrato_saldo",
+  "prazo_dias",
+  "contrato_id",
+]);
+
+const genericValidationMessage =
+  "Não foi possível iniciar a análise. Verifique os campos informados.";
+const genericRequestMessage =
+  "Não foi possível iniciar a análise. Tente novamente.";
+
+function parseCreateOperationError(
+  error: unknown,
+): CreateOperationErrorResult {
+  try {
+    const candidate = error as { message?: unknown; status?: unknown } | null;
+    const status = typeof candidate?.status === "number" ? candidate.status : null;
+    const message =
+      typeof candidate?.message === "string" && candidate.message.trim()
+        ? candidate.message
+        : null;
+
+    if (status !== 422) {
+      return {
+        formMessage:
+          status === null
+            ? genericRequestMessage
+            : status >= 500
+              ? "Erro interno. Tente novamente."
+              : message ?? genericRequestMessage,
+        fieldErrors: [],
+      };
+    }
+
+    if (!message) {
+      return { formMessage: genericValidationMessage, fieldErrors: [] };
+    }
+
+    let body: unknown;
+    try {
+      body = JSON.parse(message);
+    } catch {
+      return { formMessage: genericValidationMessage, fieldErrors: [] };
+    }
+
+    if (!body || typeof body !== "object" || !("detail" in body)) {
+      return { formMessage: genericValidationMessage, fieldErrors: [] };
+    }
+
+    const detail = (body as { detail?: unknown }).detail;
+    if (Array.isArray(detail)) {
+      if (detail.length === 0) {
+        return {
+          formMessage: "Verifique os campos informados.",
+          fieldErrors: [],
+        };
+      }
+
+      const fieldErrors = detail.flatMap((item) => {
+        if (!item || typeof item !== "object") {
+          return [];
+        }
+        const validationError = item as { loc?: unknown; msg?: unknown };
+        const field = Array.isArray(validationError.loc)
+          ? validationError.loc.at(-1)
+          : null;
+        if (typeof field !== "string" || !validationFields.has(field as CreateOperationField)) {
+          return [];
+        }
+        return [
+          {
+            field: field as CreateOperationField,
+            message:
+              typeof validationError.msg === "string" && validationError.msg
+                ? validationError.msg
+                : "Valor inválido.",
+          },
+        ];
+      });
+
+      return { formMessage: null, fieldErrors };
+    }
+
+    if (detail && typeof detail === "object") {
+      const eligibility = detail as {
+        campo?: unknown;
+        code?: unknown;
+        message?: unknown;
+      };
+      if (
+        eligibility.code === "ELIGIBILITY_FAILED" &&
+        typeof eligibility.message === "string" &&
+        eligibility.message.trim()
+      ) {
+        const fieldErrors: CreateOperationErrorResult["fieldErrors"] = [];
+        if (eligibility.campo === "prazo_dias") {
+          fieldErrors.push({
+            field: "prazo_dias",
+            message: eligibility.message,
+          });
+        } else if (eligibility.campo === "valor_enquadrado") {
+          fieldErrors.push({
+            field: "valor_solicitado",
+            message: eligibility.message,
+          });
+        }
+        return { formMessage: eligibility.message, fieldErrors };
+      }
+    }
+
+    return { formMessage: genericValidationMessage, fieldErrors: [] };
+  } catch {
+    return { formMessage: genericRequestMessage, fieldErrors: [] };
+  }
+}
+
 const inputClassName =
   "h-10 w-full rounded-md border border-input bg-background px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring";
 
@@ -147,6 +271,7 @@ function FieldError({ message }: { message?: string }) {
 
 export default function NewOperationPage() {
   const router = useRouter();
+  const [formMessage, setFormMessage] = useState<string | null>(null);
   const {
     clearErrors,
     formState: { errors },
@@ -184,38 +309,11 @@ export default function NewOperationPage() {
   const createOperationMutation = useMutation({
     mutationFn: createOperation,
     onError: (error) => {
-      if (error instanceof ApiError && error.status === 422) {
-        let validationErrors: Array<{ loc?: string[]; msg?: string }> = [];
-
-        try {
-          validationErrors = (
-            JSON.parse(error.message) as {
-              detail?: Array<{ loc?: string[]; msg?: string }>;
-            }
-          ).detail ?? [];
-        } catch {
-          validationErrors = [];
-        }
-
-        if (validationErrors.length === 0) {
-          setError("cnpj", { message: "Verifique os campos informados." });
-        }
-
-        validationErrors.forEach((validationError) => {
-          const field = validationError.loc?.at(-1);
-          if (
-            field === "cnpj" ||
-            field === "valor_solicitado" ||
-            field === "contrato_saldo" ||
-            field === "prazo_dias" ||
-            field === "contrato_id"
-          ) {
-            setError(field, {
-              message: validationError.msg ?? "Valor inválido.",
-            });
-          }
-        });
-      }
+      const parsed = parseCreateOperationError(error);
+      setFormMessage(parsed.formMessage);
+      parsed.fieldErrors.forEach(({ field, message }) => {
+        setError(field, { message });
+      });
     },
   });
 
@@ -233,6 +331,7 @@ export default function NewOperationPage() {
 
   function submit(values: AnalysisFormValues) {
     clearErrors();
+    setFormMessage(null);
 
     const payload: PropostaInput = {
       cnpj: digitsOnly(values.cnpj),
@@ -421,11 +520,13 @@ export default function NewOperationPage() {
 
             <div className="my-4 border-t-[0.5px] border-border" />
 
-            {createOperationMutation.isError &&
-            createOperationMutation.error instanceof ApiError &&
-            createOperationMutation.error.status >= 500 ? (
-              <p className="mb-3 text-xs text-red-700" data-testid="op-error" role="alert">
-                Erro interno. Tente novamente.
+            {formMessage ? (
+              <p
+                className="mb-3 text-xs text-red-700"
+                data-testid="op-form-error"
+                role="alert"
+              >
+                {formMessage}
               </p>
             ) : null}
             {createOperationMutation.isSuccess ? (
