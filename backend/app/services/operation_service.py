@@ -76,6 +76,18 @@ class OperationService:
         # Cria snapshots pendentes para cada componente ativo
         await self._init_snapshots(operation["id"])
 
+        try:
+            from app.services.cliente_service import ClienteService
+
+            ClienteService().vincular_operacao(operation["id"])
+        except Exception as exc:
+            logger.warning(
+                "client.dual_write_failed",
+                action="link_operation_after_create",
+                source_operation_id=operation["id"],
+                error=str(exc),
+            )
+
         logger.info("operation.created", operation_id=operation["id"], cnpj=cnpj)
         return operation
 

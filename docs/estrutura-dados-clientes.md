@@ -1084,3 +1084,39 @@ Ao concluir a W8:
 - limites aprovados poderão ser consolidados por CNPJ e raiz;
 - o sistema estará preparado para reduzir chamadas externas sem introduzir
   reuso indevido ou aumentar intervenção humana.
+
+---
+
+## 17. Ajustes da etapa 1 (v3)
+
+1. A etapa 1 fica dividida em 1a, com vínculo cliente-operação e log em
+   `cliente_snapshots`, e 1b, com as projeções de materialização cadastral e
+   `clientes_historico`, sinais financeiros, faturamento anual, sanções e
+   pessoas/vínculos. As projeções são reconstruíveis a partir do log.
+2. `clientes.cnpj` aceita CNPJ alfanumérico conforme o padrão
+   `^[0-9A-Z]{12}[0-9]{2}$`.
+3. Em `cliente_snapshots`, `collected_at` é fornecido pela aplicação; não há
+   FK para `cotacoes_broadfactor`; foram adicionados
+   `degradado`/`degradacao_motivo`, `fonte` e `payload_hash`; e `status` fica
+   restrito a `completed`/`failed`. A RPC aceita `raw_result`, mas ele não é
+   gravado quando for idêntico a `parsed_result`; rejeita
+   `source_operation_id` de outro cliente; e permite `completed` + `ERROR`
+   para registrar falha semântica silenciosa do pipeline.
+4. A promoção do snapshot vigente rejeita observação com `collected_at`
+   anterior ao da observação vigente.
+5. `valid_until` corresponde a `collected_at +
+   component_config.cache_ttl_hours`; TTL nulo ou zero nasce vencido.
+6. Na etapa 1a, o vínculo cliente-operação ocorre após o insert e em regime
+   best-effort. A criação transacional única descrita na seção 10.1 entra na
+   fase contract.
+7. `empty_result_authoritative` permanece `FALSE`. Antes da etapa 2 para
+   listas de sanção, o fetcher do Portal precisa distinguir JSON `[]` de corpo
+   vazio.
+8. As views de limite aprovado entram depois do backfill, com
+   `security_invoker = true` e a lista de status alinhada ao enum de produção.
+9. As RPCs têm `EXECUTE` revogado de `PUBLIC`, `anon` e `authenticated`.
+10. Operações de teste, incluindo `playwright_e2e`, `debug_e2e`,
+    `*_smoke_test` e demais origens não produtivas, continuam gerando cliente
+    e observações. Métricas de shadow, critérios de promoção e views de limite
+    consideram somente operações de origem produtiva, filtrando por
+    `operations.source` por meio de `source_operation_id`.

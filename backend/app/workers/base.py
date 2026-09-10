@@ -3,7 +3,9 @@ BaseComponentTask: classe base para todos os workers de consulta.
 Gerencia: snapshot lifecycle, cache, auditoria, erro handling.
 """
 import time
+from datetime import datetime, timezone
 from typing import Callable, TypeVar
+from uuid import uuid4
 
 import httpx
 from app.utils.encoding import fix_dict_encoding
@@ -62,6 +64,95 @@ def _execute_snapshot_write(
     raise RuntimeError("snapshot write retry loop exhausted")
 
 
+def _dual_write_cliente(
+    *,
+    operation_id: str,
+    component: str,
+    collection_key: str,
+    collected_at: datetime,
+    status: str,
+    result: object,
+    duration_ms: int,
+    error_message: str | None = None,
+) -> None:
+    """Espelha uma consulta real no cadastro sem afetar o pipeline."""
+    try:
+        from app.core.database import supabase
+        from app.services.cliente_result_classifier import (
+            Classificacao,
+            calcular_payload_hash,
+            classificar,
+        )
+        from app.services.cliente_service import ClienteService
+
+        cliente_svc = ClienteService()
+        if not cliente_svc.is_cliente_component(component):
+            return
+
+        operation_result = _execute_snapshot_write(
+            operation_id,
+            component,
+            "load_operation_for_client_dual_write",
+            lambda: supabase.table("operations")
+            .select("cliente_id,cotacao_id")
+            .eq("id", operation_id)
+            .maybe_single()
+            .execute(),
+        )
+        operation = operation_result.data or {}
+        cliente_id = operation.get("cliente_id")
+        if not cliente_id:
+            cliente_id = cliente_svc.vincular_operacao(operation_id)
+        if not cliente_id:
+            return
+
+        if status == "failed":
+            classification = Classificacao(
+                result_state="ERROR",
+                degradado=False,
+                degradacao_motivo=None,
+                fonte=None,
+                error_message=error_message or "erro sem mensagem",
+                fingerprint=None,
+            )
+            parsed_result = None
+        else:
+            classification = classificar(
+                component,
+                result,
+                cotacao_id=operation.get("cotacao_id"),
+            )
+            parsed_result = result
+
+        cliente_svc.registrar_snapshot(
+            cliente_id=str(cliente_id),
+            component=component,
+            collection_key=collection_key,
+            status=status,
+            result_state=classification.result_state,
+            collected_at=collected_at.isoformat(),
+            parsed_result=parsed_result,
+            raw_result=None,
+            payload_hash=calcular_payload_hash(classification.fingerprint),
+            fonte=classification.fonte,
+            degradado=classification.degradado,
+            degradacao_motivo=classification.degradacao_motivo,
+            source_operation_id=operation_id,
+            source_cotacao_id=operation.get("cotacao_id"),
+            error_message=classification.error_message,
+            duration_ms=duration_ms,
+        )
+    except Exception as exc:
+        logger.warning(
+            "client.dual_write_failed",
+            action="dual_write_component",
+            operation_id=operation_id,
+            component=component,
+            collection_key=collection_key,
+            error=str(exc),
+        )
+
+
 class BaseComponentTask:
     """
     Herdar desta classe garante que todo componente:
@@ -118,6 +209,8 @@ class BaseComponentTask:
             )
             return {"operation_id": operation_id, "component": component, "cached": True}
 
+        collection_key = str(uuid4())
+
         # Marca como running
         _execute_snapshot_write(
             operation_id,
@@ -135,6 +228,7 @@ class BaseComponentTask:
                 result = handler(cnpj, operation_id=operation_id)
             else:
                 result = handler(cnpj)
+            collected_at = datetime.now(timezone.utc)
             result = fix_dict_encoding(result)
             duration_ms = int((time.time() - start) * 1000)
 
@@ -156,6 +250,16 @@ class BaseComponentTask:
             if use_cache:
                 cache_svc.set(cnpj, component, result)
 
+            _dual_write_cliente(
+                operation_id=operation_id,
+                component=component,
+                collection_key=collection_key,
+                collected_at=collected_at,
+                status="completed",
+                result=result,
+                duration_ms=duration_ms,
+            )
+
             audit_svc.log(
                 operation_id,
                 "component_completed",
@@ -172,6 +276,7 @@ class BaseComponentTask:
             return {"operation_id": operation_id, "component": component, "status": "completed"}
 
         except Exception as exc:
+            collected_at = datetime.now(timezone.utc)
             duration_ms = int((time.time() - start) * 1000)
             error_message = str(exc)
             logger.error(
@@ -179,6 +284,17 @@ class BaseComponentTask:
                 operation_id=operation_id,
                 component=component,
                 error=error_message,
+            )
+
+            _dual_write_cliente(
+                operation_id=operation_id,
+                component=component,
+                collection_key=collection_key,
+                collected_at=collected_at,
+                status="failed",
+                result=None,
+                duration_ms=duration_ms,
+                error_message=error_message,
             )
 
             _execute_snapshot_write(
