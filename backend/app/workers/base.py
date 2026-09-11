@@ -279,7 +279,9 @@ class BaseComponentTask:
             )
 
             # Salva no cache
-            if use_cache:
+            if use_cache and not (
+                isinstance(result, dict) and "erro" in result
+            ):
                 cache_svc.set(cnpj, component, result)
 
             _dual_write_cliente(

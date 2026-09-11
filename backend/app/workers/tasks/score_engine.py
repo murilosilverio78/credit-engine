@@ -1118,6 +1118,18 @@ def gates_deterministicos(snapshots: dict[str, Any]) -> list[str]:
     return sorted(set(bloqueios))
 
 
+def _fontes_sancao_nao_verificadas(snapshots: dict[str, Any]) -> list[str]:
+    fontes = [
+        component
+        for component in ("ceis", "cnep", "cepim", "acordos_leniencia")
+        if component not in snapshots
+    ]
+    pessoa = snapshots.get("pessoa_juridica")
+    if isinstance(pessoa, dict) and pessoa.get("erro"):
+        fontes.append("pessoa_juridica")
+    return sorted(set(fontes))
+
+
 async def _create_porte_message(client, **kwargs):
     response = client.messages.create(**kwargs)
     if inspect.isawaitable(response):
@@ -1447,6 +1459,13 @@ def consolidar_score(
     historico_flags = _flags_historico_recebimentos(snapshots)
     regularidade = score_regularidade(snapshots)
     bloqueios = gates_deterministicos(snapshots)
+    fontes_sancao_nao_verificadas = _fontes_sancao_nao_verificadas(snapshots)
+    requer_revisao_manual = bool(fontes_sancao_nao_verificadas)
+    atencao_sancoes = (
+        "Sanções não verificadas: " + ", ".join(fontes_sancao_nao_verificadas)
+        if fontes_sancao_nao_verificadas
+        else None
+    )
     if bloqueios:
         dimensoes = {
             dim: _dimension(
@@ -1489,12 +1508,15 @@ def consolidar_score(
             "bloqueios": bloqueios,
             "pontos_positivos": [],
             "pontos_atencao": bloqueios,
+            "requer_revisao_manual": requer_revisao_manual,
+            "fontes_sancao_nao_verificadas": fontes_sancao_nao_verificadas,
             "flags": sorted(
                 set(
                     faturamento["flags"]
                     + cobertura_flags
                     + historico_flags
                     + regularidade["flags"]
+                    + (["sancao_nao_verificada"] if requer_revisao_manual else [])
                 )
             ),
             "parecer_estruturado": parecer_estruturado,
@@ -1572,6 +1594,8 @@ def consolidar_score(
             "Reputação de mercado não pôde ser verificada automaticamente "
             "(falha de parse) — dimensão avaliada de forma neutra"
         )
+    if atencao_sancoes:
+        pontos_atencao.append(atencao_sancoes)
     limite_aprovado_rs, limite_flags = _limite_aprovado(snapshots, operacao)
     flags_extra = sorted(
         set(
@@ -1582,6 +1606,7 @@ def consolidar_score(
             + pd_flags
             + balanco_flags
             + regularidade["flags"]
+            + (["sancao_nao_verificada"] if requer_revisao_manual else [])
             + list(
                 dimensoes["relacionamento_governamental"].get("flags") or []
             )
@@ -1624,6 +1649,8 @@ def consolidar_score(
         "bloqueios": [],
         "pontos_positivos": pontos_positivos,
         "pontos_atencao": pontos_atencao,
+        "requer_revisao_manual": requer_revisao_manual,
+        "fontes_sancao_nao_verificadas": fontes_sancao_nao_verificadas,
         "parecer_estruturado": parecer_estruturado,
         "parecer": _parecer_texto(parecer_estruturado),
         "parecer_resumo": _parecer_resumo(

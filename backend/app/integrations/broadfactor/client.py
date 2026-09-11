@@ -685,7 +685,12 @@ class BroadfactorClient:
     def listar_cotacoes(self) -> list[Cotacao]:
         res = self._req("GET", "/cotacoes")
         if not res.ok:
-            return []
+            raise BroadfactorError(
+                res.message or f"Falha ao listar cotacoes: {res.outcome.value}",
+                status=res.status,
+                endpoint=res.endpoint,
+                payload=res.data,
+            )
         cotacoes: list[Cotacao] = []
         for payload in res.data:
             if not isinstance(payload, dict):

@@ -1,5 +1,7 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
+from typing import Literal
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -32,6 +34,7 @@ class Settings(BaseSettings):
 
     # Portal da Transparência
     PORTAL_TRANSPARENCIA_TOKEN: str
+    PORTAL_EMPTY_BODY_POLICY: Literal["raise", "empty"] = "raise"
 
     # Broadfactor
     BROADFACTOR_CLIENT_ID: str = ""

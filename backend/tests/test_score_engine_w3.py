@@ -231,3 +231,31 @@ def test_consolidated_result_exposes_credit_signals_without_changing_rating(
     assert "diversificacao_hhi_utilizada" in short_history["flags"]
     assert short_history["score"] == mature_history["score"]
     assert short_history["rating"] == mature_history["rating"]
+
+
+def test_missing_sanction_source_requires_manual_review(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.pricing_params_service.get_pricing_config",
+        pricing_config,
+    )
+    snapshots = {
+        "brasil_api": {"situacao_cadastral": "ATIVA"},
+        "pessoa_juridica": {"possui_sancao": False},
+        "cnep": {"total_registros": 0, "registros": []},
+        "cepim": {"total_registros": 0, "registros": []},
+        "acordos_leniencia": {"total_acordos": 0, "acordos": []},
+        "contratos": contracts(),
+        "recursos_recebidos": {"meses_com_recebimento": 12},
+    }
+
+    result = score_engine.consolidar_score(
+        "03012610000101",
+        snapshots,
+        porte_dimension=porte_dimension(),
+    )
+
+    assert result["bloqueios"] == []
+    assert result["requer_revisao_manual"] is True
+    assert result["fontes_sancao_nao_verificadas"] == ["ceis"]
+    assert "sancao_nao_verificada" in result["flags"]
+    assert "Sanções não verificadas: ceis" in result["pontos_atencao"]

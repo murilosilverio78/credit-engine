@@ -293,6 +293,30 @@ def test_execute_ignora_falha_da_rpc_de_dual_write(monkeypatch):
     ]
 
 
+def test_execute_nao_armazena_resultado_com_erro_no_cache(monkeypatch):
+    from app.services.cache_service import CacheService
+
+    db = FakeSupabase(component="pessoa_juridica")
+    monkeypatch.setattr(cliente_service, "supabase", db)
+    monkeypatch.setattr("app.core.database.supabase", db)
+    _patch_component_dependencies(monkeypatch)
+    cache_writes = []
+    monkeypatch.setattr(
+        CacheService,
+        "set",
+        lambda *_args, **_kwargs: cache_writes.append((_args, _kwargs)),
+    )
+
+    result = BaseComponentTask().execute(
+        "op-1",
+        "pessoa_juridica",
+        lambda _cnpj: {"erro": "sem_registro"},
+    )
+
+    assert result["status"] == "completed"
+    assert cache_writes == []
+
+
 def test_execute_relança_excecao_original_e_grava_error(monkeypatch):
     db = FakeSupabase()
     monkeypatch.setattr(cliente_service, "supabase", db)

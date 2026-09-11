@@ -1,11 +1,28 @@
 import time
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 import structlog
 
+from app.core.config import settings
+
 
 logger = structlog.get_logger()
+
+
+class PortalRespostaVaziaError(RuntimeError):
+    """Portal returned HTTP 200 without a usable response body."""
+
+
+def _pagination_params(url: str, params: dict[str, Any] | None) -> dict[str, Any]:
+    values = dict(parse_qsl(urlsplit(url).query))
+    values.update(params or {})
+    return {
+        key: value
+        for key, value in values.items()
+        if key.lower() in {"pagina", "page", "size", "tamanho"}
+    }
 
 
 def _retry_delay(response: httpx.Response | None, attempt: int) -> float:
@@ -37,7 +54,21 @@ def fetch_json_with_retry(
                 response.raise_for_status()
             response.raise_for_status()
             if not response.content or not response.text.strip():
-                return []
+                logger.warning(
+                    "portal.empty_body",
+                    endpoint=url.split("?", 1)[0],
+                    params_pagina=_pagination_params(url, params),
+                    tentativa=attempt + 1,
+                )
+                if settings.PORTAL_EMPTY_BODY_POLICY == "empty":
+                    return []
+                if attempt >= max_retries:
+                    raise PortalRespostaVaziaError(
+                        f"Portal retornou corpo vazio em {url.split('?', 1)[0]} "
+                        f"apos {max_retries + 1} tentativas"
+                    )
+                time.sleep(_retry_delay(response, attempt))
+                continue
             return response.json()
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code

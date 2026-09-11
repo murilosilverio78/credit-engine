@@ -290,6 +290,43 @@ def test_portal_query_uses_explicit_reconciliation_window(monkeypatch):
     assert "mesAnoFim=12/2025" in urls[0]
 
 
+def test_portal_second_empty_page_does_not_truncate_silently(monkeypatch):
+    from app.workers.http_utils import PortalRespostaVaziaError
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+    calls = 0
+
+    def fake_fetch_json(client, url, headers):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return [{"valor": 100, "anoMes": 202501}]
+        raise PortalRespostaVaziaError("pagina 2 permaneceu vazia")
+
+    monkeypatch.setattr(recursos_recebidos.httpx, "Client", FakeClient)
+    monkeypatch.setattr(recursos_recebidos, "fetch_json_with_retry", fake_fetch_json)
+
+    with pytest.raises(PortalRespostaVaziaError, match="pagina 2"):
+        recursos_recebidos._fetch_portal(
+            "31822605000191",
+            token="test",
+            today=TODAY,
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 12, 31),
+        )
+
+    assert calls == 2
+
+
 def test_manual_operation_uses_only_portal(monkeypatch):
     portal = [receipt(300, "Orgao Portal", "06/2025")]
     monkeypatch.setattr(recursos_recebidos, "_get_cotacao_id", lambda _: None)

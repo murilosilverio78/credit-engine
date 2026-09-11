@@ -87,6 +87,23 @@ def test_request_forces_prefix_and_distinguishes_empty_200():
     assert result.ok is False
 
 
+def test_listar_cotacoes_raises_on_transport_error(monkeypatch):
+    client = BroadfactorClient("client", "secret", "http://broadfactor.test")
+    monkeypatch.setattr(
+        client,
+        "_req",
+        lambda *_args, **_kwargs: Result(
+            Outcome.ERROR,
+            status=500,
+            message="upstream failed",
+            endpoint="/integracao/cotacoes",
+        ),
+    )
+
+    with pytest.raises(BroadfactorError, match="upstream failed"):
+        client.listar_cotacoes()
+
+
 def test_default_credentials_come_from_settings(monkeypatch):
     monkeypatch.setattr(
         "app.integrations.broadfactor.client.settings.BROADFACTOR_CLIENT_ID",
