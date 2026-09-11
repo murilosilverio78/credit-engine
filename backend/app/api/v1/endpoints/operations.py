@@ -61,6 +61,28 @@ def _operation_snapshot(operation_id: str) -> dict:
     return result.data
 
 
+def _score_manual_review_context(
+    operation_id: str,
+) -> tuple[bool | None, list[str]]:
+    result = (
+        supabase.table("component_snapshots")
+        .select("parsed_result")
+        .eq("operation_id", operation_id)
+        .eq("component", "score_engine")
+        .eq("status", "completed")
+        .maybe_single()
+        .execute()
+    )
+    if result is None or not getattr(result, "data", None):
+        return None, []
+    parsed_result = result.data.get("parsed_result")
+    if not isinstance(parsed_result, dict) or not parsed_result:
+        return None, []
+    raw_sources = parsed_result.get("fontes_sancao_nao_verificadas") or []
+    sources = [str(source) for source in raw_sources] if isinstance(raw_sources, list) else []
+    return parsed_result.get("requer_revisao_manual") is True, sources
+
+
 def _claim_score_reprocessing(operation_id: str) -> None:
     snapshot = supabase.table("component_snapshots")\
         .select("status,started_at")\
@@ -417,7 +439,24 @@ async def approve_operation(
     _check_state_transition(operation, "approve")
     alcada = _get_alcada_config(role)
     _check_alcada(operation, alcada)
-    approval = _insert_approval(operation, "approved", current_user, payload.justificativa)
+    requer_revisao_manual, fontes_sancao = _score_manual_review_context(operation_id)
+    if requer_revisao_manual is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Score em reprocessamento ou indisponível; aguarde para aprovar",
+        )
+    justificativa = (payload.justificativa or "").strip()
+    if requer_revisao_manual and len(justificativa) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Sanções não verificadas: justificativa obrigatória para aprovar",
+        )
+    approval = _insert_approval(
+        operation,
+        "approved",
+        current_user,
+        justificativa or None,
+    )
     _update_operation_status(operation_id, "approved", expected_status=operation["status"])
     audit.log(
         operation_id=operation_id,
@@ -425,7 +464,11 @@ async def approve_operation(
         actor_id=current_user.get("id"),
         actor_type=role,
         ip_address=request.client.host if request.client else None,
-        payload={"approval_id": approval.get("id")},
+        payload={
+            "approval_id": approval.get("id"),
+            "sancao_nao_verificada": requer_revisao_manual,
+            "fontes_sancao_nao_verificadas": fontes_sancao,
+        },
     )
     return {"ok": True, "approval_id": approval.get("id")}
 
@@ -515,6 +558,26 @@ async def resolve_escalation(
     if payload.action == "escalation_rejected" and len(justificativa) < 10:
         raise HTTPException(status_code=400, detail="Justificativa obrigatória com ao menos 10 caracteres")
 
+    requer_revisao_manual = False
+    fontes_sancao: list[str] = []
+    if payload.action == "escalation_approved":
+        review_context, fontes_sancao = _score_manual_review_context(operation_id)
+        if review_context is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Score em reprocessamento ou indisponível; aguarde para aprovar"
+                ),
+            )
+        requer_revisao_manual = review_context
+        if requer_revisao_manual and len(justificativa) < 10:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Sanções não verificadas: justificativa obrigatória para aprovar"
+                ),
+            )
+
     decision_extra = {"decided_role": role}
     if current_user.get("id"):
         decision_extra["decided_by"] = current_user.get("id")
@@ -535,6 +598,14 @@ async def resolve_escalation(
         payload={
             "approval_id": approval.get("id"),
             "resolved_approval_id": payload.approval_id,
+            **(
+                {
+                    "sancao_nao_verificada": requer_revisao_manual,
+                    "fontes_sancao_nao_verificadas": fontes_sancao,
+                }
+                if payload.action == "escalation_approved"
+                else {}
+            ),
         },
     )
     return {"ok": True, "approval_id": approval.get("id")}

@@ -1,7 +1,14 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, Check, LoaderCircle, RotateCcw, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowUp,
+  Check,
+  LoaderCircle,
+  RotateCcw,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -21,11 +28,19 @@ function operationValue(operation: OperationDetails) {
   return operation.valor_solicitado ?? operation.limite_aprovado ?? null;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 export function ApprovalActions({ operation }: { operation: OperationDetails }) {
   const queryClient = useQueryClient();
   const alcada = useAlcada();
   const { session } = useSession();
-  const [mode, setMode] = useState<"reject" | "escalate" | null>(null);
+  const [mode, setMode] = useState<"approve" | "reject" | "escalate" | null>(
+    null,
+  );
   const [confirmReprocessing, setConfirmReprocessing] = useState(false);
   const [justificativa, setJustificativa] = useState("");
   const [message, setMessage] = useState("");
@@ -36,15 +51,25 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
   const scoreSnapshot = operation.components?.find(
     (component) => component.component === "score_engine",
   );
+  const scoreResult = asRecord(scoreSnapshot?.parsed_result);
+  const requiresSanctionJustification =
+    scoreResult.requer_revisao_manual === true;
+  const unverifiedSanctionSources = Array.isArray(
+    scoreResult.fontes_sancao_nao_verificadas,
+  )
+    ? scoreResult.fontes_sancao_nao_verificadas.map(String)
+    : [];
   const scoreReprocessing = scoreSnapshot?.status === "running";
   const canReprocess =
     session?.user.role === "diretor" &&
     (operation.status === "completed" || operation.status === "failed");
 
   const approveMutation = useMutation({
-    mutationFn: () => approveOperation(operation.id),
+    mutationFn: () => approveOperation(operation.id, { justificativa }),
     onSuccess: async () => {
       setMessage("Operação aprovada.");
+      setMode(null);
+      setJustificativa("");
       await queryClient.invalidateQueries({ queryKey: ["operation", operation.id] });
     },
   });
@@ -81,13 +106,20 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
     scoreReprocessing;
 
   function submitInline() {
-    if (mode === "reject" && justificativa.trim().length < 10) {
+    if (
+      (mode === "reject" ||
+        (mode === "approve" && requiresSanctionJustification)) &&
+      justificativa.trim().length < 10
+    ) {
       setMessage("Informe uma justificativa com pelo menos 10 caracteres.");
       return;
     }
     setMessage("");
     if (mode === "reject") {
       rejectMutation.mutate();
+    }
+    if (mode === "approve") {
+      approveMutation.mutate();
     }
     if (mode === "escalate") {
       escalateMutation.mutate();
@@ -96,13 +128,30 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
 
   return (
     <div className="mb-3.5 rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
+      {canDecide && canApprove && requiresSanctionJustification ? (
+        <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <AlertTriangle
+            aria-hidden="true"
+            className="mt-0.5 h-3.5 w-3.5 shrink-0"
+          />
+          <span>
+            Sanções não verificadas:{" "}
+            {unverifiedSanctionSources.join(", ") || "fontes indisponíveis"}.
+            Justificativa obrigatória para aprovar.
+          </span>
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         {canDecide && canApprove ? (
           <button
             className={buttonClassName}
             data-testid="action-approve"
             disabled={pending}
-            onClick={() => approveMutation.mutate()}
+            onClick={() =>
+              requiresSanctionJustification
+                ? setMode("approve")
+                : approveMutation.mutate()
+            }
             type="button"
           >
             <Check aria-hidden="true" className="h-3.5 w-3.5" />
@@ -210,7 +259,9 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
         <div className="mt-3">
           <label className="block text-[11px] font-medium text-muted-foreground">
             <span className="mb-1 block">
-              {mode === "reject" ? "Justificativa obrigatória" : "Justificativa opcional"}
+              {mode === "reject" || mode === "approve"
+                ? "Justificativa obrigatória"
+                : "Justificativa opcional"}
             </span>
             <textarea
               className="h-16 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring"

@@ -1,12 +1,18 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpCircle, Check, ExternalLink, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowUpCircle,
+  Check,
+  ExternalLink,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
 import { useSession } from "@/hooks/use-session";
-import { getPendingEscaladas, resolveEscalation } from "@/lib/api";
+import { getOperation, getPendingEscaladas, resolveEscalation } from "@/lib/api";
 import type { EscaladaPendente, Rating, UserRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -57,11 +63,33 @@ function canResolveEscalada(role: string | undefined) {
   return role === "gerente" || role === "diretor" || role === "comite";
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 function EscaladaCard({ canResolve, item }: { canResolve: boolean; item: EscaladaPendente }) {
   const queryClient = useQueryClient();
-  const [rejecting, setRejecting] = useState(false);
+  const [mode, setMode] = useState<"approve" | "reject" | null>(null);
   const [justificativa, setJustificativa] = useState("");
   const [error, setError] = useState("");
+  const operationQuery = useQuery({
+    enabled: canResolve,
+    queryFn: () => getOperation(item.operation_id),
+    queryKey: ["operation", item.operation_id],
+  });
+  const scoreSnapshot = operationQuery.data?.components?.find(
+    (component) => component.component === "score_engine",
+  );
+  const scoreResult = asRecord(scoreSnapshot?.parsed_result);
+  const requiresSanctionJustification =
+    scoreResult.requer_revisao_manual === true;
+  const unverifiedSanctionSources = Array.isArray(
+    scoreResult.fontes_sancao_nao_verificadas,
+  )
+    ? scoreResult.fontes_sancao_nao_verificadas.map(String)
+    : [];
   const mutation = useMutation({
     mutationFn: (decision: "approved" | "rejected") =>
       resolveEscalation(item.operation_id, {
@@ -70,9 +98,14 @@ function EscaladaCard({ canResolve, item }: { canResolve: boolean; item: Escalad
             ? "escalation_approved"
             : "escalation_rejected",
         approval_id: item.id,
-        justificativa: decision === "approved" ? "Escalada aprovada pela alçada responsável." : justificativa,
+        justificativa:
+          decision === "approved" && !requiresSanctionJustification
+            ? "Escalada aprovada pela alçada responsável."
+            : justificativa,
       }),
     onSuccess: async () => {
+      setMode(null);
+      setJustificativa("");
       await queryClient.invalidateQueries({ queryKey: ["escaladas", "pendentes"] });
     },
   });
@@ -84,6 +117,15 @@ function EscaladaCard({ canResolve, item }: { canResolve: boolean; item: Escalad
     }
     setError("");
     mutation.mutate("rejected");
+  }
+
+  function approve() {
+    if (requiresSanctionJustification && justificativa.trim().length < 10) {
+      setError("Informe uma justificativa com pelo menos 10 caracteres.");
+      return;
+    }
+    setError("");
+    mutation.mutate("approved");
   }
 
   return (
@@ -138,6 +180,19 @@ function EscaladaCard({ canResolve, item }: { canResolve: boolean; item: Escalad
           {item.justificativa}
         </p>
       ) : null}
+      {canResolve && requiresSanctionJustification ? (
+        <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <AlertTriangle
+            aria-hidden="true"
+            className="mt-0.5 h-3.5 w-3.5 shrink-0"
+          />
+          <span>
+            Sanções não verificadas:{" "}
+            {unverifiedSanctionSources.join(", ") || "fontes indisponíveis"}.
+            Justificativa obrigatória para aprovar a escalada.
+          </span>
+        </div>
+      ) : null}
       <div className="flex items-center justify-between gap-3">
         <Link
           className="flex items-center gap-1 text-[11px] text-blue-700 hover:underline"
@@ -151,7 +206,7 @@ function EscaladaCard({ canResolve, item }: { canResolve: boolean; item: Escalad
             <button
               className="flex h-8 items-center gap-1 rounded-md border-[0.5px] border-red-200 bg-red-50 px-3 text-[11px] font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
               disabled={mutation.isPending}
-              onClick={() => setRejecting(true)}
+              onClick={() => setMode("reject")}
               type="button"
             >
               <X aria-hidden="true" className="h-3 w-3" />
@@ -160,7 +215,11 @@ function EscaladaCard({ canResolve, item }: { canResolve: boolean; item: Escalad
             <button
               className="flex h-8 items-center gap-1 rounded-md border-[0.5px] border-emerald-200 bg-emerald-50 px-3 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
               disabled={mutation.isPending}
-              onClick={() => mutation.mutate("approved")}
+              onClick={() =>
+                requiresSanctionJustification
+                  ? setMode("approve")
+                  : mutation.mutate("approved")
+              }
               type="button"
             >
               <Check aria-hidden="true" className="h-3 w-3" />
@@ -169,21 +228,34 @@ function EscaladaCard({ canResolve, item }: { canResolve: boolean; item: Escalad
           </div>
         ) : null}
       </div>
-      {canResolve && rejecting ? (
+      {canResolve && mode ? (
         <div className="mt-3 rounded-md border-[0.5px] border-border bg-muted/40 p-3">
           <textarea
             className="h-16 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring"
             onChange={(event) => setJustificativa(event.target.value)}
-            placeholder="Motivo da rejeição..."
+            placeholder={
+              mode === "approve"
+                ? "Justifique a aprovação com as sanções não verificadas..."
+                : "Motivo da rejeição..."
+            }
             value={justificativa}
           />
           {error ? <p className="mt-1 text-[11px] text-red-700">{error}</p> : null}
           <div className="mt-2 flex justify-end gap-2">
-            <button className="h-8 rounded-md border-[0.5px] border-border px-3 text-xs" onClick={() => setRejecting(false)} type="button">
+            <button className="h-8 rounded-md border-[0.5px] border-border px-3 text-xs" onClick={() => setMode(null)} type="button">
               Cancelar
             </button>
-            <button className="h-8 rounded-md border-[0.5px] border-red-200 bg-red-50 px-3 text-xs font-medium text-red-700" onClick={reject} type="button">
-              Confirmar rejeição
+            <button
+              className={cn(
+                "h-8 rounded-md border-[0.5px] px-3 text-xs font-medium",
+                mode === "approve"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-red-200 bg-red-50 text-red-700",
+              )}
+              onClick={mode === "approve" ? approve : reject}
+              type="button"
+            >
+              {mode === "approve" ? "Confirmar aprovação" : "Confirmar rejeição"}
             </button>
           </div>
         </div>
