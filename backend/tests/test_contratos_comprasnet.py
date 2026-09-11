@@ -515,6 +515,7 @@ def test_fetch_enriches_match_without_using_heavy_fallback(monkeypatch):
     )
 
     assert result["status_consulta"] == "ENCONTRADO"
+    assert result["origem_numero_contrato"] == "BROADFACTOR"
     assert result["contrato_comprasnet"]["match_confianca"] == "CNPJ_CONFERIDO"
     assert result["empenhos"]["pago_total"] == 100_000
     assert result["consistencia_margem"]["status"] == "CONSISTENTE"
@@ -522,6 +523,117 @@ def test_fetch_enriches_match_without_using_heavy_fallback(monkeypatch):
         "CONTRATOS_NUMERO"
     )
     assert not any("/api/contrato/ug/" in path for path in client.calls)
+
+
+def test_manual_operation_without_contract_number_is_not_queried(monkeypatch):
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_operation",
+        lambda _operation_id: {"cotacao_id": None, "contrato_id": None},
+    )
+
+    result = contratos_comprasnet._fetch(
+        _digits_cnpj(CNPJ),
+        operation_id="op-1",
+        comprasnet_client=FakeComprasnet({}),
+    )
+
+    assert result["motivo"] == "cotacao_id_ausente"
+    assert result["origem_numero_contrato"] is None
+
+
+def test_manual_operation_uses_contract_number_and_portal_uasg(monkeypatch):
+    client = FakeComprasnet(
+        {
+            "/api/contrato/ugorigem/154069/numeroano/000182026": raw_contract(),
+            "/api/contrato/42/faturas": [],
+            "/api/contrato/42/empenhos": [],
+        }
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_operation",
+        lambda _operation_id: {
+            "cotacao_id": None,
+            "contrato_id": "00018/2026",
+            "margem_disponivel": None,
+        },
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_contracts_snapshot",
+        lambda _operation_id: {
+            "contratos_detalhe": [
+                {
+                    "numero": "00018/2026",
+                    "unidade_codigo": "154069",
+                    "ativo": True,
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "BroadfactorClient",
+        lambda: (_ for _ in ()).throw(AssertionError("Broadfactor nao deve ser chamada")),
+    )
+
+    result = contratos_comprasnet._fetch(
+        _digits_cnpj(CNPJ),
+        operation_id="op-1",
+        today=TODAY,
+        comprasnet_client=client,
+    )
+
+    assert result["status_consulta"] == "ENCONTRADO"
+    assert result["origem_numero_contrato"] == "OPERACAO_MANUAL"
+    assert result["consistencia_margem"]["status"] == "INDETERMINADA"
+    assert result["diagnostico_busca"]["tentativas"][0]["origem"] == (
+        "CONTRATOS_NUMERO"
+    )
+
+
+def test_manual_operation_rejects_contract_from_another_cnpj(monkeypatch):
+    client = FakeComprasnet(
+        {
+            "/api/contrato/ugorigem/154069/numeroano/000182026": raw_contract(
+                cnpj="00.000.000/0001-00"
+            ),
+            "/api/contrato/ug/154069": [],
+        }
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_operation",
+        lambda _operation_id: {
+            "cotacao_id": None,
+            "contrato_id": "00018/2026",
+            "margem_disponivel": None,
+        },
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_contracts_snapshot",
+        lambda _operation_id: {
+            "contratos_detalhe": [
+                {
+                    "numero": "00018/2026",
+                    "unidade_codigo": "154069",
+                    "ativo": True,
+                }
+            ]
+        },
+    )
+
+    result = contratos_comprasnet._fetch(
+        _digits_cnpj(CNPJ),
+        operation_id="op-1",
+        today=TODAY,
+        comprasnet_client=client,
+    )
+
+    assert result["motivo"] == "contrato_sem_match_cnpj"
+    assert result["origem_numero_contrato"] == "OPERACAO_MANUAL"
 
 
 def _digits_cnpj(value):

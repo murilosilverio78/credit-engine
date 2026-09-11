@@ -127,7 +127,7 @@ def _load_operation(operation_id: str) -> dict[str, Any]:
         "load_operation_context",
         lambda: supabase.table("operations")
         .select(
-            "cnpj,cotacao_id,margem_disponivel,prazo_vincendo_meses,"
+            "cnpj,cotacao_id,contrato_id,margem_disponivel,prazo_vincendo_meses,"
             "prazo_final_meses,prazo_vincendo_indisponivel"
         )
         .eq("id", operation_id)
@@ -592,10 +592,15 @@ def _margin_consistency(
     }, flags
 
 
-def _failure(reason: str, **details: Any) -> dict[str, Any]:
+def _failure(
+    reason: str,
+    origem_numero_contrato: str | None = None,
+    **details: Any,
+) -> dict[str, Any]:
     return {
         "status_consulta": "NAO_ENCONTRADO",
         "motivo": reason,
+        "origem_numero_contrato": origem_numero_contrato,
         "contrato_comprasnet": _empty_contract(),
         "performance_contratual": _performance([]),
         "empenhos": _commitments([]),
@@ -627,42 +632,59 @@ def _fetch(
     today = today or date.today()
     operation = _load_operation(operation_id)
     cotacao_id = operation.get("cotacao_id")
-    if not cotacao_id:
-        return _failure("cotacao_id_ausente")
+    contract_number_source: str | None = None
+    numbers: list[str] = []
+    receipts: list[Recebimento] = []
 
-    own_broadfactor = broadfactor_client is None
+    if not cotacao_id:
+        number = _normalize_contract_number(operation.get("contrato_id"))
+        if len(number) != 9:
+            return _failure("cotacao_id_ausente")
+        numbers = [number]
+        contract_number_source = "OPERACAO_MANUAL"
+    else:
+        contract_number_source = "BROADFACTOR"
+
+    own_broadfactor = bool(cotacao_id and broadfactor_client is None)
     own_comprasnet = comprasnet_client is None
-    broadfactor_client = broadfactor_client or BroadfactorClient()
+    if cotacao_id and broadfactor_client is None:
+        broadfactor_client = BroadfactorClient()
     comprasnet_client = comprasnet_client or ComprasnetClient()
     try:
-        contracts = broadfactor_client.contratos_da_cotacao(cotacao_id)
-        numbers = []
-        for item in contracts:
-            number = _digits(item.numero_contrato)
-            if len(number) == 9 and number not in numbers:
-                numbers.append(number)
-        if not numbers:
-            return _failure("numero_contrato_indisponivel", cotacao_id=cotacao_id)
+        if cotacao_id:
+            contracts = broadfactor_client.contratos_da_cotacao(cotacao_id)
+            for item in contracts:
+                number = _digits(item.numero_contrato)
+                if len(number) == 9 and number not in numbers:
+                    numbers.append(number)
+            if not numbers:
+                return _failure(
+                    "numero_contrato_indisponivel",
+                    origem_numero_contrato=contract_number_source,
+                    cotacao_id=cotacao_id,
+                )
 
         contracts_snapshot = _load_contracts_snapshot(operation_id)
-        try:
-            receipts = broadfactor_client.recebimentos(
-                cotacao_id,
-                paginas=1,
-                tamanho=50,
-            )
-        except Exception as exc:
-            receipts = []
-            logger.warning(
-                "contratos_comprasnet.receipts_fallback_unavailable",
-                operation_id=operation_id,
-                cotacao_id=cotacao_id,
-                error=str(exc),
-            )
+        if cotacao_id:
+            try:
+                receipts = broadfactor_client.recebimentos(
+                    cotacao_id,
+                    paginas=1,
+                    tamanho=50,
+                )
+            except Exception as exc:
+                receipts = []
+                logger.warning(
+                    "contratos_comprasnet.receipts_fallback_unavailable",
+                    operation_id=operation_id,
+                    cotacao_id=cotacao_id,
+                    error=str(exc),
+                )
         uasgs = _discover_uasg_candidates(numbers, contracts_snapshot, receipts)
         if not uasgs:
             return _failure(
                 "uasg_indisponivel",
+                origem_numero_contrato=contract_number_source,
                 cotacao_id=cotacao_id,
                 numeros_contrato=numbers,
             )
@@ -682,6 +704,7 @@ def _fetch(
                     if lookup_succeeded
                     else "falha_consulta_comprasnet"
                 ),
+                origem_numero_contrato=contract_number_source,
                 cotacao_id=cotacao_id,
                 numeros_contrato=numbers,
                 uasgs_tentadas=[
@@ -731,6 +754,7 @@ def _fetch(
             "status_consulta": "ENCONTRADO",
             "motivo": None,
             "cotacao_id": cotacao_id,
+            "origem_numero_contrato": contract_number_source,
             "contrato_comprasnet": contract,
             "performance_contratual": performance,
             "empenhos": commitment_metrics,
@@ -764,13 +788,14 @@ def _fetch(
         )
         return _failure(
             "falha_consulta_comprasnet",
+            origem_numero_contrato=contract_number_source,
             cotacao_id=cotacao_id,
             error=str(exc)[:300],
         )
     finally:
         if own_comprasnet:
             comprasnet_client.close()
-        if own_broadfactor:
+        if own_broadfactor and broadfactor_client is not None:
             close = getattr(getattr(broadfactor_client, "_s", None), "close", None)
             if callable(close):
                 close()
