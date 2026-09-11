@@ -175,6 +175,48 @@ class ClienteService:
                     snapshot_id=snapshot_id,
                     **context,
                 )
+            if component == "brasil_api" and result_state == "OK" and snapshot_id:
+                try:
+                    from app.workers.base import _execute_snapshot_write
+
+                    projection = _execute_snapshot_write(
+                        source_operation_id or cliente_id,
+                        component,
+                        "projetar_cadastro_de_snapshot",
+                        lambda: supabase.rpc(
+                            "projetar_cadastro_de_snapshot",
+                            {"p_snapshot_id": snapshot_id},
+                        ).execute(),
+                    )
+                    projection_row = _first_row(projection.data)
+                    campos_alterados = projection_row.get("out_campos_alterados") or []
+                    divergencias = int(
+                        projection_row.get("out_divergencias") or 0
+                    )
+                    projection_context = {
+                        "cliente_id": cliente_id,
+                        "snapshot_id": snapshot_id,
+                        "revision": projection_row.get("out_revision"),
+                        "campos_alterados": campos_alterados,
+                        "divergencias": divergencias,
+                    }
+                    if campos_alterados:
+                        logger.info(
+                            "client.cadastro_materializado",
+                            **projection_context,
+                        )
+                    if divergencias > 0:
+                        logger.warning(
+                            "client.cadastro_divergencia",
+                            **projection_context,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "client.cadastro_projecao_failed",
+                        cliente_id=cliente_id,
+                        snapshot_id=snapshot_id,
+                        error=str(exc),
+                    )
             return str(snapshot_id) if snapshot_id else None
         except Exception as exc:
             logger.warning(

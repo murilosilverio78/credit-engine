@@ -43,6 +43,8 @@ def _fetch(cnpj: str) -> dict:
         "porte": d.get("porte"),
         "capital_social": d.get("capital_social"),
         "atividade_principal": d.get("cnae_fiscal_descricao"),
+        "cnae_fiscal": str(d.get("cnae_fiscal")) if d.get("cnae_fiscal") else None,
+        "identificador_matriz_filial": d.get("identificador_matriz_filial"),
         "regime_tributario": [
             {"ano": r.get("ano"), "forma": r.get("forma_de_tributacao")}
             for r in (d.get("regime_tributario") or [])

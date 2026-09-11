@@ -1120,3 +1120,16 @@ Ao concluir a W8:
     e observações. Métricas de shadow, critérios de promoção e views de limite
     consideram somente operações de origem produtiva, filtrando por
     `operations.source` por meio de `source_operation_id`.
+
+---
+
+## 18. Ajustes da etapa 1b.1 (cadastro)
+
+1. Só a BRASIL_API materializa o cadastro nesta versão; `pessoa_juridica` não materializa, para não disparar a regra 4 sem matriz de precedência.
+2. O mapeamento fonte → colunas fica em SQL (`mapear_cadastro_brasil_api`); a aplicação informa só o snapshot.
+3. `clientes_historico.registro` guarda o estado resultante da revisão; o estado anterior é a revisão imediatamente menor. Inclui `source_snapshot_id` e `observed_at`.
+4. Divergências (regra 4) ficam em `clientes_divergencias_cadastrais`.
+5. Mesma fonte, observação mais nova e valor diferente = atualização (não divergência).
+6. `field_provenance` por campo guarda `source`, `observed_at` e `snapshot_id`; confirmação sem mudança renova `observed_at` sem nova revisão.
+7. `operations.cliente_cadastro_revision` só é preenchido quando a própria operação gerou a observação da brasil_api; com cache hit fica NULL até a etapa 2.
+8. `cnae_principal_codigo` e `unidade` só são materializados a partir de observações posteriores ao ajuste do worker.

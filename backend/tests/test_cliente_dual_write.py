@@ -396,6 +396,7 @@ def test_execute_autocorrige_operacao_sem_cliente(monkeypatch):
     assert [name for name, _params in db.rpc_calls] == [
         "vincular_cliente_operacao",
         "registrar_cliente_snapshot",
+        "projetar_cadastro_de_snapshot",
     ]
     assert db.rpc_calls[1][1]["p_cliente_id"] == "cliente-recuperado"
 
