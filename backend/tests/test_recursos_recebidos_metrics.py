@@ -141,8 +141,34 @@ def test_current_partial_year_is_excluded_from_volatility():
     }
     assert metrics["volatilidade"] == {
         "cv": 0.3333,
+        "anos_completos": 2,
         "maior_queda_anual_pct": 0.0,
     }
+
+
+def test_current_year_only_has_insufficient_volatility_history():
+    volatility = recursos_recebidos._volatility(
+        {"2026": 1_000.0},
+        current_year=2026,
+        min_complete_years=2,
+    )
+
+    assert volatility == {
+        "cv": None,
+        "anos_completos": 0,
+        "maior_queda_anual_pct": 0.0,
+    }
+
+
+def test_three_complete_stable_years_have_zero_cv():
+    volatility = recursos_recebidos._volatility(
+        {"2023": 1_000.0, "2024": 1_000.0, "2025": 1_000.0},
+        current_year=2026,
+        min_complete_years=2,
+    )
+
+    assert volatility["cv"] == 0.0
+    assert volatility["anos_completos"] == 3
 
 
 @pytest.mark.parametrize(

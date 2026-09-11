@@ -26,6 +26,9 @@ def pricing_config() -> tuple[dict, dict]:
             "pd_cv_corte_alto": 0.80,
             "pd_mult_volatilidade_moderada": 1.08,
             "pd_mult_volatilidade_alta": 1.15,
+            "pd_min_anos_completos_volatilidade": 2,
+            "pd_mult_historico_insuficiente": 1.08,
+            "hhi_min_meses_recebimento": 6,
         },
         {
             "A": {"pd_mult": 0.6},
@@ -151,6 +154,132 @@ def test_missing_pd_parameter_degrades_to_no_adjustment(monkeypatch):
 
     assert adjustment["multiplicador_volatilidade"] == 1.0
     assert "pd_volatilidade_parametro_indisponivel_sem_ajuste" in flags
+
+
+def test_current_year_only_uses_insufficient_history_multiplier(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.pricing_params_service.get_pricing_config",
+        pricing_config,
+    )
+
+    adjustment, flags = score_engine._ajuste_pd_volatilidade(
+        {
+            "recursos_recebidos": {
+                "serie_anual": {str(score_engine.date.today().year): 500_000},
+                "volatilidade": {"cv": None, "anos_completos": 0},
+            }
+        },
+        "B",
+    )
+
+    assert adjustment["faixa_volatilidade"] == "HISTORICO_INSUFICIENTE"
+    assert adjustment["multiplicador_volatilidade"] == 1.08
+    assert adjustment["parametro"] == "pd_mult_historico_insuficiente"
+    assert "pd_volatilidade_historico_insuficiente" in flags
+
+
+def test_insufficient_history_multiplier_falls_back_to_moderate(monkeypatch):
+    params, matrix = pricing_config()
+    params.pop("pd_mult_historico_insuficiente")
+    monkeypatch.setattr(
+        "app.services.pricing_params_service.get_pricing_config",
+        lambda: (params, matrix),
+    )
+
+    adjustment, flags = score_engine._ajuste_pd_volatilidade(
+        {
+            "recursos_recebidos": {
+                "serie_anual": {str(score_engine.date.today().year): 500_000},
+                "volatilidade": {"cv": None, "anos_completos": 0},
+            }
+        },
+        "B",
+    )
+
+    assert adjustment["multiplicador_volatilidade"] == 1.08
+    assert adjustment["parametro"] == "pd_mult_volatilidade_moderada"
+    assert "pd_volatilidade_historico_insuficiente" in flags
+
+
+def test_legacy_zero_cv_with_short_series_is_insufficient(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.pricing_params_service.get_pricing_config",
+        pricing_config,
+    )
+    previous_year = str(score_engine.date.today().year - 1)
+
+    adjustment, _ = score_engine._ajuste_pd_volatilidade(
+        {
+            "recursos_recebidos": {
+                "serie_anual": {previous_year: 500_000},
+                "volatilidade": {"cv": 0},
+            }
+        },
+        "B",
+    )
+
+    assert adjustment["faixa_volatilidade"] == "HISTORICO_INSUFICIENTE"
+
+
+def test_three_complete_stable_years_remain_low_volatility(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.pricing_params_service.get_pricing_config",
+        pricing_config,
+    )
+
+    adjustment, flags = score_engine._ajuste_pd_volatilidade(
+        {
+            "recursos_recebidos": {
+                "serie_anual": {"2023": 100, "2024": 100, "2025": 100},
+                "volatilidade": {"cv": 0, "anos_completos": 3},
+            }
+        },
+        "B",
+    )
+
+    assert adjustment["faixa_volatilidade"] == "BAIXA"
+    assert adjustment["multiplicador_volatilidade"] == 1.0
+    assert "pd_volatilidade_baixa_sem_ajuste" in flags
+
+
+def test_short_receipt_history_uses_worse_concentration_score(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.pricing_params_service.get_pricing_config",
+        pricing_config,
+    )
+    result = score_engine.score_relacionamento(
+        {
+            "contratos": contracts(org_count=2),
+            "recursos_recebidos": {
+                "meses_com_recebimento": 4,
+                "concentracao": {"hhi": 3000},
+            },
+        }
+    )
+    expected = round(0.30 * 68 + 0.30 * 62 + 0.25 * 68 + 0.15 * 55, 1)
+
+    assert result["score"] == expected
+    assert "concentracao_historico_insuficiente" in result["flags"]
+
+
+def test_mature_receipt_history_uses_hhi_only(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.pricing_params_service.get_pricing_config",
+        pricing_config,
+    )
+    result = score_engine.score_relacionamento(
+        {
+            "contratos": contracts(org_count=2),
+            "recursos_recebidos": {
+                "meses_com_recebimento": 12,
+                "concentracao": {"hhi": 3000},
+            },
+        }
+    )
+    expected = round(0.30 * 68 + 0.30 * 70 + 0.25 * 68 + 0.15 * 55, 1)
+
+    assert result["score"] == expected
+    assert "concentracao_historico_insuficiente" not in result["flags"]
 
 
 @pytest.mark.parametrize(

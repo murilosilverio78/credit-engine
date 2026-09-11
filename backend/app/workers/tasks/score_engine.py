@@ -104,6 +104,8 @@ PHASE2_COMPONENTS = (
     "cepim",
 )
 RUNNING_STALE_MINUTES = 15
+DEFAULT_PD_MIN_COMPLETE_YEARS = 2
+DEFAULT_HHI_MIN_RECEIPT_MONTHS = 6
 
 COMPONENT_DIMENSION_MAP = {
     "brasil_api": "saude_cadastral",
@@ -426,6 +428,7 @@ def _ajuste_pd_volatilidade(
     recursos = _first_snapshot(snapshots, "recursos_recebidos")
     volatilidade = recursos.get("volatilidade") or {}
     cv = _as_float(volatilidade.get("cv")) if isinstance(volatilidade, dict) else None
+    serie_anual = recursos.get("serie_anual") or recursos.get("valor_por_ano") or {}
     flags: list[str] = []
     parametro: str | None = None
     multiplicador = 1.0
@@ -440,7 +443,54 @@ def _ajuste_pd_volatilidade(
 
     corte_moderado = _as_float(params.get("pd_cv_corte_moderado"))
     corte_alto = _as_float(params.get("pd_cv_corte_alto"))
-    if cv is None:
+    min_anos = int(
+        _as_float(params.get("pd_min_anos_completos_volatilidade"))
+        or DEFAULT_PD_MIN_COMPLETE_YEARS
+    )
+    anos_inferidos = len(
+        [
+            year
+            for year in serie_anual
+            if str(year).isdigit() and int(year) < date.today().year
+        ]
+    ) if isinstance(serie_anual, dict) else 0
+    anos_informados = (
+        _as_float(volatilidade.get("anos_completos"))
+        if isinstance(volatilidade, dict)
+        else None
+    )
+    anos_completos = (
+        int(anos_informados) if anos_informados is not None else anos_inferidos
+    )
+    snapshot_novo_insuficiente = (
+        cv is None
+        and anos_informados is not None
+        and anos_completos < min_anos
+    )
+    snapshot_legado_insuficiente = (
+        anos_informados is None
+        and cv == 0
+        and isinstance(serie_anual, dict)
+        and bool(serie_anual)
+        and anos_completos < min_anos
+    )
+    historico_insuficiente = (
+        snapshot_novo_insuficiente or snapshot_legado_insuficiente
+    )
+
+    if historico_insuficiente:
+        faixa = "HISTORICO_INSUFICIENTE"
+        parametro = "pd_mult_historico_insuficiente"
+        configured = _as_float(params.get(parametro))
+        if configured is None or configured <= 0:
+            parametro = "pd_mult_volatilidade_moderada"
+            configured = _as_float(params.get(parametro))
+        if configured is not None and configured > 0:
+            multiplicador = configured
+        else:
+            flags.append("pd_volatilidade_parametro_indisponivel_sem_ajuste")
+        flags.append("pd_volatilidade_historico_insuficiente")
+    elif cv is None:
         faixa = "INDISPONIVEL"
         flags.append("pd_volatilidade_indisponivel_sem_ajuste")
     elif (
@@ -481,6 +531,8 @@ def _ajuste_pd_volatilidade(
     pd_ajustada = pd_base * multiplicador if pd_base is not None else None
     return {
         "cv": cv,
+        "anos_completos": anos_completos,
+        "min_anos_completos": min_anos,
         "corte_moderado": corte_moderado,
         "corte_alto": corte_alto,
         "faixa_volatilidade": faixa,
@@ -880,6 +932,27 @@ def score_relacionamento(snapshots: dict[str, Any]) -> dict[str, Any]:
 
     concentracao = recursos.get("concentracao") or {}
     hhi = _as_float(concentracao.get("hhi")) if isinstance(concentracao, dict) else None
+    if org_count <= 1:
+        fallback_concentracao_score = 45
+    elif org_count == 2:
+        fallback_concentracao_score = 62
+    elif org_count <= 4:
+        fallback_concentracao_score = 78
+    else:
+        fallback_concentracao_score = 90
+
+    try:
+        from app.services.pricing_params_service import get_pricing_config
+
+        pricing_params, _ = get_pricing_config()
+    except Exception as exc:
+        logger.warning("score_engine.pricing_params_unavailable", error=str(exc))
+        pricing_params = {}
+    min_receipt_months = int(
+        _as_float(pricing_params.get("hhi_min_meses_recebimento"))
+        or DEFAULT_HHI_MIN_RECEIPT_MONTHS
+    )
+    receipt_months = _as_float(recursos.get("meses_com_recebimento"))
     if hhi is not None and hhi > 0:
         if hhi < 2500:
             concentracao_score = 90
@@ -889,15 +962,18 @@ def score_relacionamento(snapshots: dict[str, Any]) -> dict[str, Any]:
             concentracao_score = 45
         flags.append("diversificacao_hhi_utilizada")
         concentracao_fator = f"HHI de recebimentos: {hhi:.1f}"
+        if receipt_months is not None and receipt_months < min_receipt_months:
+            concentracao_score = min(
+                concentracao_score,
+                fallback_concentracao_score,
+            )
+            flags.append("concentracao_historico_insuficiente")
+            concentracao_fator += (
+                f"; apenas {int(receipt_months)} meses, aplicado o pior entre "
+                f"HHI e fallback por {org_count} orgaos"
+            )
     else:
-        if org_count <= 1:
-            concentracao_score = 45
-        elif org_count == 2:
-            concentracao_score = 62
-        elif org_count <= 4:
-            concentracao_score = 78
-        else:
-            concentracao_score = 90
+        concentracao_score = fallback_concentracao_score
         flags.append("diversificacao_fallback_contagem_orgaos")
         concentracao_fator = f"Diversificacao por fallback: {org_count} orgaos distintos"
 

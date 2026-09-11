@@ -28,6 +28,7 @@ MAX_PAGES = 300
 MAX_SECONDS = 180
 BROADFACTOR_PAGE_SIZE = 50
 RECONCILIATION_TOLERANCE_PCT = 10.0
+DEFAULT_MIN_COMPLETE_YEARS = 2
 
 
 def _month_key(value: str | int | None) -> tuple[int, int] | None:
@@ -115,15 +116,41 @@ def _annual_series(receipts: list[Recebimento]) -> dict[str, float]:
     }
 
 
-def _volatility(series: dict[str, float], current_year: int) -> dict[str, float]:
+def _minimum_complete_years() -> int:
+    try:
+        from app.services.pricing_params_service import get_pricing_config
+
+        params, _ = get_pricing_config()
+        configured = int(float(params.get("pd_min_anos_completos_volatilidade")))
+        return configured if configured > 0 else DEFAULT_MIN_COMPLETE_YEARS
+    except (TypeError, ValueError):
+        return DEFAULT_MIN_COMPLETE_YEARS
+    except Exception as exc:
+        logger.warning(
+            "recursos_recebidos.pricing_params_unavailable",
+            error=str(exc),
+        )
+        return DEFAULT_MIN_COMPLETE_YEARS
+
+
+def _volatility(
+    series: dict[str, float],
+    current_year: int,
+    min_complete_years: int | None = None,
+) -> dict[str, Any]:
     complete_years = sorted(
         (int(year), float(total))
         for year, total in series.items()
         if int(year) < current_year
     )
+    required_years = min_complete_years or _minimum_complete_years()
     totals = [total for _, total in complete_years]
     mean = statistics.fmean(totals) if totals else 0.0
-    cv = statistics.pstdev(totals) / mean if len(totals) > 1 and mean else 0.0
+    cv = (
+        statistics.pstdev(totals) / mean
+        if len(totals) >= required_years and mean
+        else None
+    )
 
     drops = []
     for (_, previous), (_, current) in zip(complete_years, complete_years[1:]):
@@ -131,7 +158,8 @@ def _volatility(series: dict[str, float], current_year: int) -> dict[str, float]
             drops.append(max((previous - current) / previous * 100, 0.0))
 
     return {
-        "cv": round(cv, 4),
+        "cv": round(cv, 4) if cv is not None else None,
+        "anos_completos": len(complete_years),
         "maior_queda_anual_pct": round(max(drops, default=0.0), 2),
     }
 
