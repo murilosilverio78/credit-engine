@@ -178,8 +178,40 @@ class BaseComponentTask:
         cache_svc = CacheService()
         audit_svc = AuditService()
 
-        # Busca CNPJ da operação
-        cnpj = snap_svc.get_cnpj(operation_id)
+        try:
+            cnpj = snap_svc.get_cnpj(operation_id)
+        except Exception as exc:
+            error_message = str(exc) or exc.__class__.__name__
+            logger.error(
+                "component.preflight_failed",
+                operation_id=operation_id,
+                component=component,
+                error=error_message,
+            )
+            try:
+                _execute_snapshot_write(
+                    operation_id,
+                    component,
+                    "save_result_preflight_failed",
+                    lambda: snap_svc.save_result(
+                        operation_id=operation_id,
+                        component=component,
+                        raw_result=None,
+                        parsed_result=None,
+                        status="failed",
+                        duration_ms=0,
+                        error_message=error_message,
+                    ),
+                )
+            except Exception as persist_exc:
+                logger.error(
+                    "component.preflight_failure_persist_failed",
+                    operation_id=operation_id,
+                    component=component,
+                    original_error=error_message,
+                    persist_error=str(persist_exc),
+                )
+            raise
 
         logger.info(
             "component.started",

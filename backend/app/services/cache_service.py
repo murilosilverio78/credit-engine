@@ -6,6 +6,7 @@ from typing import Optional
 import structlog
 
 from app.core.database import supabase
+from app.workers.base import _execute_snapshot_write
 
 
 logger = structlog.get_logger()
@@ -44,9 +45,14 @@ def _get_ttl_overrides() -> dict[str, int]:
         return _TTL_OVERRIDES
 
     try:
-        result = supabase.table("component_config")\
-            .select("component,cache_ttl_hours")\
-            .execute()
+        result = _execute_snapshot_write(
+            "cache",
+            "component_config",
+            "get_ttl_overrides",
+            lambda: supabase.table("component_config")
+            .select("component,cache_ttl_hours")
+            .execute(),
+        )
         _TTL_OVERRIDES = {
             row["component"]: row["cache_ttl_hours"]
             for row in (result.data or [])
@@ -81,13 +87,18 @@ class CacheService:
 
         try:
             now = datetime.now(timezone.utc).isoformat()
-            result = supabase.table("cnpj_cache")\
-                .select("result")\
-                .eq("cnpj", cnpj)\
-                .eq("component", component)\
-                .gt("expires_at", now)\
-                .single()\
-                .execute()
+            result = _execute_snapshot_write(
+                cnpj,
+                component,
+                "cache_get",
+                lambda: supabase.table("cnpj_cache")
+                .select("result")
+                .eq("cnpj", cnpj)
+                .eq("component", component)
+                .gt("expires_at", now)
+                .single()
+                .execute(),
+            )
 
             if result.data:
                 logger.info("cache.hit", cnpj=cnpj, component=component)

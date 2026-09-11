@@ -260,6 +260,70 @@ def test_orchestrator_database_calls_retry_transient_disconnect(monkeypatch):
     assert len(attempts) == 3
 
 
+def test_phase2_pending_comprasnet_is_failed_without_overwriting_operation(monkeypatch):
+    database = FakeSupabase({
+        "component_snapshots": [
+            {"component": "contratos", "status": "completed"},
+            {"component": "contratos_comprasnet", "status": "pending"},
+        ],
+        "operations": [{"fonte_prazo_vincendo": "EXTRACAO_LLM"}],
+    })
+    monkeypatch.setattr(orchestrator, "supabase", database)
+
+    result = orchestrator._finalize_phase2_snapshots("op-1")
+
+    assert result == {
+        "pending_marked_failed": ["contratos_comprasnet"],
+        "contratos_comprasnet_status": "failed",
+    }
+    pending_update = next(
+        query
+        for query in database.queries
+        if query.table == "component_snapshots" and query.action == "update"
+    )
+    assert pending_update.payload == {
+        "status": "failed",
+        "error_message": "nao_executado",
+    }
+    assert ("eq", "status", "pending") in pending_update.filters
+    operation_queries = [
+        query
+        for query in database.queries
+        if query.table == "operations"
+    ]
+    assert len(operation_queries) == 1
+    assert operation_queries[0].action == "select"
+
+
+def test_phase2_finalize_failure_does_not_interrupt_pipeline(monkeypatch):
+    snapshots = [
+        {"component": component, "status": "completed"}
+        for component in (*orchestrator.PHASE1_COMPONENTS, *orchestrator.PHASE2_COMPONENTS)
+    ]
+    database = FakeSupabase({"component_snapshots": snapshots})
+    after_phase2_calls = []
+
+    async def fake_after_phase2(operation_id, **_kwargs):
+        after_phase2_calls.append(operation_id)
+        return {"operation_id": operation_id, "status": "completed"}
+
+    def fail_finalize(_operation_id):
+        raise RuntimeError("finalize indisponivel")
+
+    monkeypatch.setattr(orchestrator, "supabase", database)
+    monkeypatch.setattr(orchestrator, "_finalize_phase2_snapshots", fail_finalize)
+    monkeypatch.setattr(orchestrator, "_after_phase2", fake_after_phase2)
+    monkeypatch.setattr(
+        "app.workers.tasks.contratos_comprasnet.apply_contract_source_precedence",
+        lambda _operation_id: None,
+    )
+
+    result = asyncio.run(orchestrator._run_analysis("op-1"))
+
+    assert result == {"operation_id": "op-1", "status": "pipeline_started"}
+    assert after_phase2_calls == ["op-1"]
+
+
 def test_score_preconditions_retry_transient_disconnect(monkeypatch):
     snapshots = [
         {"component": component, "status": "completed", "started_at": None}

@@ -4,6 +4,7 @@ SnapshotService: persiste resultados de cada componente de consulta.
 from typing import Optional
 from datetime import datetime, timezone
 from app.core.database import supabase
+from app.workers.base import _execute_snapshot_write
 import structlog
 
 logger = structlog.get_logger()
@@ -13,11 +14,16 @@ class SnapshotService:
 
     def get_cnpj(self, operation_id: str) -> str:
         """Retorna CNPJ da operação."""
-        result = supabase.table("operations")\
-            .select("cnpj")\
-            .eq("id", operation_id)\
-            .single()\
-            .execute()
+        result = _execute_snapshot_write(
+            operation_id,
+            "operation",
+            "get_cnpj",
+            lambda: supabase.table("operations")
+            .select("cnpj")
+            .eq("id", operation_id)
+            .single()
+            .execute(),
+        )
         return result.data["cnpj"]
 
     def mark_running(self, operation_id: str, component: str):

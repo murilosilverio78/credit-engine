@@ -87,6 +87,66 @@ def _phase2_failed_components(results: list[Any]) -> list[tuple[str, Any]]:
     ]
 
 
+def _finalize_phase2_snapshots(operation_id: str) -> dict[str, Any]:
+    """Close phase-2 snapshots that never ran and report missing Comprasnet data."""
+    result = _execute_db(
+        operation_id,
+        "load_phase2_snapshot_statuses",
+        lambda: supabase.table("component_snapshots")
+        .select("component,status")
+        .eq("operation_id", operation_id)
+        .in_("component", list(PHASE2_COMPONENTS))
+        .execute(),
+    )
+    statuses = {
+        row.get("component"): row.get("status")
+        for row in (result.data or [])
+        if row.get("component") in PHASE2_COMPONENTS
+    }
+    pending = [
+        component
+        for component in PHASE2_COMPONENTS
+        if statuses.get(component) == "pending"
+    ]
+    if pending:
+        _execute_db(
+            operation_id,
+            "mark_phase2_pending_not_executed",
+            lambda: supabase.table("component_snapshots")
+            .update({"status": "failed", "error_message": "nao_executado"})
+            .eq("operation_id", operation_id)
+            .in_("component", pending)
+            .eq("status", "pending")
+            .execute(),
+        )
+        for component in pending:
+            statuses[component] = "failed"
+
+    comprasnet_status = statuses.get("contratos_comprasnet")
+    if comprasnet_status != "completed":
+        operation_result = _execute_db(
+            operation_id,
+            "load_contract_term_source",
+            lambda: supabase.table("operations")
+            .select("fonte_prazo_vincendo")
+            .eq("id", operation_id)
+            .execute(),
+        )
+        operation_rows = operation_result.data or []
+        operation = operation_rows[0] if operation_rows else {}
+        logger.warning(
+            "pipeline.comprasnet_indisponivel",
+            operation_id=operation_id,
+            snapshot_status=comprasnet_status or "missing",
+            fonte_prazo_vincendo=operation.get("fonte_prazo_vincendo"),
+        )
+
+    return {
+        "pending_marked_failed": pending,
+        "contratos_comprasnet_status": comprasnet_status or "missing",
+    }
+
+
 def _mark_operation_failed(operation_id: str, message: str):
     stage = _PIPELINE_STAGE.get()
     if not message.startswith(f"{stage}:"):
@@ -474,6 +534,14 @@ async def _run_analysis(operation_id: str):
     except Exception as exc:
         logger.warning(
             "pipeline.contract_source_precedence_failed",
+            operation_id=operation_id,
+            error=str(exc),
+        )
+    try:
+        _finalize_phase2_snapshots(operation_id)
+    except Exception as exc:
+        logger.warning(
+            "pipeline.phase2_finalize_failed",
             operation_id=operation_id,
             error=str(exc),
         )
