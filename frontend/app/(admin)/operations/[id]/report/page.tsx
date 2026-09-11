@@ -94,6 +94,7 @@ const legalEntityLabels: Record<string, string> = {
 
 const componentOrder = [
   "contratos",
+  "contratos_comprasnet",
   "brasil_api",
   "pessoa_juridica",
   "recursos_recebidos",
@@ -114,6 +115,21 @@ const sanctionComponents = new Set([
   "cepim",
   "acordos_leniencia",
 ]);
+
+const comprasnetFailureMessages: Record<string, string> = {
+  cotacao_id_ausente:
+    "Não consultado: sem cotação Broadfactor e sem nº de contrato informado.",
+  numero_contrato_indisponivel: "Nº de contrato indisponível.",
+  uasg_indisponivel: "UASG do contrato não identificada.",
+  contrato_sem_match_cnpj: "Contrato não encontrado para este CNPJ no Comprasnet.",
+  falha_consulta_comprasnet:
+    "Falha ao consultar o Comprasnet (indisponibilidade da fonte).",
+};
+
+const contractNumberSourceLabels: Record<string, string> = {
+  BROADFACTOR: "Broadfactor",
+  OPERACAO_MANUAL: "Operação manual",
+};
 
 function asRecord(value: unknown): JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -206,6 +222,15 @@ function formatOptionalCurrency(value: unknown) {
     return "—";
   }
   return formatCurrency(value);
+}
+
+function formatOptionalPercent(value: unknown, multiplier = 100) {
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+  return `${(numberValue(value) * multiplier).toLocaleString("pt-BR", {
+    maximumFractionDigits: 2,
+  })}%`;
 }
 
 function operationTerm(operation: OperationDetails) {
@@ -1017,6 +1042,141 @@ function ContractsDetails({ result }: { result: JsonRecord }) {
   );
 }
 
+function ComprasnetDetails({ result }: { result: JsonRecord }) {
+  const status = stringValue(result.status_consulta, "");
+  const reason = stringValue(result.motivo, "");
+
+  if (status !== "ENCONTRADO") {
+    const fallback = reason
+      ? `Consulta sem resultado. ${reason}`
+      : "Consulta sem resultado.";
+    return (
+      <div
+        className="flex gap-2 rounded-md bg-amber-50 px-3 py-3 text-xs text-amber-800"
+        role="alert"
+      >
+        <AlertTriangle aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <p>{comprasnetFailureMessages[reason] ?? fallback}</p>
+      </div>
+    );
+  }
+
+  const contract = asRecord(result.contrato_comprasnet);
+  const performance = asRecord(result.performance_contratual);
+  const commitments = asRecord(result.empenhos);
+  const margin = asRecord(result.consistencia_margem);
+  const flags = asArray(result.flags).map((flag) => stringValue(flag, "")).filter(Boolean);
+  const uasg = [stringValue(contract.uasg, ""), stringValue(contract.uasg_nome, "")]
+    .filter(Boolean)
+    .join(" · ");
+  const validity = contract.vigencia_inicio || contract.vigencia_fim
+    ? `${formatDate(contract.vigencia_inicio)} – ${formatDate(contract.vigencia_fim)}`
+    : "—";
+  const remainingTerm =
+    contract.prazo_vincendo_meses === null ||
+    contract.prazo_vincendo_meses === undefined
+      ? "—"
+      : `${stringValue(contract.prazo_vincendo_meses)} meses`;
+  const medianApprovalLag =
+    performance.lag_ateste_mediana === null ||
+    performance.lag_ateste_mediana === undefined
+      ? "—"
+      : `${stringValue(performance.lag_ateste_mediana)} dias`;
+  const numberSource = stringValue(result.origem_numero_contrato, "");
+
+  return (
+    <div className="space-y-4">
+      <section>
+        <p className="mb-1 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+          Contrato
+        </p>
+        <div className="grid gap-x-8 sm:grid-cols-2">
+          <DetailRow label="Número" value={stringValue(contract.numero)} />
+          <DetailRow label="Órgão" value={stringValue(contract.orgao)} />
+          <DetailRow label="UASG" value={uasg || "—"} />
+          <DetailRow label="Vigência" value={validity} />
+          <DetailRow label="Valor global" value={formatOptionalCurrency(contract.valor_global)} />
+          <DetailRow label="Prazo vincendo" value={remainingTerm} />
+          <DetailRow label="Conferência do CNPJ" value={stringValue(contract.match_confianca)} />
+          <DetailRow
+            label="Origem do número"
+            value={contractNumberSourceLabels[numberSource] ?? (numberSource || "—")}
+          />
+          <DetailRow
+            label="Fonte do prazo"
+            value={stringValue(result.fonte_prazo_vincendo)}
+          />
+        </div>
+      </section>
+
+      <section>
+        <p className="mb-1 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+          Execução contratual
+        </p>
+        <div className="grid gap-x-8 sm:grid-cols-2">
+          <DetailRow label="Faturas" value={stringValue(performance.n_faturas)} />
+          <DetailRow
+            label="Faturado"
+            value={formatOptionalCurrency(performance.faturado_total)}
+          />
+          <DetailRow label="Glosas" value={formatOptionalCurrency(performance.glosa_total)} />
+          <DetailRow label="Taxa de glosa" value={formatOptionalPercent(performance.taxa_glosa)} />
+          <DetailRow label="Mediana até o ateste" value={medianApprovalLag} />
+        </div>
+      </section>
+
+      <section>
+        <p className="mb-1 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+          Empenhos
+        </p>
+        <div className="grid gap-x-8 sm:grid-cols-2">
+          <DetailRow
+            label="Empenhado"
+            value={formatOptionalCurrency(commitments.empenhado_total)}
+          />
+          <DetailRow
+            label="Liquidado"
+            value={formatOptionalCurrency(commitments.liquidado_total)}
+          />
+          <DetailRow label="A liquidar" value={formatOptionalCurrency(commitments.aliquidar_total)} />
+          <DetailRow label="Pago" value={formatOptionalCurrency(commitments.pago_total)} />
+        </div>
+      </section>
+
+      <section>
+        <p className="mb-1 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+          Consistência da margem
+        </p>
+        <div className="grid gap-x-8 sm:grid-cols-2">
+          <DetailRow label="Status" value={stringValue(margin.status)} />
+          <DetailRow
+            label="Divergência"
+            value={formatOptionalPercent(margin.divergencia_pct, 1)}
+          />
+        </div>
+      </section>
+
+      {flags.length ? (
+        <section>
+          <p className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+            Flags
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {flags.map((flag, index) => (
+              <span
+                className="rounded bg-muted px-2 py-1 font-mono text-[10px] text-muted-foreground"
+                key={`${flag}-${index}`}
+              >
+                {flag}
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
 function ResourcesDetails({ result }: { result: JsonRecord }) {
   const annualValues = Object.entries(asRecord(result.valor_por_ano));
   const agencies = asArray(result.orgaos_pagadores);
@@ -1287,6 +1447,9 @@ function ComponentDetails({ snapshot }: { snapshot: ComponentSnapshot }) {
   }
   if (snapshot.component === "contratos") {
     return <ContractsDetails result={result} />;
+  }
+  if (snapshot.component === "contratos_comprasnet") {
+    return <ComprasnetDetails result={result} />;
   }
   if (snapshot.component === "recursos_recebidos") {
     return <ResourcesDetails result={result} />;
@@ -1811,6 +1974,10 @@ function Report({ operation }: { operation: OperationDetails }) {
           {components.map((component) => {
             const manual = documentComponents.has(component.component);
             const document = asRecord(component.parsed_result);
+            const comprasnetWithoutData =
+              component.component === "contratos_comprasnet" &&
+              component.status === "completed" &&
+              document.status_consulta === "NAO_ENCONTRADO";
             const obtained = manual && document.status === "obtida";
             const outcome = obtained ? certificateResult(document.resultado) : null;
             const failed = component.status === "failed";
@@ -1837,6 +2004,8 @@ function Report({ operation }: { operation: OperationDetails }) {
                       ? "text-red-700"
                       : obtained
                       ? outcome?.text
+                      : comprasnetWithoutData
+                        ? "text-amber-700"
                       : !manual
                         ? "text-emerald-700"
                         : "text-amber-700",
@@ -1848,6 +2017,8 @@ function Report({ operation }: { operation: OperationDetails }) {
                     outcome?.icon
                   ) : manual ? (
                     <FileUp className="h-3 w-3" />
+                  ) : comprasnetWithoutData ? (
+                    <AlertTriangle className="h-3 w-3" />
                   ) : (
                     <Check className="h-3 w-3" />
                   )}
@@ -1859,6 +2030,8 @@ function Report({ operation }: { operation: OperationDetails }) {
                       : "irregular"
                       : manual
                         ? "não enviada"
+                        : comprasnetWithoutData
+                          ? "sem dados"
                         : "ok"}
                 </p>
                 <p className="mt-1 font-mono text-[10px] text-muted-foreground">

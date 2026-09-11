@@ -513,7 +513,7 @@ export default function NewOperationPage() {
                 placeholder="Ex: 00123/2024"
               />
               <p className="mt-1 text-[11px] text-muted-foreground">
-                ID do contrato no Portal da Transparência
+                Informe o nº do contrato para habilitar a consulta ao Comprasnet.
               </p>
               <FieldError message={errors.contrato_id?.message} />
             </div>
