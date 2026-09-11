@@ -250,7 +250,11 @@ function formatDate(value: unknown) {
     return "—";
   }
 
-  const date = new Date(String(value));
+  const text = String(value);
+  const dateOnly = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(text);
   if (Number.isNaN(date.getTime())) {
     return stringValue(value);
   }
