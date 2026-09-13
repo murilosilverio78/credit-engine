@@ -6,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
+from app.services.analysis_runtime import is_shutting_down
 from app.services.operation_watchdog_service import run_operation_watchdog
 from app.workers.tasks.broadfactor_ingestao import run_broadfactor_ingestao
 
@@ -46,6 +47,12 @@ async def trigger_broadfactor_ingestion(
     limit: int | None = Query(default=None, ge=1, le=100),
     _: None = Depends(verify_internal_token),
 ):
+    if is_shutting_down():
+        raise HTTPException(
+            status_code=503,
+            detail="Serviço em encerramento; tente novamente em instantes",
+        )
+
     if dry_run:
         return await run_broadfactor_ingestao(dry_run=True, limit=limit)
 

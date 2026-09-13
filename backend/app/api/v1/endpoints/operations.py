@@ -6,6 +6,7 @@ import re
 
 from app.core.auth import get_current_user
 from app.core.database import supabase
+from app.services.analysis_runtime import is_shutting_down
 from app.services.audit_service import AuditService
 from app.services.report_pdf_service import ReportPdfService
 
@@ -249,6 +250,12 @@ def _check_alcada(operation: dict, alcada: dict):
 
 @router.post("/", status_code=201)
 async def create_operation(payload: PropostaInput, background_tasks: BackgroundTasks):
+    if is_shutting_down():
+        raise HTTPException(
+            status_code=503,
+            detail="Serviço em encerramento; tente novamente em instantes",
+        )
+
     from app.services.eligibility_service import check_eligibility
     from app.services.ingestion_discard_service import record_ingestion_discard
     from app.services.operation_service import OperationService

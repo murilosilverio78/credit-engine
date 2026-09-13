@@ -7,13 +7,17 @@ from typing import Any
 
 import structlog
 
+from app.services.analysis_runtime import enqueue_analysis
 from app.workers.base import _execute_snapshot_write
 
 
 logger = structlog.get_logger()
 PARAMETER_KEY = "watchdog_heartbeat_timeout_minutos"
 DEFAULT_HEARTBEAT_TIMEOUT_MINUTES = 15.0
+DEFAULT_MAX_RETOMADAS = 1
 WATCHED_OPERATION_STATUSES = ("pending", "processing")
+_BASE_OPERATION_FIELDS = "id,cotacao_id,status,heartbeat_at,created_at"
+_RESUME_OPERATION_FIELDS = f"{_BASE_OPERATION_FIELDS},retomadas_count"
 _CACHE_TTL_SECONDS = 60.0
 _cache: dict[str, float | None] = {"value": None, "ts": 0.0}
 
@@ -94,11 +98,28 @@ def _stage_label(components: list[str]) -> str:
     return "componentes " + ",".join(components)
 
 
-def _load_stale_operations(db: Any, cutoff_iso: str) -> list[dict[str, Any]]:
+def _is_missing_resume_column_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "retomadas_count" in message and any(
+        marker in message
+        for marker in (
+            "does not exist",
+            "could not find",
+            "pgrst204",
+            "42703",
+        )
+    )
+
+
+def _query_stale_operations(
+    db: Any,
+    cutoff_iso: str,
+    fields: str,
+) -> list[dict[str, Any]]:
     stale_heartbeat = _execute_db(
         "load_stale_operations_with_heartbeat",
         lambda: db.table("operations")
-        .select("id,cotacao_id,status,heartbeat_at,created_at")
+        .select(fields)
         .in_("status", list(WATCHED_OPERATION_STATUSES))
         .lt("heartbeat_at", cutoff_iso)
         .execute(),
@@ -106,7 +127,7 @@ def _load_stale_operations(db: Any, cutoff_iso: str) -> list[dict[str, Any]]:
     missing_heartbeat = _execute_db(
         "load_stale_operations_without_heartbeat",
         lambda: db.table("operations")
-        .select("id,cotacao_id,status,heartbeat_at,created_at")
+        .select(fields)
         .in_("status", list(WATCHED_OPERATION_STATUSES))
         .is_("heartbeat_at", "null")
         .lt("created_at", cutoff_iso)
@@ -121,6 +142,25 @@ def _load_stale_operations(db: Any, cutoff_iso: str) -> list[dict[str, Any]]:
         if row.get("id")
     }
     return list(candidates.values())
+
+
+def _load_stale_operations(
+    db: Any,
+    cutoff_iso: str,
+) -> tuple[list[dict[str, Any]], bool]:
+    try:
+        return (
+            _query_stale_operations(db, cutoff_iso, _RESUME_OPERATION_FIELDS),
+            True,
+        )
+    except Exception as exc:
+        if not _is_missing_resume_column_error(exc):
+            raise
+        logger.warning(
+            "operation_watchdog.resume_column_unavailable",
+            error=str(exc),
+        )
+        return _query_stale_operations(db, cutoff_iso, _BASE_OPERATION_FIELDS), False
 
 
 def _claim_stale_operation(
@@ -147,13 +187,48 @@ def _claim_stale_operation(
     return _execute_db("mark_operation_failed", request)
 
 
+def _claim_stale_operation_for_resume(
+    db: Any,
+    candidate: dict[str, Any],
+    cutoff_iso: str,
+    reference_iso: str,
+    current_attempt: int,
+):
+    operation_id = str(candidate["id"])
+
+    def request():
+        query = (
+            db.table("operations")
+            .update(
+                {
+                    "status": "pending",
+                    "heartbeat_at": reference_iso,
+                    "error_message": None,
+                    "completed_at": None,
+                    "retomadas_count": current_attempt + 1,
+                }
+            )
+            .eq("id", operation_id)
+            .in_("status", list(WATCHED_OPERATION_STATUSES))
+            .eq("retomadas_count", current_attempt)
+        )
+        if candidate.get("heartbeat_at") is None:
+            query = query.is_("heartbeat_at", "null").lt("created_at", cutoff_iso)
+        else:
+            query = query.lt("heartbeat_at", cutoff_iso)
+        return query.execute()
+
+    return _execute_db("claim_operation_for_resume", request)
+
+
 def run_operation_watchdog(
     *,
     timeout_minutes: float | None = None,
+    max_retomadas: int | None = None,
     now: datetime | None = None,
     db: Any | None = None,
 ) -> dict[str, Any]:
-    """Mark stale pending or processing operations without starting a retry."""
+    """Resume stale operations once, then close them after the retry limit."""
     if db is None:
         from app.core.database import supabase
 
@@ -164,12 +239,25 @@ def run_operation_watchdog(
     timeout_minutes = float(timeout_minutes)
     if timeout_minutes <= 0:
         raise ValueError("timeout_minutes must be greater than zero")
+    if max_retomadas is None:
+        try:
+            from app.core.config import settings
+
+            max_retomadas = settings.WATCHDOG_MAX_RETOMADAS
+        except Exception as exc:
+            logger.warning(
+                "operation_watchdog.max_retomadas_fallback",
+                error=str(exc),
+            )
+            max_retomadas = DEFAULT_MAX_RETOMADAS
+    max_retomadas = max(int(max_retomadas), 0)
 
     reference_time = now or datetime.now(timezone.utc)
     if reference_time.tzinfo is None:
         reference_time = reference_time.replace(tzinfo=timezone.utc)
     cutoff = reference_time - timedelta(minutes=timeout_minutes)
     cutoff_iso = cutoff.isoformat()
+    reference_iso = reference_time.isoformat()
 
     summary: dict[str, Any] = {
         "status": "completed",
@@ -180,10 +268,15 @@ def run_operation_watchdog(
         "snapshots_marcados": 0,
         "cotacoes_marcadas": 0,
         "erros": 0,
+        "retomadas": 0,
+        "retomadas_esgotadas": 0,
     }
 
     try:
-        candidates = _load_stale_operations(db, cutoff_iso)
+        candidates, resume_column_available = _load_stale_operations(
+            db,
+            cutoff_iso,
+        )
     except Exception as exc:
         logger.error("operation_watchdog.load_failed", error=str(exc))
         return {**summary, "status": "failed", "erros": 1, "error": str(exc)}
@@ -199,6 +292,109 @@ def run_operation_watchdog(
         try:
             components = _running_components(db, operation_id)
             message = f"watchdog: heartbeat vencido em {_stage_label(components)}"
+            current_resume = int(candidate.get("retomadas_count") or 0)
+            should_resume = (
+                resume_column_available and current_resume < max_retomadas
+            )
+
+            if should_resume:
+                claimed = _claim_stale_operation_for_resume(
+                    db,
+                    candidate,
+                    cutoff_iso,
+                    reference_iso,
+                    current_resume,
+                )
+                if not claimed.data:
+                    summary["corridas_ignoradas"] += 1
+                    logger.info(
+                        "operation_watchdog.race_skipped",
+                        operation_id=operation_id,
+                    )
+                    continue
+
+                try:
+                    snapshots = _execute_db(
+                        "reset_running_snapshots_for_resume",
+                        lambda: db.table("component_snapshots")
+                        .update(
+                            {
+                                "status": "pending",
+                                "error_message": None,
+                                "started_at": None,
+                                "completed_at": None,
+                            }
+                        )
+                        .eq("operation_id", operation_id)
+                        .eq("status", "running")
+                        .execute(),
+                    )
+                    if not enqueue_analysis(operation_id):
+                        raise RuntimeError(
+                            "event loop indisponivel para reenfileirar analise"
+                        )
+                except Exception as resume_exc:
+                    failure_message = f"{message}; retomada falhou: {resume_exc}"
+                    failed = _execute_db(
+                        "mark_failed_after_resume_error",
+                        lambda: db.table("operations")
+                        .update(
+                            {
+                                "status": "failed",
+                                "error_message": failure_message,
+                            }
+                        )
+                        .eq("id", operation_id)
+                        .eq("status", "pending")
+                        .eq("heartbeat_at", reference_iso)
+                        .eq("retomadas_count", current_resume + 1)
+                        .execute(),
+                    )
+                    failed_snapshots = _execute_db(
+                        "mark_snapshots_failed_after_resume_error",
+                        lambda: db.table("component_snapshots")
+                        .update(
+                            {
+                                "status": "failed",
+                                "error_message": failure_message,
+                                "completed_at": reference_iso,
+                            }
+                        )
+                        .eq("operation_id", operation_id)
+                        .in_("status", ["pending", "running"])
+                        .execute(),
+                    )
+                    quote = _execute_db(
+                        "mark_quote_failed_after_resume_error",
+                        lambda: db.table("cotacoes_broadfactor")
+                        .update({"status_ingestao": "ERRO_ANALISE"})
+                        .eq("operation_id", operation_id)
+                        .execute(),
+                    )
+                    summary["erros"] += 1
+                    summary["marcadas"] += len(failed.data or [])
+                    summary["snapshots_marcados"] += len(
+                        failed_snapshots.data or []
+                    )
+                    summary["cotacoes_marcadas"] += len(quote.data or [])
+                    logger.error(
+                        "operation_watchdog.retomada_failed",
+                        operation_id=operation_id,
+                        error=str(resume_exc),
+                    )
+                    continue
+
+                attempt = current_resume + 1
+                summary["retomadas"] += 1
+                logger.warning(
+                    "operation_watchdog.retomada",
+                    operation_id=operation_id,
+                    componentes=components,
+                    tentativa=attempt,
+                    snapshots_resetados=len(snapshots.data or []),
+                )
+                continue
+
             claimed = _claim_stale_operation(db, candidate, cutoff_iso, message)
             if not claimed.data:
                 summary["corridas_ignoradas"] += 1
@@ -208,6 +404,15 @@ def run_operation_watchdog(
                 )
                 continue
 
+            if resume_column_available and current_resume >= max_retomadas:
+                summary["retomadas_esgotadas"] += 1
+                logger.warning(
+                    "operation_watchdog.retomada_esgotada",
+                    operation_id=operation_id,
+                    tentativa=current_resume,
+                    max_retomadas=max_retomadas,
+                )
+
             snapshots = _execute_db(
                 "mark_running_snapshots_failed",
                 lambda: db.table("component_snapshots")
@@ -215,7 +420,7 @@ def run_operation_watchdog(
                     {
                         "status": "failed",
                         "error_message": message,
-                        "completed_at": reference_time.isoformat(),
+                        "completed_at": reference_iso,
                     }
                 )
                 .eq("operation_id", operation_id)

@@ -11,6 +11,7 @@ from uuid import uuid4
 import structlog
 
 from app.core.database import supabase
+from app.services.analysis_runtime import track_analysis
 from app.workers.base import _execute_snapshot_write as _execute_with_retry
 
 logger = structlog.get_logger()
@@ -357,22 +358,23 @@ async def _run_or_reuse_component(
 
 async def start_analysis(operation_id: str):
     """Run the pipeline and persist any unhandled failure with its stage."""
-    stage_token = _PIPELINE_STAGE.set("pipeline_initialization")
-    try:
-        return await _run_analysis(operation_id)
-    except Exception as exc:
-        stage = _PIPELINE_STAGE.get()
-        _mark_operation_failed(operation_id, f"{stage}: {exc}")
-        logger.error(
-            "pipeline.unhandled_failure",
-            operation_id=operation_id,
-            stage=stage,
-            error=str(exc),
-            exc_info=True,
-        )
-        raise
-    finally:
-        _PIPELINE_STAGE.reset(stage_token)
+    async with track_analysis(operation_id):
+        stage_token = _PIPELINE_STAGE.set("pipeline_initialization")
+        try:
+            return await _run_analysis(operation_id)
+        except Exception as exc:
+            stage = _PIPELINE_STAGE.get()
+            _mark_operation_failed(operation_id, f"{stage}: {exc}")
+            logger.error(
+                "pipeline.unhandled_failure",
+                operation_id=operation_id,
+                stage=stage,
+                error=str(exc),
+                exc_info=True,
+            )
+            raise
+        finally:
+            _PIPELINE_STAGE.reset(stage_token)
 
 
 async def _run_analysis(operation_id: str):

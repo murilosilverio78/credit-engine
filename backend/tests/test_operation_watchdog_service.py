@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from app.services import operation_watchdog_service
 from app.services.operation_watchdog_service import (
     DEFAULT_HEARTBEAT_TIMEOUT_MINUTES,
     get_watchdog_timeout_minutes,
@@ -25,10 +26,12 @@ class Query:
         self.db = db
         self.table_name = table
         self.action = "select"
+        self.selected_columns = ""
         self.payload: dict[str, Any] = {}
         self.filters: list[tuple[str, str, Any]] = []
 
-    def select(self, _columns: str):
+    def select(self, columns: str):
+        self.selected_columns = columns
         return self
 
     def update(self, payload: dict[str, Any]):
@@ -66,6 +69,15 @@ class Query:
         return True
 
     def execute(self):
+        if (
+            self.action == "select"
+            and self.table_name == "operations"
+            and self.db.missing_resume_column
+            and "retomadas_count" in self.selected_columns
+        ):
+            raise RuntimeError(
+                "column operations.retomadas_count does not exist"
+            )
         if self.action == "update" and self.db.before_update is not None:
             self.db.before_update(self)
         matched = [row for row in self.db.tables[self.table_name] if self._matches(row)]
@@ -76,8 +88,14 @@ class Query:
 
 
 class FakeSupabase:
-    def __init__(self, tables: dict[str, list[dict[str, Any]]]):
+    def __init__(
+        self,
+        tables: dict[str, list[dict[str, Any]]],
+        *,
+        missing_resume_column: bool = False,
+    ):
         self.tables = deepcopy(tables)
+        self.missing_resume_column = missing_resume_column
         self.before_update: Callable[[Query], None] | None = None
 
     def table(self, name: str):
@@ -89,6 +107,7 @@ def _database(
     heartbeat_at: datetime | None,
     created_at: datetime | None = None,
     status: str = "processing",
+    retomadas_count: int = 1,
 ) -> FakeSupabase:
     created_at = created_at or NOW - timedelta(hours=1)
     return FakeSupabase(
@@ -101,6 +120,7 @@ def _database(
                     "heartbeat_at": heartbeat_at.isoformat() if heartbeat_at else None,
                     "created_at": created_at.isoformat(),
                     "error_message": None,
+                    "retomadas_count": retomadas_count,
                 }
             ],
             "component_snapshots": [
@@ -143,6 +163,8 @@ def test_stale_heartbeat_marks_operation_snapshot_and_quote_failed():
         "snapshots_marcados": 1,
         "cotacoes_marcadas": 1,
         "erros": 0,
+        "retomadas": 0,
+        "retomadas_esgotadas": 1,
     }
     operation = db.tables["operations"][0]
     assert operation["status"] == "failed"
@@ -152,6 +174,97 @@ def test_stale_heartbeat_marks_operation_snapshot_and_quote_failed():
     assert db.tables["component_snapshots"][0]["status"] == "failed"
     assert db.tables["component_snapshots"][1]["status"] == "completed"
     assert db.tables["cotacoes_broadfactor"][0]["status_ingestao"] == "ERRO_ANALISE"
+
+
+def test_stale_operation_is_resumed_once(monkeypatch):
+    db = _database(
+        heartbeat_at=NOW - timedelta(minutes=16),
+        retomadas_count=0,
+    )
+    enqueued: list[str] = []
+    monkeypatch.setattr(
+        operation_watchdog_service,
+        "enqueue_analysis",
+        lambda operation_id: enqueued.append(operation_id) or True,
+    )
+
+    first = run_operation_watchdog(
+        timeout_minutes=15,
+        max_retomadas=1,
+        now=NOW,
+        db=db,
+    )
+    second = run_operation_watchdog(
+        timeout_minutes=15,
+        max_retomadas=1,
+        now=NOW,
+        db=db,
+    )
+
+    assert first["retomadas"] == 1
+    assert first["marcadas"] == 0
+    assert second["candidatas"] == 0
+    assert enqueued == ["op-1"]
+    operation = db.tables["operations"][0]
+    assert operation["status"] == "pending"
+    assert operation["heartbeat_at"] == NOW.isoformat()
+    assert operation["retomadas_count"] == 1
+    assert operation["error_message"] is None
+    running_snapshot = db.tables["component_snapshots"][0]
+    assert running_snapshot["status"] == "pending"
+    assert running_snapshot["started_at"] is None
+    assert running_snapshot["completed_at"] is None
+    assert db.tables["component_snapshots"][1]["status"] == "completed"
+    assert db.tables["cotacoes_broadfactor"][0]["status_ingestao"] == (
+        "OPERACAO_CRIADA"
+    )
+
+
+def test_stale_operation_at_resume_limit_is_closed():
+    db = _database(
+        heartbeat_at=NOW - timedelta(minutes=16),
+        retomadas_count=1,
+    )
+
+    result = run_operation_watchdog(
+        timeout_minutes=15,
+        max_retomadas=1,
+        now=NOW,
+        db=db,
+    )
+
+    assert result["retomadas"] == 0
+    assert result["retomadas_esgotadas"] == 1
+    assert result["marcadas"] == 1
+    assert db.tables["operations"][0]["status"] == "failed"
+
+
+def test_missing_resume_column_keeps_previous_failure_behavior(monkeypatch):
+    db = _database(
+        heartbeat_at=NOW - timedelta(minutes=16),
+        retomadas_count=0,
+    )
+    db.missing_resume_column = True
+    enqueued: list[str] = []
+    monkeypatch.setattr(
+        operation_watchdog_service,
+        "enqueue_analysis",
+        lambda operation_id: enqueued.append(operation_id) or True,
+    )
+
+    result = run_operation_watchdog(
+        timeout_minutes=15,
+        max_retomadas=1,
+        now=NOW,
+        db=db,
+    )
+
+    assert result["status"] == "completed"
+    assert result["marcadas"] == 1
+    assert result["retomadas"] == 0
+    assert result["retomadas_esgotadas"] == 0
+    assert enqueued == []
+    assert db.tables["operations"][0]["status"] == "failed"
 
 
 def test_recent_heartbeat_is_not_marked():
@@ -199,7 +312,10 @@ def test_recent_pending_operation_without_heartbeat_is_not_marked():
 
 
 def test_completed_operation_between_read_and_write_is_not_overwritten():
-    db = _database(heartbeat_at=NOW - timedelta(minutes=16))
+    db = _database(
+        heartbeat_at=NOW - timedelta(minutes=16),
+        retomadas_count=0,
+    )
 
     def complete_before_claim(query: Query) -> None:
         if query.table_name == "operations":

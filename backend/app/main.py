@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import Depends, FastAPI
@@ -8,15 +9,39 @@ from app.api.v1.endpoints import admin, alcadas, auth, components, eligibility, 
 from app.api.v1.endpoints.uploads import public_router as uploads_public_router
 from app.core.auth import get_current_user
 from app.core.config import settings
+from app.services.analysis_runtime import (
+    configure_analysis_runtime,
+    drain_analyses,
+)
 from app.services.operation_watchdog_service import run_operation_watchdog
 
 logger = structlog.get_logger()
+
+
+async def _recover_stale_operations():
+    try:
+        summary = await asyncio.to_thread(run_operation_watchdog)
+        logger.info("startup.recovery_complete", **summary)
+    except Exception as exc:
+        logger.error("startup.recovery_failed", error=str(exc))
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    configure_analysis_runtime(asyncio.get_running_loop())
+    await _recover_stale_operations()
+    try:
+        yield
+    finally:
+        await drain_analyses(settings.SHUTDOWN_GRACE_SECONDS)
+
 
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url=None,
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -53,19 +78,6 @@ app.include_router(internal.router, prefix="/api/v1/internal", tags=["internal"]
 
 # Rotas públicas por design (link de upload enviado ao fornecedor — sem auth)
 app.include_router(uploads_public_router, prefix="/api/v1/uploads", tags=["uploads-public"])
-
-
-async def _recover_stale_operations():
-    try:
-        summary = await asyncio.to_thread(run_operation_watchdog)
-        logger.info("startup.recovery_complete", **summary)
-    except Exception as exc:
-        logger.error("startup.recovery_failed", error=str(exc))
-
-
-@app.on_event("startup")
-async def startup_recovery():
-    await _recover_stale_operations()
 
 
 @app.get("/health")

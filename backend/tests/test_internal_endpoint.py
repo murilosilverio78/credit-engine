@@ -116,3 +116,18 @@ def test_watchdog_endpoint_returns_summary_with_internal_token(monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == expected
+
+
+def test_ingestion_is_rejected_during_shutdown(monkeypatch):
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    monkeypatch.setattr(internal, "is_shutting_down", lambda: True)
+
+    response = make_client().post(
+        "/api/v1/internal/ingestao/broadfactor",
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Serviço em encerramento; tente novamente em instantes"
+    )

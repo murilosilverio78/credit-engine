@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     BROADFACTOR_CLIENT_SECRET: str = ""
     BROADFACTOR_BASE_URL: str = "http://api.dev.antecipagov.com.br"
     INTERNAL_JOB_TOKEN: str = ""
+    SHUTDOWN_GRACE_SECONDS: int = 90
+    WATCHDOG_MAX_RETOMADAS: int = 1
 
     # TLS verification — False apenas em .env local Windows
     HTTPX_VERIFY_SSL: bool = True
