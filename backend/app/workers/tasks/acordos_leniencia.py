@@ -6,12 +6,13 @@ Sempre executado — independente das flags do pessoa_juridica.
 Tipo: automatizado | Fila: fast | Cache: 24h
 """
 import os
+import time
 
 import httpx
-import time
+import structlog
+
 from app.workers.base import BaseComponentTask
 from app.workers.http_utils import fetch_json_with_retry
-import structlog
 
 logger = structlog.get_logger()
 
@@ -64,11 +65,20 @@ def _fetch(cnpj: str, token: str = None) -> dict:
         "total_acordos": len(acordos),
         "acordos": [
             {
+                "id": a.get("id"),
                 "situacao": a.get("situacao"),
                 "data_inicio": a.get("dataInicioAcordo"),
                 "data_fim": a.get("dataFimAcordo"),
                 "orgao": a.get("orgaoResponsavel"),
                 "objeto": a.get("objeto"),
+                "quantidade_empresas": a.get("quantidade"),
+                "empresas": [
+                    {
+                        "cnpj": sancao.get("cnpj"),
+                        "razao_social": sancao.get("razaoSocial"),
+                    }
+                    for sancao in (a.get("sancoes") or [])
+                ],
             }
             for a in acordos
         ],

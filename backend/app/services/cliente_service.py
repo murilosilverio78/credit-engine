@@ -16,6 +16,9 @@ logger = structlog.get_logger()
 _COMPONENT_SCOPES: dict[str, str] = {}
 _COMPONENT_SCOPES_TS = 0.0
 _COMPONENT_SCOPES_SECONDS = 60.0
+_SANCTION_COMPONENTS = frozenset(
+    {"ceis", "cnep", "cepim", "acordos_leniencia"}
+)
 
 
 def normalizar_cnpj(valor: str | None) -> str | None:
@@ -215,6 +218,61 @@ class ClienteService:
                         "client.cadastro_projecao_failed",
                         cliente_id=cliente_id,
                         snapshot_id=snapshot_id,
+                        error=str(exc),
+                    )
+            if component in _SANCTION_COMPONENTS and snapshot_id:
+                try:
+                    from app.workers.base import _execute_snapshot_write
+
+                    projection = _execute_snapshot_write(
+                        source_operation_id or cliente_id,
+                        component,
+                        "projetar_sancoes_de_snapshot",
+                        lambda: supabase.rpc(
+                            "projetar_sancoes_de_snapshot",
+                            {"p_snapshot_id": snapshot_id},
+                        ).execute(),
+                    )
+                    projection_row = _first_row(projection.data)
+                    counts = {
+                        "novas": int(projection_row.get("out_novas") or 0),
+                        "confirmadas": int(
+                            projection_row.get("out_confirmadas") or 0
+                        ),
+                        "ausentes": int(
+                            projection_row.get("out_ausentes") or 0
+                        ),
+                        "reaparecidas": int(
+                            projection_row.get("out_reaparecidas") or 0
+                        ),
+                    }
+                    projection_context = {
+                        "cliente_id": cliente_id,
+                        "snapshot_id": snapshot_id,
+                        "source": component,
+                        **counts,
+                    }
+                    if any(counts.values()):
+                        logger.info(
+                            "client.sancoes_projetadas",
+                            **projection_context,
+                        )
+                    if counts["novas"] > 0:
+                        logger.warning(
+                            "client.sancao_detectada",
+                            **projection_context,
+                        )
+                    if counts["ausentes"] > 0:
+                        logger.info(
+                            "client.sancao_ausente",
+                            **projection_context,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "client.sancoes_projecao_failed",
+                        cliente_id=cliente_id,
+                        snapshot_id=snapshot_id,
+                        source=component,
                         error=str(exc),
                     )
             return str(snapshot_id) if snapshot_id else None

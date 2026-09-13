@@ -1133,3 +1133,15 @@ Ao concluir a W8:
 6. `field_provenance` por campo guarda `source`, `observed_at` e `snapshot_id`; confirmação sem mudança renova `observed_at` sem nova revisão.
 7. `operations.cliente_cadastro_revision` só é preenchido quando a própria operação gerou a observação da brasil_api; com cache hit fica NULL até a etapa 2.
 8. `cnae_principal_codigo` e `unidade` só são materializados a partir de observações posteriores ao ajuste do worker.
+
+---
+
+## 19. Ajustes da etapa 1b.2 (sanções)
+
+1. `identificador` é o `id` numérico da fonte (CEIS, CNEP e CEPIM), confirmado estável contra a API em 11/09/2026.
+2. Um registro só vira sanção do cliente quando o CNPJ do próprio registro bate com o do cadastro: o CEIS mistura pessoas físicas e jurídicas, e o CPF vem mascarado.
+3. `pagination_complete` é derivado do snapshot: os 4 workers levantam exceção ao atingir o cap de páginas ou o timeout, logo um resultado presente e não degradado implica paginação completa.
+4. `cliente_sancao_coletas` registra também as coletas EMPTY e ERROR, com FK única para o snapshot de origem (idempotência).
+5. Acordos de leniência: até o ajuste do worker, o identificador é derivado de órgão e datas; a partir dele, passa a ser o `id` da fonte. Snapshots antigos mantêm o identificador derivado.
+6. Um acordo de leniência pode citar dezenas de empresas do grupo; o worker passa a gravar `empresas` e `quantidade_empresas`. Avaliar risco de grupo econômico é assunto de etapa futura.
+7. `vw_cliente_situacao_sancoes` distingue sanção observada de vigente (por `data_inicio`/`data_fim`), conforme a regra 5 da §6.7.
