@@ -1145,3 +1145,15 @@ Ao concluir a W8:
 5. Acordos de leniência: até o ajuste do worker, o identificador é derivado de órgão e datas; a partir dele, passa a ser o `id` da fonte. Snapshots antigos mantêm o identificador derivado.
 6. Um acordo de leniência pode citar dezenas de empresas do grupo; o worker passa a gravar `empresas` e `quantidade_empresas`. Avaliar risco de grupo econômico é assunto de etapa futura.
 7. `vw_cliente_situacao_sancoes` distingue sanção observada de vigente (por `data_inicio`/`data_fim`), conforme a regra 5 da §6.7.
+
+---
+
+## 20. Ajustes da etapa 1b.3 (sinais financeiros)
+
+1. A projeção não recalcula nada: copia as medições já feitas pelo worker `recursos_recebidos` (faturamento 12m, série anual, HHI, volatilidade, reconciliação).
+2. `competencia_ate` vem de `periodo_fim`; competências "MM/AAAA" são convertidas para o primeiro dia do mês.
+3. `janela_12m_inicio`/`janela_12m_fim` são derivadas de `collected_at` (mês da coleta menos 11 meses até o fim do mês da coleta), a mesma âncora usada pelo worker.
+4. `top_participacao` é gravado como fração (0 a 1), como o worker entrega.
+5. `cliente_faturamento_anual.parcial` marca os anos maiores ou iguais ao ano da coleta (ano ainda em curso); `n_pagamentos` fica nulo porque o worker não entrega essa contagem por ano.
+6. Cada coleta gera um sinal novo (UNIQUE por source_snapshot_id); o vigente é a coleta mais recente, exposto por `vw_cliente_sinal_financeiro_vigente` (empate resolvido por id DESC). Sinais anteriores permanecem para explicar scores históricos.
+7. A hipótese de escopo de `recursos_recebidos` (§17) segue sem confirmação; o versionamento por coleta torna o desenho tolerante a ela.

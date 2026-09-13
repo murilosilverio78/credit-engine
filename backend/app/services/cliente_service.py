@@ -275,6 +275,39 @@ class ClienteService:
                         source=component,
                         error=str(exc),
                     )
+            if (
+                component == "recursos_recebidos"
+                and result_state == "OK"
+                and snapshot_id
+            ):
+                try:
+                    from app.workers.base import _execute_snapshot_write
+
+                    projection = _execute_snapshot_write(
+                        source_operation_id or cliente_id,
+                        component,
+                        "projetar_sinais_financeiros_de_snapshot",
+                        lambda: supabase.rpc(
+                            "projetar_sinais_financeiros_de_snapshot",
+                            {"p_snapshot_id": snapshot_id},
+                        ).execute(),
+                    )
+                    projection_row = _first_row(projection.data)
+                    if projection_row.get("out_inserido"):
+                        logger.info(
+                            "client.sinais_financeiros_projetados",
+                            cliente_id=cliente_id,
+                            snapshot_id=snapshot_id,
+                            sinal_id=projection_row.get("out_sinal_id"),
+                            anos=int(projection_row.get("out_anos") or 0),
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "client.sinais_financeiros_failed",
+                        cliente_id=cliente_id,
+                        snapshot_id=snapshot_id,
+                        error=str(exc),
+                    )
             return str(snapshot_id) if snapshot_id else None
         except Exception as exc:
             logger.warning(
