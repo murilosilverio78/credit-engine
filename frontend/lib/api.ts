@@ -26,6 +26,7 @@ import type {
   UploadResumeResult,
   UploadResult,
   UploadTask,
+  OperationStatus,
   UserRole,
 } from "@/lib/types";
 import { clearAuthToken, getAuthToken } from "@/lib/auth-token";
@@ -114,10 +115,19 @@ async function request<T>(path: string, init?: ApiRequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function getAdminOperations(limit = 20, offset = 0) {
-  return request<PaginatedOperations>(
-    `/api/v1/admin/operations?limit=${limit}&offset=${offset}`,
-  );
+export function getAdminOperations(
+  limit = 20,
+  offset = 0,
+  status?: OperationStatus | "",
+) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  if (status) {
+    params.set("status", status);
+  }
+  return request<PaginatedOperations>(`/api/v1/admin/operations?${params}`);
 }
 
 export function createOperation(payload: PropostaInput) {

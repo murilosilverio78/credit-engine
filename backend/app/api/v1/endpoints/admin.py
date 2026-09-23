@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 import structlog
 
 from app.core.auth import get_current_user
@@ -14,11 +14,16 @@ ORPHAN_THRESHOLD_MINUTES = 30
 
 
 @router.get("/operations")
-async def list_operations():
+async def list_operations(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    status: str | None = None,
+    cnpj: str | None = None,
+):
     """Lista operações para o admin."""
     from app.services.operation_service import OperationService
     svc = OperationService()
-    return await svc.list()
+    return await svc.list(status=status, cnpj=cnpj, limit=limit, offset=offset)
 
 
 @router.get("/upload-tasks")

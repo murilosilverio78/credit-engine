@@ -140,8 +140,8 @@ export default function OperationsPage() {
   const [rating, setRating] = useState<Rating | "">("");
 
   const operationsQuery = useQuery({
-    queryKey: ["operations", { limit: PAGE_SIZE, offset, status, rating }],
-    queryFn: () => getAdminOperations(PAGE_SIZE, offset),
+    queryKey: ["operations", { limit: PAGE_SIZE, offset, status }],
+    queryFn: () => getAdminOperations(PAGE_SIZE, offset, status),
     placeholderData: keepPreviousData,
     refetchInterval: 15_000,
     refetchIntervalInBackground: true,
@@ -161,6 +161,8 @@ export default function OperationsPage() {
       const matchesCnpj =
         search.length === 0 || normalizeCnpj(operation.cnpj).includes(search);
       const matchesStatus = status === "" || operation.status === status;
+      // Status is filtered by the API for pagination consistency; rating remains
+      // local because /admin/operations does not support a rating parameter.
       const matchesRating = rating === "" || operation.rating === rating;
 
       return matchesCnpj && matchesStatus && matchesRating;
