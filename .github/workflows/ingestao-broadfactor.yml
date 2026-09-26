@@ -1,10 +1,6 @@
 name: Ingestao Broadfactor
 
 on:
-  schedule:
-    # 08:05 and 14:15 America/Sao_Paulo (UTC-3).
-    - cron: "5 11 * * 1-5"
-    - cron: "15 17 * * 1-5"
   workflow_dispatch:
     inputs:
       limit:
