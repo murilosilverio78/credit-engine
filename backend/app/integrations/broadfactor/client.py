@@ -117,6 +117,10 @@ class AuthError(BroadfactorError):
     pass
 
 
+class QuotationInactiveError(BroadfactorError):
+    pass
+
+
 # --------------------------------------------------------------------------
 # Parsers defensivos
 # --------------------------------------------------------------------------
@@ -650,7 +654,11 @@ class BroadfactorClient:
         #   Spring  -> {timestamp, status, error, path}   (rota inexistente)
         msg = None
         if isinstance(payload, dict):
-            msg = payload.get("customMessage") or payload.get("error")
+            msg = (
+                payload.get("customMessage")
+                or payload.get("serproMessage")
+                or payload.get("error")
+            )
 
         if r.status_code == 403:
             # Ex.: /documentos em registro legado (C-0002020...)
@@ -887,6 +895,12 @@ class BroadfactorClient:
 
     def _documentos(self, cid: str, f: Fornecedor) -> list[DocumentoAnexo]:
         res = self._req("GET", f"/empresa/{cid}/documentos")
+        if "QUOTATION_INACTIVE" in str(res.message or "").upper():
+            raise QuotationInactiveError(
+                "QUOTATION_INACTIVE",
+                status=res.status,
+                endpoint=res.endpoint,
+            )
         if res.outcome is Outcome.FORBIDDEN:
             # Observado apenas em registros legados (C-0002020...). Os demais
             # endpoints respondem 200 para os mesmos ids.

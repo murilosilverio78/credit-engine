@@ -28,7 +28,10 @@ def valid_context():
     }
     snapshots = {
         "brasil_api": {"situacao_cadastral": "ATIVA"},
-        "pessoa_juridica": {"possui_sancao": False},
+        "pessoa_juridica": {
+            "possui_sancao": False,
+            "sancionado_ceaf": False,
+        },
         "ceis": {"possui_sancao": False, "registros": []},
         "cnep": {"possui_sancao": False, "registros": []},
         "cepim": {"possui_sancao": False, "registros": []},
@@ -47,6 +50,7 @@ def valid_context():
     statuses = {
         component: "completed" for component in service.SANCTION_COMPONENTS
     }
+    statuses.update({"brasil_api": "completed", "pessoa_juridica": "completed"})
     return operation, snapshots, statuses
 
 
@@ -148,6 +152,26 @@ def test_unverified_sanction_source_blocks_qualification(monkeypatch):
 
     assert qualified is False
     assert reasons == ["fonte_sancao_nao_verificada:ceis"]
+
+
+def test_unverified_registry_status_blocks_qualification(monkeypatch):
+    qualified, reasons = evaluate(
+        monkeypatch,
+        lambda _operation, snapshots: snapshots["brasil_api"].clear(),
+    )
+
+    assert qualified is False
+    assert reasons == ["situacao_cadastral_nao_verificada"]
+
+
+def test_unverified_ceaf_source_blocks_qualification(monkeypatch):
+    qualified, reasons = evaluate(
+        monkeypatch,
+        statuses_mutate=lambda statuses: statuses.update(pessoa_juridica="failed"),
+    )
+
+    assert qualified is False
+    assert reasons == ["fonte_sancao_nao_verificada:ceaf"]
 
 
 def test_reevaluation_promotes_previously_rejected_quote(monkeypatch):

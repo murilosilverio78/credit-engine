@@ -13,6 +13,7 @@ from app.integrations.broadfactor.client import (  # noqa: E402
     BroadfactorClient,
     BroadfactorError,
     Outcome,
+    QuotationInactiveError,
     Result,
 )
 
@@ -102,6 +103,37 @@ def test_listar_cotacoes_raises_on_transport_error(monkeypatch):
 
     with pytest.raises(BroadfactorError, match="upstream failed"):
         client.listar_cotacoes()
+
+
+def test_documents_raise_specific_error_for_inactive_quote(monkeypatch):
+    client = BroadfactorClient("client", "secret", "http://broadfactor.test")
+    monkeypatch.setattr(
+        client,
+        "_req",
+        lambda *_args, **_kwargs: Result(
+            Outcome.ERROR,
+            status=409,
+            message="QUOTATION_INACTIVE",
+            endpoint="/integracao/empresa/C-1/documentos",
+        ),
+    )
+
+    with pytest.raises(QuotationInactiveError, match="QUOTATION_INACTIVE"):
+        client.documentos_da_cotacao("C-1")
+
+
+def test_inactive_quote_message_is_read_from_serpro_envelope():
+    client = BroadfactorClient("client", "secret", "http://broadfactor.test")
+
+    result = client._interpretar(
+        FakeResponse(
+            status_code=409,
+            payload={"serproMessage": "QUOTATION_INACTIVE"},
+        ),
+        "/integracao/empresa/C-1/documentos",
+    )
+
+    assert result.message == "QUOTATION_INACTIVE"
 
 
 def test_default_credentials_come_from_settings(monkeypatch):

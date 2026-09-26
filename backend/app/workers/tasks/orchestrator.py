@@ -355,6 +355,20 @@ def _completed_components(operation_id: str) -> set[str]:
     }
 
 
+def _reusable_components_for_run(
+    operation_id: str,
+    ate_fase: int | None,
+) -> set[str]:
+    reusable_components = _completed_components(operation_id)
+    if ate_fase == 2:
+        # Funnel reevaluation must refresh every free input whose value can
+        # change between ingestion windows.
+        reusable_components.difference_update(
+            (*PHASE1_COMPONENTS, *PHASE2_FUNIL_COMPONENTS)
+        )
+    return reusable_components
+
+
 async def _run_or_reuse_component(
     component: str,
     run_fn,
@@ -429,7 +443,7 @@ async def _run_analysis(operation_id: str, *, ate_fase: int | None = None):
         .execute(),
     )
 
-    reusable_components = _completed_components(operation_id)
+    reusable_components = _reusable_components_for_run(operation_id, ate_fase)
     upstream_complete_before_run = all(
         component in reusable_components
         for component in (*PHASE1_COMPONENTS, *PHASE2_COMPONENTS)

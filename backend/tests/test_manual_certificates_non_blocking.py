@@ -208,6 +208,28 @@ def test_completed_component_is_reused_without_running_worker(component):
     assert calls == []
 
 
+def test_partial_funnel_run_refreshes_free_components(monkeypatch):
+    completed = {
+        *orchestrator.PHASE1_COMPONENTS,
+        *orchestrator.PHASE2_COMPONENTS,
+        "web_research",
+        "score_engine",
+    }
+    monkeypatch.setattr(
+        orchestrator,
+        "_completed_components",
+        lambda _operation_id: completed.copy(),
+    )
+
+    reusable = orchestrator._reusable_components_for_run("op-1", ate_fase=2)
+
+    assert not reusable.intersection(orchestrator.PHASE1_COMPONENTS)
+    assert not reusable.intersection(orchestrator.PHASE2_FUNIL_COMPONENTS)
+    assert "contrato_extracao" in reusable
+    assert "web_research" in reusable
+    assert "score_engine" in reusable
+
+
 def test_phase3_4_resume_reuses_web_research_and_recalculates_score(monkeypatch):
     calls = []
 

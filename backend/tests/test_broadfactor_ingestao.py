@@ -9,7 +9,12 @@ import pytest
 for key in ("SECRET_KEY", "TWOCAPTCHA_API_KEY", "RESEND_API_KEY"):
     os.environ.setdefault(key, "test")
 
-from app.integrations.broadfactor.client import Cotacao, Documento, DocumentoAnexo  # noqa: E402
+from app.integrations.broadfactor.client import (  # noqa: E402
+    Cotacao,
+    Documento,
+    DocumentoAnexo,
+    QuotationInactiveError,
+)
 from app.workers.tasks import broadfactor_ingestao  # noqa: E402
 
 
@@ -52,7 +57,10 @@ def install_funnel(monkeypatch, cotacoes, documentos=None, initial_quotes=None):
             return cotacoes
 
         def documentos_da_cotacao(self, cotacao_id):
-            return documentos.get(cotacao_id, [])
+            result = documentos.get(cotacao_id, [])
+            if isinstance(result, Exception):
+                raise result
+            return result
 
     class FakeOperationService:
         async def create(self, **data):
@@ -222,6 +230,33 @@ async def test_missing_quote_is_closed_preserving_maximum_stage(monkeypatch):
     assert database.quotes["C-gone"]["estagio"] == "ENCERRADA"
     assert database.quotes["C-gone"]["estagio_max"] == "QUALIFICADA"
     assert result["encerradas"] == 1
+
+
+@pytest.mark.asyncio
+async def test_inactive_listed_quote_is_closed_preserving_maximum_stage(monkeypatch):
+    database, created, analyses = install_funnel(
+        monkeypatch,
+        [quote("C-inactive")],
+        documentos={
+            "C-inactive": QuotationInactiveError("QUOTATION_INACTIVE")
+        },
+        initial_quotes=[{
+            "cotacao_id": "C-inactive",
+            "ambiente": "PRODUCAO",
+            "estagio": "DOCUMENTADA",
+            "estagio_max": "QUALIFICADA",
+            "operation_id": "operation-C-inactive",
+        }],
+    )
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert database.quotes["C-inactive"]["estagio"] == "ENCERRADA"
+    assert database.quotes["C-inactive"]["estagio_max"] == "QUALIFICADA"
+    assert database.quotes["C-inactive"]["estagio_motivo"] == "QUOTATION_INACTIVE"
+    assert result["encerradas"] == 1
+    assert created == []
+    assert analyses == []
 
 
 @pytest.mark.asyncio

@@ -134,9 +134,25 @@ def avaliar_qualificacao_funil(operation_id: str) -> tuple[bool, list[str]]:
     deterministic = gates_deterministicos(snapshots)
     motivos.extend(deterministic)
 
+    cadastro = snapshots.get("brasil_api") or {}
+    situacao = (
+        cadastro.get("situacao_cadastral")
+        or cadastro.get("descricao_situacao_cadastral")
+        or cadastro.get("situacao")
+    )
+    if not situacao:
+        motivos.append("situacao_cadastral_nao_verificada")
+
     for component in SANCTION_COMPONENTS:
         if statuses.get(component) != "completed":
             motivos.append(f"fonte_sancao_nao_verificada:{component}")
+
+    pessoa_juridica = snapshots.get("pessoa_juridica") or {}
+    if (
+        statuses.get("pessoa_juridica") != "completed"
+        or "sancionado_ceaf" not in pessoa_juridica
+    ):
+        motivos.append("fonte_sancao_nao_verificada:ceaf")
 
     if not _contract_found(snapshots):
         motivos.append("contrato_comprasnet_nao_encontrado")

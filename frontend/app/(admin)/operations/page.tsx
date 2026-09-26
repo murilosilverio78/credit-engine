@@ -154,6 +154,9 @@ export default function OperationsPage() {
   const [status, setStatus] = useState<OperationStatus | "">("");
   const [rating, setRating] = useState<Rating | "">("");
   const [stage, setStage] = useState<FunilEstagio>("LISTA_ESPERA");
+  const [generatingOperationId, setGeneratingOperationId] = useState<
+    string | null
+  >(null);
 
   const operationsQuery = useQuery({
     queryKey: ["operations", { limit: PAGE_SIZE, offset, status, stage }],
@@ -164,7 +167,9 @@ export default function OperationsPage() {
   });
   const reportMutation = useMutation({
     mutationFn: generateOperationReport,
+    onMutate: (operationId) => setGeneratingOperationId(operationId),
     onSuccess: () => operationsQuery.refetch(),
+    onSettled: () => setGeneratingOperationId(null),
   });
   const pendingOverridesQuery = useQuery({
     queryKey: ["overrides", "pending"],
@@ -459,7 +464,8 @@ export default function OperationsPage() {
                           type="button"
                         >
                           <FileText aria-hidden="true" className="h-3.5 w-3.5" />
-                          {operation.status === "processing"
+                          {operation.status === "processing" ||
+                          generatingOperationId === operation.operation_id
                             ? "Gerando"
                             : "Gerar relatório"}
                         </button>

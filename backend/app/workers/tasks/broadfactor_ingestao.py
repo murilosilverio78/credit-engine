@@ -14,7 +14,12 @@ from typing import Any
 
 import structlog
 
-from app.integrations.broadfactor.client import BroadfactorClient, Cotacao, DocumentoAnexo
+from app.integrations.broadfactor.client import (
+    BroadfactorClient,
+    Cotacao,
+    DocumentoAnexo,
+    QuotationInactiveError,
+)
 from app.workers.base import _execute_snapshot_write as _execute_with_retry
 
 
@@ -439,7 +444,7 @@ async def run_broadfactor_ingestao(
                 )
                 continue
 
-            if estagio == "ENQUADRADA":
+            if estagio in {"ENQUADRADA", "DOCUMENTADA", "QUALIFICADA"}:
                 try:
                     documentos = await asyncio.to_thread(
                         client.documentos_da_cotacao,
@@ -447,36 +452,49 @@ async def run_broadfactor_ingestao(
                     )
                 except AttributeError:
                     documentos = []
+                except QuotationInactiveError:
+                    _update_quote_stage(
+                        supabase,
+                        cotacao.id,
+                        "ENCERRADA",
+                        motivo="QUOTATION_INACTIVE",
+                        estagio_max=_stage_max(estagio_max, estagio),
+                    )
+                    encerradas += 1
+                    continue
                 except Exception as exc:
+                    if estagio == "ENQUADRADA":
+                        _update_quote_stage(
+                            supabase,
+                            cotacao.id,
+                            "ENQUADRADA",
+                            motivo=f"erro_documentos_broadfactor:{exc}",
+                            estagio_max=estagio_max,
+                        )
+                        continue
+                    documentos = []
+                if estagio == "ENQUADRADA":
+                    n_documentos, tipos_documento = _documentos_info(documentos)
+                    if n_documentos < 1:
+                        _update_quote_stage(
+                            supabase,
+                            cotacao.id,
+                            "ENQUADRADA",
+                            motivo="sem_documentos_broadfactor",
+                            n_documentos=0,
+                            tipos_documento=[],
+                            estagio_max=estagio_max,
+                        )
+                        continue
+                    estagio = "DOCUMENTADA"
                     _update_quote_stage(
                         supabase,
                         cotacao.id,
-                        "ENQUADRADA",
-                        motivo=f"erro_documentos_broadfactor:{exc}",
+                        estagio,
+                        n_documentos=n_documentos,
+                        tipos_documento=tipos_documento,
                         estagio_max=estagio_max,
                     )
-                    continue
-                n_documentos, tipos_documento = _documentos_info(documentos)
-                if n_documentos < 1:
-                    _update_quote_stage(
-                        supabase,
-                        cotacao.id,
-                        "ENQUADRADA",
-                        motivo="sem_documentos_broadfactor",
-                        n_documentos=0,
-                        tipos_documento=[],
-                        estagio_max=estagio_max,
-                    )
-                    continue
-                estagio = "DOCUMENTADA"
-                _update_quote_stage(
-                    supabase,
-                    cotacao.id,
-                    estagio,
-                    n_documentos=n_documentos,
-                    tipos_documento=tipos_documento,
-                    estagio_max=estagio_max,
-                )
 
             if estagio not in {"DOCUMENTADA", "QUALIFICADA"}:
                 continue
