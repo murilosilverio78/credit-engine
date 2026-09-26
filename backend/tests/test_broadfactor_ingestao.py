@@ -323,3 +323,273 @@ def test_close_update_persists_explicit_maximum_stage(monkeypatch):
 
     assert saved["estagio"] == "ENCERRADA"
     assert saved["estagio_max"] == "QUALIFICADA"
+
+
+@pytest.mark.asyncio
+async def test_one_quote_failure_does_not_block_following_quotes(monkeypatch):
+    first = quote("C-fails")
+    second = quote("C-works")
+    database, created, analyses = install_funnel(
+        monkeypatch,
+        [first, second],
+        documentos={first.id: [document()], second.id: [document()]},
+    )
+    persist = broadfactor_ingestao._persist_quote
+
+    def fail_first(supabase, cotacao, valor_enquadrado):
+        if cotacao.id == first.id:
+            raise ConnectionError("temporary failure")
+        persist(supabase, cotacao, valor_enquadrado)
+
+    monkeypatch.setattr(broadfactor_ingestao, "_persist_quote", fail_first)
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert set(database.quotes) == {second.id}
+    assert [item["cotacao_id"] for item in created] == [second.id]
+    assert analyses == ["operation-C-works"]
+    assert result["criadas"] == 1
+    assert result["falhas"] == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_operation_is_reprocessed_without_creating_another(monkeypatch):
+    database, created, analyses = install_funnel(
+        monkeypatch,
+        [quote("C-retry")],
+        initial_quotes=[{
+            "cotacao_id": "C-retry",
+            "ambiente": "PRODUCAO",
+            "estagio": "DOCUMENTADA",
+            "estagio_max": "DOCUMENTADA",
+            "operation_id": "operation-C-retry",
+        }],
+    )
+    existing = {
+        "id": "operation-C-retry",
+        "status": "failed",
+        "analysis_attempts": 1,
+    }
+    statuses = []
+    monkeypatch.setattr(broadfactor_ingestao, "_get_existing_operation", lambda *_: existing)
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_claim_failed_operation",
+        lambda *_: {**existing, "status": "processing", "analysis_attempts": 2},
+    )
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_update_quote_status",
+        lambda _, cotacao_id, status, operation_id=None: statuses.append(
+            (cotacao_id, status, operation_id)
+        ),
+    )
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert database.quotes["C-retry"]["estagio"] == "DOCUMENTADA"
+    assert created == []
+    assert analyses == ["operation-C-retry"]
+    assert statuses == [
+        ("C-retry", "REPROCESSANDO", "operation-C-retry"),
+        ("C-retry", "ANALISE_CONCLUIDA", "operation-C-retry"),
+    ]
+    assert result["reprocessadas"] == 1
+    assert result["criadas"] == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_operation_stops_after_maximum_attempts(monkeypatch):
+    _, created, analyses = install_funnel(
+        monkeypatch,
+        [quote("C-exhausted")],
+        initial_quotes=[{
+            "cotacao_id": "C-exhausted",
+            "ambiente": "PRODUCAO",
+            "estagio": "DOCUMENTADA",
+            "estagio_max": "DOCUMENTADA",
+            "operation_id": "operation-C-exhausted",
+        }],
+    )
+    statuses = []
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_get_existing_operation",
+        lambda *_: {
+            "id": "operation-C-exhausted",
+            "status": "failed",
+            "analysis_attempts": broadfactor_ingestao.MAX_ANALYSIS_ATTEMPTS,
+        },
+    )
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_claim_failed_operation",
+        lambda *_: pytest.fail("exhausted operation was claimed"),
+    )
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_update_quote_status",
+        lambda _, cotacao_id, status, operation_id=None: statuses.append(
+            (cotacao_id, status, operation_id)
+        ),
+    )
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert created == []
+    assert analyses == []
+    assert statuses == [
+        ("C-exhausted", "ERRO_ANALISE_FINAL", "operation-C-exhausted")
+    ]
+    assert result["reprocessadas"] == 0
+    assert result["tentativas_esgotadas"] == 1
+
+
+@pytest.mark.asyncio
+async def test_quote_status_or_stage_failure_does_not_block_partial_analysis(monkeypatch):
+    _, created, analyses = install_funnel(
+        monkeypatch,
+        [quote("C-status-fails")],
+        documentos={"C-status-fails": [document()]},
+    )
+
+    def fail_status(*_args):
+        raise ConnectionError("status unavailable")
+
+    monkeypatch.setattr(broadfactor_ingestao, "_update_quote_status", fail_status)
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert [item["cotacao_id"] for item in created] == ["C-status-fails"]
+    assert analyses == ["operation-C-status-fails"]
+    assert result["criadas"] == 1
+    assert result["falhas"] >= 1
+
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_execute_with_retry",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ConnectionError("stage unavailable")
+        ),
+    )
+    broadfactor_ingestao._update_quote_stage(
+        object(),
+        "C-status-fails",
+        "DOCUMENTADA",
+        estagio_max="ENQUADRADA",
+    )
+
+
+@pytest.mark.asyncio
+async def test_analysis_error_is_persisted_on_quote(monkeypatch):
+    _, created, _ = install_funnel(
+        monkeypatch,
+        [quote("C-analysis-fails")],
+        documentos={"C-analysis-fails": [document()]},
+    )
+    statuses = []
+
+    async def fail_analysis(_operation_id):
+        raise RuntimeError("phase2_validation: Server disconnected")
+
+    monkeypatch.setattr(broadfactor_ingestao, "_start_analysis", fail_analysis)
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_update_quote_status",
+        lambda _, cotacao_id, status, operation_id=None: statuses.append(
+            (cotacao_id, status, operation_id)
+        ),
+    )
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert [item["cotacao_id"] for item in created] == ["C-analysis-fails"]
+    assert statuses == [
+        ("C-analysis-fails", "OPERACAO_CRIADA", "operation-C-analysis-fails"),
+        ("C-analysis-fails", "ERRO_ANALISE", "operation-C-analysis-fails"),
+    ]
+    assert result["falhas"] == 1
+
+
+@pytest.mark.asyncio
+async def test_limit_counts_created_operations_not_duplicates(monkeypatch):
+    existing = quote("C-existing")
+    first_new = quote("C-first-new")
+    second_new = quote("C-second-new")
+    database, created, analyses = install_funnel(
+        monkeypatch,
+        [existing, first_new, second_new],
+        initial_quotes=[
+            {
+                "cotacao_id": item.id,
+                "ambiente": "PRODUCAO",
+                "estagio": "DOCUMENTADA",
+                "estagio_max": "DOCUMENTADA",
+                **(
+                    {"operation_id": "operation-C-existing"}
+                    if item.id == existing.id
+                    else {}
+                ),
+            }
+            for item in (existing, first_new, second_new)
+        ],
+    )
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_get_existing_operation",
+        lambda _, cotacao_id: (
+            {"id": "operation-C-existing", "status": "aguardando_relatorio"}
+            if cotacao_id == existing.id
+            else None
+        ),
+    )
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao(limit=1)
+
+    assert set(database.quotes) == {existing.id, first_new.id, second_new.id}
+    assert [item["cotacao_id"] for item in created] == [first_new.id]
+    assert analyses == ["operation-C-existing", "operation-C-first-new"]
+    assert result["duplicadas"] == 1
+    assert result["criadas"] == 1
+
+
+def test_failed_operation_claim_is_conditional_and_increments_attempts(monkeypatch):
+    captured = {"filters": []}
+
+    class Query:
+        def update(self, data):
+            captured["data"] = data
+            return self
+
+        def eq(self, field, value):
+            captured["filters"].append((field, value))
+            return self
+
+        def execute(self):
+            return SimpleNamespace(data=[{"id": "op-1", "status": "processing"}])
+
+    class Supabase:
+        def table(self, name):
+            assert name == "operations"
+            return Query()
+
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_execute_with_retry",
+        lambda _operation_id, _component, _action, request: request(),
+    )
+
+    claimed = broadfactor_ingestao._claim_failed_operation(
+        Supabase(),
+        {"id": "op-1", "status": "failed", "analysis_attempts": 1},
+    )
+
+    assert claimed["analysis_attempts"] == 2
+    assert captured["data"] == {
+        "status": "processing",
+        "analysis_attempts": 2,
+        "error_message": None,
+        "completed_at": None,
+    }
+    assert ("status", "failed") in captured["filters"]
+    assert ("analysis_attempts", 1) in captured["filters"]

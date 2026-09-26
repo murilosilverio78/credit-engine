@@ -483,14 +483,34 @@ async def run_broadfactor_ingestao(
             if estagio == "QUALIFICADA":
                 duplicadas += 1
                 continue
-            if limit is not None and processadas >= limit:
-                continue
-
             existing = _get_existing_operation(supabase, cotacao.id)
+            attempt = 1
+            status_ingestao = "OPERACAO_CRIADA"
             if existing:
                 operation_id = str(existing["id"])
-                duplicadas += 1
+                if existing.get("status") == "failed":
+                    attempt = int(existing.get("analysis_attempts") or 1)
+                    if attempt >= MAX_ANALYSIS_ATTEMPTS:
+                        tentativas_esgotadas += 1
+                        _update_quote_status(
+                            supabase,
+                            cotacao.id,
+                            "ERRO_ANALISE_FINAL",
+                            operation_id,
+                        )
+                        continue
+                    claimed = _claim_failed_operation(supabase, existing)
+                    if not claimed:
+                        duplicadas += 1
+                        continue
+                    attempt = int(claimed.get("analysis_attempts") or attempt + 1)
+                    reprocessadas += 1
+                    status_ingestao = "REPROCESSANDO"
+                else:
+                    duplicadas += 1
             else:
+                if limit is not None and processadas >= limit:
+                    continue
                 operation = await operation_service.create(
                     cnpj=cotacao.documento.numero,
                     origem_dados="API_BROADFACTOR",
@@ -505,6 +525,7 @@ async def run_broadfactor_ingestao(
                 )
                 operation_id = str(operation["id"])
                 criadas += 1
+                processadas += 1
 
             if not operation_id:
                 continue
@@ -512,16 +533,15 @@ async def run_broadfactor_ingestao(
                 (
                     cotacao.id,
                     operation_id,
-                    1,
+                    attempt,
                     asyncio.create_task(_start_analysis(operation_id)),
                 )
             )
-            processadas += 1
             try:
                 _update_quote_status(
                     supabase,
                     cotacao.id,
-                    "OPERACAO_CRIADA",
+                    status_ingestao,
                     operation_id,
                 )
             except Exception as status_exc:
