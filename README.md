@@ -79,10 +79,9 @@ Ver `backend/.env.example` e `frontend/.env.local.example`.
 
 ## Ingestao Broadfactor
 
-A ingestao de cotacoes roda duas vezes por dia util pelo workflow GitHub Actions
-`Ingestao Broadfactor`, as 08:05 e 14:15 no horario de Brasilia. Os crons do
-workflow estao definidos em UTC e devem ser revistos se o Brasil voltar a adotar
-horario de verao.
+A ingestao de cotacoes roda duas vezes por dia util pelo n8n, as 08:05 e 14:15
+no horario de Brasilia. O agendamento no n8n tambem envia um alerta por Gmail em
+caso de falha. O GitHub Actions nao possui cron para evitar disparos duplicados.
 
 Para executar manualmente, abra **Actions > Ingestao Broadfactor > Run workflow**.
 O disparo manual aceita `limit` opcional e `dry_run` para executar apenas a
