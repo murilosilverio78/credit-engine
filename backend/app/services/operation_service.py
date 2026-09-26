@@ -1,6 +1,8 @@
 """
 OperationService: CRUD de operações de crédito.
 """
+from __future__ import annotations
+
 import asyncio
 from typing import Optional
 from datetime import datetime, timezone
