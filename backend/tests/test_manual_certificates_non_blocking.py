@@ -356,7 +356,8 @@ def test_score_preconditions_retry_transient_disconnect(monkeypatch):
 def test_start_analysis_persists_unhandled_failure_with_stage(monkeypatch):
     persisted = []
 
-    async def fail_analysis(_operation_id):
+    async def fail_analysis(_operation_id, *, ate_fase=None):
+        assert ate_fase is None
         orchestrator._PIPELINE_STAGE.set("phase2_validation")
         raise httpx.RemoteProtocolError("Server disconnected")
 

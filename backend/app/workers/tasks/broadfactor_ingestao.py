@@ -199,7 +199,10 @@ def _update_quote_stage(
         "estagio_atualizado_em": datetime.now(timezone.utc).isoformat(),
         "status_ingestao": estagio,
     }
-    if estagio != "ENCERRADA":
+    if estagio == "ENCERRADA":
+        if estagio_max is not None:
+            data["estagio_max"] = estagio_max
+    else:
         data["estagio_max"] = _stage_max(estagio_max, estagio)
     if operation_id is not None:
         data["operation_id"] = operation_id

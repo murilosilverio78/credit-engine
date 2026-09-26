@@ -37,7 +37,8 @@ async def test_shutdown_waits_for_running_analysis(monkeypatch):
     release = asyncio.Event()
     fake_logger = FakeLogger()
 
-    async def fake_run(_operation_id: str):
+    async def fake_run(_operation_id: str, *, ate_fase=None):
+        assert ate_fase is None
         entered.set()
         await release.wait()
         return {"status": "completed"}
@@ -77,7 +78,8 @@ async def test_shutdown_timeout_is_logged_without_raising(monkeypatch):
     release = asyncio.Event()
     fake_logger = FakeLogger()
 
-    async def fake_run(_operation_id: str):
+    async def fake_run(_operation_id: str, *, ate_fase=None):
+        assert ate_fase is None
         entered.set()
         await release.wait()
         return {"status": "completed"}
@@ -124,7 +126,8 @@ async def test_create_operation_is_rejected_during_shutdown():
 
 @pytest.mark.asyncio
 async def test_failed_analysis_is_removed_from_runtime_tracker(monkeypatch):
-    async def fake_run(_operation_id: str):
+    async def fake_run(_operation_id: str, *, ate_fase=None):
+        assert ate_fase is None
         raise RuntimeError("falha simulada")
 
     monkeypatch.setattr(orchestrator, "_run_analysis", fake_run)

@@ -80,8 +80,8 @@ def test_admin_operations_respects_limit_and_offset(monkeypatch):
         "op-9",
     ]
     assert calls == [
-        {"status": "completed", "cnpj": None, "limit": 5, "offset": 0},
-        {"status": "completed", "cnpj": None, "limit": 5, "offset": 5},
+        {"status": "completed", "cnpj": None, "estagio": None, "limit": 5, "offset": 0},
+        {"status": "completed", "cnpj": None, "estagio": None, "limit": 5, "offset": 5},
     ]
 
 
