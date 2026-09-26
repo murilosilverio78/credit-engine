@@ -1,25 +1,39 @@
 "use client";
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { FileText, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useMemo, useState } from "react";
 
-import { getAdminOperations, getPendingOverrides } from "@/lib/api";
+import {
+  generateOperationReport,
+  getAdminOperations,
+  getPendingOverrides,
+} from "@/lib/api";
 import { formatTaxaAm } from "@/lib/format";
 import {
   type Operation,
   type OperationStatus,
   type Rating,
+  type FunilEstagio,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
 
+const stageTabs: Array<{ value: FunilEstagio; label: string }> = [
+  { value: "LISTA_ESPERA", label: "Lista de espera" },
+  { value: "ENQUADRADA", label: "Enquadradas" },
+  { value: "DOCUMENTADA", label: "Documentadas" },
+  { value: "QUALIFICADA", label: "Qualificadas" },
+  { value: "ENCERRADA", label: "Encerradas" },
+];
+
 const statusOptions: OperationStatus[] = [
   "pending",
   "processing",
+  "aguardando_relatorio",
   "completed",
   "failed",
   "manual_review",
@@ -40,6 +54,7 @@ const ratingColors: Record<Rating, string> = {
 const statusColors: Record<OperationStatus, string> = {
   pending: "bg-muted text-muted-foreground",
   processing: "animate-pulse bg-blue-100 text-blue-800",
+  aguardando_relatorio: "bg-emerald-100 text-emerald-800",
   completed: "bg-blue-100 text-blue-800",
   failed: "bg-red-100 text-red-800",
   error: "bg-red-100 text-red-800",
@@ -138,13 +153,18 @@ export default function OperationsPage() {
   const [cnpjSearch, setCnpjSearch] = useState("");
   const [status, setStatus] = useState<OperationStatus | "">("");
   const [rating, setRating] = useState<Rating | "">("");
+  const [stage, setStage] = useState<FunilEstagio>("LISTA_ESPERA");
 
   const operationsQuery = useQuery({
-    queryKey: ["operations", { limit: PAGE_SIZE, offset, status }],
-    queryFn: () => getAdminOperations(PAGE_SIZE, offset, status),
+    queryKey: ["operations", { limit: PAGE_SIZE, offset, status, stage }],
+    queryFn: () => getAdminOperations(PAGE_SIZE, offset, status, stage),
     placeholderData: keepPreviousData,
     refetchInterval: 15_000,
     refetchIntervalInBackground: true,
+  });
+  const reportMutation = useMutation({
+    mutationFn: generateOperationReport,
+    onSuccess: () => operationsQuery.refetch(),
   });
   const pendingOverridesQuery = useQuery({
     queryKey: ["overrides", "pending"],
@@ -170,6 +190,7 @@ export default function OperationsPage() {
   }, [cnpjSearch, operations, rating, status]);
 
   const total = operationsQuery.data?.total ?? 0;
+  const stageCounts = operationsQuery.data?.estagios ?? {};
   const completed = operations.filter(
     (operation) => operation.status === "completed",
   ).length;
@@ -191,9 +212,13 @@ export default function OperationsPage() {
     operation: Operation,
     event?: KeyboardEvent<HTMLTableRowElement>,
   ) {
+    const operationId = operation.operation_id ?? operation.id;
+    if (!operation.operation_id) {
+      return;
+    }
     if (!event || event.key === "Enter" || event.key === " ") {
       event?.preventDefault();
-      router.push(`/operations/${operation.id}`);
+      router.push(`/operations/${operationId}`);
     }
   }
 
@@ -233,6 +258,30 @@ export default function OperationsPage() {
             subtitle="pendente"
             value={pendingOverrides}
           />
+        </div>
+
+        <div className="mb-3 flex flex-wrap gap-1.5 border-b-[0.5px] border-border">
+          {stageTabs.map((tab) => (
+            <button
+              className={cn(
+                "flex h-9 items-center gap-1.5 border-b-2 px-2.5 text-xs transition-colors",
+                stage === tab.value
+                  ? "border-foreground text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+              key={tab.value}
+              onClick={() => {
+                setStage(tab.value);
+                setOffset(0);
+              }}
+              type="button"
+            >
+              {tab.label}
+              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                {stageCounts[tab.value] ?? 0}
+              </span>
+            </button>
+          ))}
         </div>
 
         <div className="mb-3 flex gap-2">
@@ -315,8 +364,14 @@ export default function OperationsPage() {
                 <th className="w-[120px] border-b-[0.5px] border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground">
                   Status
                 </th>
+                <th className="w-[170px] border-b-[0.5px] border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground">
+                  Motivo
+                </th>
                 <th className="w-[105px] border-b-[0.5px] border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground">
                   Data
+                </th>
+                <th className="w-[135px] border-b-[0.5px] border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground">
+                  Ação
                 </th>
               </tr>
             </thead>
@@ -325,7 +380,7 @@ export default function OperationsPage() {
                 <tr>
                   <td
                     className="h-28 text-center text-sm text-muted-foreground"
-                    colSpan={7}
+                    colSpan={9}
                   >
                     Carregando operações...
                   </td>
@@ -334,7 +389,7 @@ export default function OperationsPage() {
                 <tr>
                   <td
                     className="h-28 text-center text-sm text-red-700"
-                    colSpan={7}
+                    colSpan={9}
                   >
                     Não foi possível carregar as operações.
                   </td>
@@ -343,7 +398,7 @@ export default function OperationsPage() {
                 <tr>
                   <td
                     className="h-28 text-center text-sm text-muted-foreground"
-                    colSpan={7}
+                    colSpan={9}
                   >
                     Nenhuma operação encontrada. Inicie uma análise.
                   </td>
@@ -379,8 +434,38 @@ export default function OperationsPage() {
                     <td className="border-b-[0.5px] border-border px-2.5 py-2">
                       <StatusBadge status={operation.status} />
                     </td>
+                    <td
+                      className="truncate border-b-[0.5px] border-border px-2.5 py-2 text-[11px] text-muted-foreground"
+                      title={operation.estagio_motivo ?? undefined}
+                    >
+                      {operation.estagio_motivo || "—"}
+                    </td>
                     <td className="border-b-[0.5px] border-border px-2.5 py-2 font-mono text-[11px] text-muted-foreground">
                       {formatDate(operation.created_at)}
+                    </td>
+                    <td className="border-b-[0.5px] border-border px-2.5 py-2">
+                      {stage === "QUALIFICADA" && operation.operation_id ? (
+                        <button
+                          className="inline-flex h-7 items-center gap-1.5 rounded-md border-[0.5px] border-border bg-background px-2 text-[11px] text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                          disabled={
+                            operation.status === "processing" ||
+                            operation.status === "completed" ||
+                            reportMutation.isPending
+                          }
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            reportMutation.mutate(operation.operation_id!);
+                          }}
+                          type="button"
+                        >
+                          <FileText aria-hidden="true" className="h-3.5 w-3.5" />
+                          {operation.status === "processing"
+                            ? "Gerando"
+                            : "Gerar relatório"}
+                        </button>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </td>
                   </tr>
                 ))

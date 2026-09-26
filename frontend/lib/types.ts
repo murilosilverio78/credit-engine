@@ -3,6 +3,7 @@ export type Rating = "A" | "B" | "C" | "D" | "E";
 export type OperationStatus =
   | "pending"
   | "processing"
+  | "aguardando_relatorio"
   | "completed"
   | "failed"
   | "error"          // alias legado — unificado para 'failed' no backend (PR-4)
@@ -11,6 +12,13 @@ export type OperationStatus =
   | "rejected"
   | "escalated";
 
+export type FunilEstagio =
+  | "LISTA_ESPERA"
+  | "ENQUADRADA"
+  | "DOCUMENTADA"
+  | "QUALIFICADA"
+  | "ENCERRADA";
+
 export type OverrideType = "taxa";
 
 export type UserRole = "analista" | "gerente" | "diretor";
@@ -18,6 +26,7 @@ export type Alcada = UserRole;
 
 export interface Operation {
   id: string;
+  operation_id?: string | null;
   cnpj: string;
   razao_social: string | null;
   status: OperationStatus;
@@ -37,6 +46,10 @@ export interface Operation {
   margem_disponivel?: number | null;
   origem_dados?: "API_BROADFACTOR" | "MANUAL" | null;
   cotacao_id?: string | null;
+  estagio?: FunilEstagio | null;
+  estagio_motivo?: string | null;
+  n_documentos?: number | null;
+  tipos_documento?: string[] | null;
   pricing_skipped_reason?: string | null;
   dado_cadastral_degradado?: boolean | null;
   source: string;
@@ -116,6 +129,7 @@ export interface PaginatedOperations {
   total: number;
   limit: number;
   offset: number;
+  estagios?: Partial<Record<FunilEstagio, number>>;
 }
 
 export interface OperationCreated {

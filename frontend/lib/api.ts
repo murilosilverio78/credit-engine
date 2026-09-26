@@ -27,6 +27,7 @@ import type {
   UploadResult,
   UploadTask,
   OperationStatus,
+  FunilEstagio,
   UserRole,
 } from "@/lib/types";
 import { clearAuthToken, getAuthToken } from "@/lib/auth-token";
@@ -119,6 +120,7 @@ export function getAdminOperations(
   limit = 20,
   offset = 0,
   status?: OperationStatus | "",
+  estagio?: FunilEstagio,
 ) {
   const params = new URLSearchParams({
     limit: String(limit),
@@ -126,6 +128,9 @@ export function getAdminOperations(
   });
   if (status) {
     params.set("status", status);
+  }
+  if (estagio) {
+    params.set("estagio", estagio);
   }
   return request<PaginatedOperations>(`/api/v1/admin/operations?${params}`);
 }
@@ -146,6 +151,16 @@ export function reprocessOperationScore(operationId: string) {
     `/api/v1/operations/${encodeURIComponent(operationId)}/reprocessar-score`,
     { method: "POST" },
   );
+}
+
+export function generateOperationReport(operationId: string) {
+  return request<{
+    message: string;
+    operation_id: string;
+    status: "accepted";
+  }>(`/api/v1/operations/${encodeURIComponent(operationId)}/relatorio`, {
+    method: "POST",
+  });
 }
 
 export async function downloadOperationReportPdf(operationId: string) {
