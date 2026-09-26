@@ -37,22 +37,37 @@ class Query:
             for row in rows
             if all(row.get(field) == value for field, value in self.filters)
         ]
-        return SimpleNamespace(data=(matches[0] if matches and self.single else None))
+        if self.single and not matches:
+            return None
+        return SimpleNamespace(data=(matches[0] if self.single else matches))
 
 
 class Supabase:
-    def __init__(self, stage="QUALIFICADA", score_completed=False):
+    def __init__(
+        self,
+        stage="QUALIFICADA",
+        score_completed=False,
+        include_quote=True,
+    ):
         self.tables = {
-            "component_snapshots": ([{
-                "operation_id": "op-1",
-                "component": "score_engine",
-                "status": "completed",
-            }] if score_completed else []),
-            "cotacoes_broadfactor": [{
-                "cotacao_id": "C-1",
-                "operation_id": "op-1",
-                "estagio": stage,
-            }],
+            "component_snapshots": (
+                [{
+                    "operation_id": "op-1",
+                    "component": "score_engine",
+                    "status": "completed",
+                }]
+                if score_completed
+                else []
+            ),
+            "cotacoes_broadfactor": (
+                [{
+                    "cotacao_id": "C-1",
+                    "operation_id": "op-1",
+                    "estagio": stage,
+                }]
+                if include_quote
+                else []
+            ),
         }
 
     def table(self, name):
@@ -74,7 +89,7 @@ def call_endpoint(background, user=None):
     )
 
 
-def test_qualified_quote_schedules_report_and_audits(monkeypatch):
+def test_qualified_quote_without_score_schedules_report_and_audits(monkeypatch):
     audit_entries = []
     monkeypatch.setattr(operations, "supabase", Supabase())
     monkeypatch.setattr(
@@ -113,6 +128,33 @@ def test_unqualified_quote_cannot_generate_report(monkeypatch):
     assert exc.value.status_code == 409
     assert exc.value.detail["code"] == "QUOTE_NOT_QUALIFIED"
     assert exc.value.detail["estagio"] == "DOCUMENTADA"
+
+
+def test_operation_without_linked_quote_returns_not_qualified(monkeypatch):
+    monkeypatch.setattr(
+        operations,
+        "supabase",
+        Supabase(include_quote=False),
+    )
+    monkeypatch.setattr(
+        operations,
+        "_operation_snapshot",
+        lambda _operation_id: {
+            "id": "op-1",
+            "status": "aguardando_relatorio",
+            "rating": None,
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        call_endpoint(BackgroundTasks())
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == {
+        "code": "QUOTE_NOT_QUALIFIED",
+        "message": "Relatorio so pode ser gerado para cotacao qualificada",
+        "estagio": None,
+    }
 
 
 @pytest.mark.parametrize(

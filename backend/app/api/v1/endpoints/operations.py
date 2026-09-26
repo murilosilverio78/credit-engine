@@ -410,7 +410,8 @@ async def generate_operation_report(
         .maybe_single()
         .execute()
     )
-    if score_snapshot.data:
+    score_snapshot_data = getattr(score_snapshot, "data", None)
+    if score_snapshot_data:
         raise HTTPException(
             status_code=409,
             detail={
@@ -426,13 +427,14 @@ async def generate_operation_report(
         .maybe_single()
         .execute()
     )
-    if not quote.data or quote.data.get("estagio") != "QUALIFICADA":
+    quote_data = getattr(quote, "data", None)
+    if not quote_data or quote_data.get("estagio") != "QUALIFICADA":
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "QUOTE_NOT_QUALIFIED",
                 "message": "Relatorio so pode ser gerado para cotacao qualificada",
-                "estagio": quote.data.get("estagio") if quote.data else None,
+                "estagio": quote_data.get("estagio") if quote_data else None,
             },
         )
 
@@ -442,7 +444,7 @@ async def generate_operation_report(
         actor_id=current_user.get("id"),
         actor_type=current_user.get("role", "analista"),
         ip_address=request.client.host if request.client else None,
-        payload={"cotacao_id": quote.data.get("cotacao_id")},
+        payload={"cotacao_id": quote_data.get("cotacao_id")},
     )
 
     from app.workers.tasks.orchestrator import start_report_analysis
