@@ -27,6 +27,15 @@ PHASE2_COMPONENTS = (
     "cnep",
     "cepim",
 )
+PHASE2_FUNIL_COMPONENTS = (
+    "contratos",
+    "contratos_comprasnet",
+    "recursos_recebidos",
+    "acordos_leniencia",
+    "ceis",
+    "cnep",
+    "cepim",
+)
 RUNNING_STALE_MINUTES = 15
 _PIPELINE_STAGE: ContextVar[str] = ContextVar(
     "pipeline_stage",
@@ -80,15 +89,21 @@ def _component_result_failed(result: Any) -> bool:
     return bool(result.get("error")) or result.get("status") == "failed"
 
 
-def _phase2_failed_components(results: list[Any]) -> list[tuple[str, Any]]:
+def _phase2_failed_components(
+    results: list[Any],
+    components: tuple[str, ...] = PHASE2_COMPONENTS,
+) -> list[tuple[str, Any]]:
     return [
         (component, result)
-        for component, result in zip(PHASE2_COMPONENTS, results)
+        for component, result in zip(components, results)
         if _component_result_failed(result)
     ]
 
 
-def _finalize_phase2_snapshots(operation_id: str) -> dict[str, Any]:
+def _finalize_phase2_snapshots(
+    operation_id: str,
+    components: tuple[str, ...] = PHASE2_COMPONENTS,
+) -> dict[str, Any]:
     """Close phase-2 snapshots that never ran and report missing Comprasnet data."""
     result = _execute_db(
         operation_id,
@@ -96,17 +111,17 @@ def _finalize_phase2_snapshots(operation_id: str) -> dict[str, Any]:
         lambda: supabase.table("component_snapshots")
         .select("component,status")
         .eq("operation_id", operation_id)
-        .in_("component", list(PHASE2_COMPONENTS))
+        .in_("component", list(components))
         .execute(),
     )
     statuses = {
         row.get("component"): row.get("status")
         for row in (result.data or [])
-        if row.get("component") in PHASE2_COMPONENTS
+        if row.get("component") in components
     }
     pending = [
         component
-        for component in PHASE2_COMPONENTS
+        for component in components
         if statuses.get(component) == "pending"
     ]
     if pending:
@@ -356,12 +371,12 @@ async def _run_or_reuse_component(
     return await _run_component(run_fn, operation_id)
 
 
-async def start_analysis(operation_id: str):
+async def start_analysis(operation_id: str, *, ate_fase: int | None = None):
     """Run the pipeline and persist any unhandled failure with its stage."""
     async with track_analysis(operation_id):
         stage_token = _PIPELINE_STAGE.set("pipeline_initialization")
         try:
-            return await _run_analysis(operation_id)
+            return await _run_analysis(operation_id, ate_fase=ate_fase)
         except Exception as exc:
             stage = _PIPELINE_STAGE.get()
             _mark_operation_failed(operation_id, f"{stage}: {exc}")
@@ -377,7 +392,7 @@ async def start_analysis(operation_id: str):
             _PIPELINE_STAGE.reset(stage_token)
 
 
-async def _run_analysis(operation_id: str):
+async def _run_analysis(operation_id: str, *, ate_fase: int | None = None):
     """
     Start the analysis.
 
@@ -399,7 +414,7 @@ async def _run_analysis(operation_id: str):
     from app.workers.tasks.pessoa_juridica import run_pessoa_juridica
     from app.workers.tasks.recursos_recebidos import run_recursos_recebidos
 
-    logger.info("pipeline.started", operation_id=operation_id)
+    logger.info("pipeline.started", operation_id=operation_id, ate_fase=ate_fase)
 
     # Sinaliza que o pipeline está em execução e registra heartbeat inicial
     _execute_db(
@@ -471,21 +486,28 @@ async def _run_analysis(operation_id: str):
     _update_operation_razao_social(operation_id)
     _update_heartbeat(operation_id)
 
+    partial_until_phase2 = ate_fase == 2
+    phase2_components = PHASE2_FUNIL_COMPONENTS if partial_until_phase2 else PHASE2_COMPONENTS
+
     _PIPELINE_STAGE.set("phase2")
     contracts_task = asyncio.create_task(
         _run_or_reuse_component(
             "contratos", run_contratos, operation_id, reusable_components
         )
     )
-    parallel_tasks = [
-        asyncio.create_task(
-            _run_or_reuse_component(
-                "contrato_extracao",
-                run_contrato_extracao,
-                operation_id,
-                reusable_components,
+    parallel_tasks = []
+    if not partial_until_phase2:
+        parallel_tasks.append(
+            asyncio.create_task(
+                _run_or_reuse_component(
+                    "contrato_extracao",
+                    run_contrato_extracao,
+                    operation_id,
+                    reusable_components,
+                )
             )
-        ),
+        )
+    parallel_tasks.extend([
         asyncio.create_task(
             _run_or_reuse_component(
                 "recursos_recebidos",
@@ -511,7 +533,7 @@ async def _run_analysis(operation_id: str):
         asyncio.create_task(
             _run_or_reuse_component("cepim", run_cepim, operation_id, reusable_components)
         ),
-    ]
+    ])
 
     # Comprasnet depends on the Portal contract snapshot for the correct UASG.
     # Other phase-2 components keep running while this dependency is resolved.
@@ -523,12 +545,15 @@ async def _run_analysis(operation_id: str):
         reusable_components,
     )
     parallel_results = await asyncio.gather(*parallel_tasks)
-    phase2_results = (
-        contracts_result,
-        parallel_results[0],
-        comprasnet_result,
-        *parallel_results[1:],
-    )
+    if partial_until_phase2:
+        phase2_results = (contracts_result, comprasnet_result, *parallel_results)
+    else:
+        phase2_results = (
+            contracts_result,
+            parallel_results[0],
+            comprasnet_result,
+            *parallel_results[1:],
+        )
     _PIPELINE_STAGE.set("phase2_validation")
     _update_heartbeat(operation_id)
     try:
@@ -540,14 +565,14 @@ async def _run_analysis(operation_id: str):
             error=str(exc),
         )
     try:
-        _finalize_phase2_snapshots(operation_id)
+        _finalize_phase2_snapshots(operation_id, phase2_components)
     except Exception as exc:
         logger.warning(
             "pipeline.phase2_finalize_failed",
             operation_id=operation_id,
             error=str(exc),
         )
-    failed_phase2 = _phase2_failed_components(list(phase2_results))
+    failed_phase2 = _phase2_failed_components(list(phase2_results), phase2_components)
     for component, result in failed_phase2:
         logger.error(
             "pipeline.phase2_component_failed",
@@ -555,15 +580,15 @@ async def _run_analysis(operation_id: str):
             component=component,
             result=result,
         )
-    if len(failed_phase2) == len(PHASE2_COMPONENTS):
+    if len(failed_phase2) == len(phase2_components):
         message = "pipeline abortado: falha em componente da fase 2"
         _mark_operation_failed(operation_id, message)
         logger.error("pipeline.phase2_failed", operation_id=operation_id, results=phase2_results)
         return {"operation_id": operation_id, "status": "failed", "error": message}
 
-    incomplete = _incomplete_components(operation_id, PHASE2_COMPONENTS)
+    incomplete = _incomplete_components(operation_id, phase2_components)
     if incomplete:
-        if len(incomplete) == len(PHASE2_COMPONENTS):
+        if len(incomplete) == len(phase2_components):
             message = "pipeline abortado: fase 2 incompleta: " + ", ".join(incomplete)
             _mark_operation_failed(operation_id, message)
             logger.error(
@@ -578,6 +603,9 @@ async def _run_analysis(operation_id: str):
             incomplete_components=incomplete,
         )
 
+    if partial_until_phase2:
+        return await _complete_phase2_for_funil(operation_id)
+
     _PIPELINE_STAGE.set("manual_upload_setup")
     after_phase2 = await _after_phase2(
         operation_id,
@@ -586,6 +614,58 @@ async def _run_analysis(operation_id: str):
     if isinstance(after_phase2, dict) and after_phase2.get("status") == "failed":
         return after_phase2
     return {"operation_id": operation_id, "status": "pipeline_started"}
+
+
+async def _complete_phase2_for_funil(operation_id: str):
+    _PIPELINE_STAGE.set("phase2_funil_completion")
+    result = _execute_db(
+        operation_id,
+        "load_operation_for_funil_completion",
+        lambda: supabase.table("operations")
+        .select("cotacao_id")
+        .eq("id", operation_id)
+        .maybe_single()
+        .execute(),
+    )
+    operation = result.data or {}
+    cotacao_id = operation.get("cotacao_id")
+    estagio = None
+    motivos: list[str] = []
+    if cotacao_id:
+        from app.services.funil_qualificacao_service import atualizar_estagio_pos_fase2
+
+        estagio, motivos = await asyncio.to_thread(
+            atualizar_estagio_pos_fase2,
+            str(cotacao_id),
+            operation_id,
+        )
+
+    _execute_db(
+        operation_id,
+        "mark_operation_waiting_report",
+        lambda: supabase.table("operations")
+        .update({
+            "status": "aguardando_relatorio",
+            "completed_at": None,
+            "error_message": None,
+            "heartbeat_at": datetime.now(timezone.utc).isoformat(),
+        })
+        .eq("id", operation_id)
+        .execute(),
+    )
+    logger.info(
+        "pipeline.phase2_funil_completed",
+        operation_id=operation_id,
+        cotacao_id=cotacao_id,
+        estagio=estagio,
+        motivos=motivos,
+    )
+    return {
+        "operation_id": operation_id,
+        "status": "aguardando_relatorio",
+        "estagio": estagio,
+        "motivos": motivos,
+    }
 
 
 async def _after_phase2(
@@ -736,6 +816,39 @@ async def _phase3_4(
     _PIPELINE_STAGE.set("analysis_completion")
     await _complete_analysis(operation_id)
     return {"operation_id": operation_id, "status": "completed"}
+
+
+async def start_report_analysis(operation_id: str):
+    """Run only the paid report phase after a quote is qualified."""
+    async with track_analysis(operation_id):
+        stage_token = _PIPELINE_STAGE.set("report_phase")
+        try:
+            _execute_db(
+                operation_id,
+                "mark_report_processing",
+                lambda: supabase.table("operations")
+                .update({
+                    "status": "processing",
+                    "heartbeat_at": datetime.now(timezone.utc).isoformat(),
+                    "error_message": None,
+                })
+                .eq("id", operation_id)
+                .execute(),
+            )
+            return await _phase3_4(operation_id)
+        except Exception as exc:
+            stage = _PIPELINE_STAGE.get()
+            _mark_operation_failed(operation_id, f"{stage}: {exc}")
+            logger.error(
+                "pipeline.report_unhandled_failure",
+                operation_id=operation_id,
+                stage=stage,
+                error=str(exc),
+                exc_info=True,
+            )
+            raise
+        finally:
+            _PIPELINE_STAGE.reset(stage_token)
 
 
 async def _complete_analysis(operation_id: str):

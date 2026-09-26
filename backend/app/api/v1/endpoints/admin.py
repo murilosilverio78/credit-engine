@@ -19,11 +19,18 @@ async def list_operations(
     offset: int = Query(0, ge=0),
     status: str | None = None,
     cnpj: str | None = None,
+    estagio: str | None = None,
 ):
     """Lista operações para o admin."""
     from app.services.operation_service import OperationService
     svc = OperationService()
-    return await svc.list(status=status, cnpj=cnpj, limit=limit, offset=offset)
+    return await svc.list(
+        status=status,
+        cnpj=cnpj,
+        estagio=estagio,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/upload-tasks")

@@ -154,12 +154,16 @@ class OperationService:
         self,
         status: Optional[str] = None,
         cnpj: Optional[str] = None,
+        estagio: Optional[str] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> dict:
         """Lista operações com filtros opcionais."""
+        if estagio:
+            return await self._list_funil(estagio=estagio, cnpj=cnpj, limit=limit, offset=offset)
+
         query = supabase.table("operations")            .select(
-                "id, cnpj, razao_social, status, rating, score, taxa_sugerida, source, created_at",
+                "id, cnpj, razao_social, status, rating, score, taxa_sugerida, source, created_at, cotacao_id",
                 count="exact",
             )            .order("created_at", desc=True)            .range(offset, offset + limit - 1)
 
@@ -169,8 +173,125 @@ class OperationService:
             query = query.eq("cnpj", cnpj)
 
         result = query.execute()
+        items = result.data or []
+        self._attach_quote_stage(items)
         total = result.count if result.count is not None else len(result.data)
-        return {"items": result.data, "total": total, "limit": limit, "offset": offset}
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "estagios": self._stage_counts(),
+        }
+
+    def _stage_counts(self) -> dict[str, int]:
+        try:
+            result = supabase.table("cotacoes_broadfactor")\
+                .select("estagio")\
+                .eq("ambiente", "PRODUCAO")\
+                .execute()
+        except Exception as exc:
+            logger.warning("operation.stage_counts_unavailable", error=str(exc))
+            return {}
+        counts: dict[str, int] = {}
+        for row in result.data or []:
+            stage = row.get("estagio")
+            if stage:
+                counts[stage] = counts.get(stage, 0) + 1
+        return counts
+
+    def _attach_quote_stage(self, items: list[dict]) -> None:
+        operation_ids = [item["id"] for item in items if item.get("id")]
+        if not operation_ids:
+            return
+        try:
+            result = supabase.table("cotacoes_broadfactor")\
+                .select("operation_id,cotacao_id,estagio,estagio_motivo,n_documentos,tipos_documento")\
+                .in_("operation_id", operation_ids)\
+                .execute()
+        except Exception as exc:
+            logger.warning("operation.quote_stage_unavailable", error=str(exc))
+            return
+        by_operation = {
+            str(row.get("operation_id")): row
+            for row in result.data or []
+            if row.get("operation_id")
+        }
+        for item in items:
+            quote = by_operation.get(str(item.get("id")))
+            if quote:
+                item.update({
+                    "cotacao_id": quote.get("cotacao_id"),
+                    "estagio": quote.get("estagio"),
+                    "estagio_motivo": quote.get("estagio_motivo"),
+                    "n_documentos": quote.get("n_documentos"),
+                    "tipos_documento": quote.get("tipos_documento"),
+                    "operation_id": item.get("id"),
+                })
+
+    async def _list_funil(
+        self,
+        *,
+        estagio: str,
+        cnpj: Optional[str],
+        limit: int,
+        offset: int,
+    ) -> dict:
+        query = supabase.table("cotacoes_broadfactor")\
+            .select(
+                "cotacao_id,cnpj,nome_fornecedor,valor_solicitado,valor_enquadrado,"
+                "operation_id,estagio,estagio_motivo,n_documentos,tipos_documento,"
+                "estagio_atualizado_em,created_at",
+                count="exact",
+            )\
+            .eq("ambiente", "PRODUCAO")\
+            .eq("estagio", estagio)\
+            .order("estagio_atualizado_em", desc=True)\
+            .range(offset, offset + limit - 1)
+        if cnpj:
+            query = query.eq("cnpj", cnpj)
+        result = query.execute()
+        quotes = result.data or []
+        operation_ids = [row["operation_id"] for row in quotes if row.get("operation_id")]
+        operations: dict[str, dict] = {}
+        if operation_ids:
+            op_result = supabase.table("operations")\
+                .select("id,status,rating,score,taxa_sugerida,source,created_at,razao_social")\
+                .in_("id", operation_ids)\
+                .execute()
+            operations = {str(row["id"]): row for row in op_result.data or []}
+
+        items = []
+        for quote in quotes:
+            op = operations.get(str(quote.get("operation_id"))) or {}
+            items.append({
+                "id": op.get("id") or quote["cotacao_id"],
+                "operation_id": op.get("id"),
+                "cotacao_id": quote["cotacao_id"],
+                "cnpj": quote.get("cnpj"),
+                "razao_social": op.get("razao_social") or quote.get("nome_fornecedor"),
+                "status": op.get("status") or "pending",
+                "rating": op.get("rating"),
+                "score": op.get("score"),
+                "taxa_sugerida": op.get("taxa_sugerida"),
+                "source": op.get("source") or "broadfactor_ingestao",
+                "created_at": op.get("created_at") or quote.get("created_at"),
+                "valor_solicitado": quote.get("valor_solicitado"),
+                "valor_enquadrado": quote.get("valor_enquadrado"),
+                "estagio": quote.get("estagio"),
+                "estagio_motivo": quote.get("estagio_motivo"),
+                "n_documentos": quote.get("n_documentos"),
+                "tipos_documento": quote.get("tipos_documento"),
+            })
+
+        total = result.count if result.count is not None else len(items)
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "estagios": self._stage_counts(),
+        }
 
     async def update_status(self, operation_id: str, status: str, **kwargs):
         """Atualiza status e campos opcionais da operação."""

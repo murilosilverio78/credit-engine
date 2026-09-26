@@ -384,6 +384,77 @@ async def reprocess_operation_score(
     }
 
 
+@router.post("/{operation_id}/relatorio", status_code=202)
+async def generate_operation_report(
+    operation_id: str,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    operation = _operation_snapshot(operation_id)
+    if operation.get("status") == "completed" or operation.get("rating") is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "REPORT_ALREADY_GENERATED",
+                "message": "Relatorio ja foi gerado para esta operacao",
+            },
+        )
+
+    score_snapshot = (
+        supabase.table("component_snapshots")
+        .select("status")
+        .eq("operation_id", operation_id)
+        .eq("component", "score_engine")
+        .eq("status", "completed")
+        .maybe_single()
+        .execute()
+    )
+    if score_snapshot.data:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "REPORT_ALREADY_GENERATED",
+                "message": "Relatorio ja foi gerado para esta operacao",
+            },
+        )
+
+    quote = (
+        supabase.table("cotacoes_broadfactor")
+        .select("cotacao_id,estagio")
+        .eq("operation_id", operation_id)
+        .maybe_single()
+        .execute()
+    )
+    if not quote.data or quote.data.get("estagio") != "QUALIFICADA":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "QUOTE_NOT_QUALIFIED",
+                "message": "Relatorio so pode ser gerado para cotacao qualificada",
+                "estagio": quote.data.get("estagio") if quote.data else None,
+            },
+        )
+
+    audit.log(
+        operation_id=operation_id,
+        action="relatorio_solicitado",
+        actor_id=current_user.get("id"),
+        actor_type=current_user.get("role", "analista"),
+        ip_address=request.client.host if request.client else None,
+        payload={"cotacao_id": quote.data.get("cotacao_id")},
+    )
+
+    from app.workers.tasks.orchestrator import start_report_analysis
+
+    background_tasks.add_task(start_report_analysis, operation_id)
+    return {
+        "operation_id": operation_id,
+        "status": "accepted",
+        "message": "Geracao do relatorio iniciada",
+    }
+
+
 @router.get("/{operation_id}/score-versions")
 async def list_score_versions(
     operation_id: str,
