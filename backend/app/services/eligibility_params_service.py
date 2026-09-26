@@ -15,6 +15,9 @@ REQUIRED_PARAMS = {
     "dias_minimos_expiracao",
     "prazo_minimo_dias",
     "cnpj_idade_minima_meses",
+    "funil_hist_min_meses",
+    "funil_orgaos_min",
+    "funil_cobertura_min",
 }
 
 

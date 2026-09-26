@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+from datetime import datetime, timezone
 from typing import Any
 
 import structlog
 
-from app.integrations.broadfactor.client import BroadfactorClient, Cotacao
+from app.integrations.broadfactor.client import BroadfactorClient, Cotacao, DocumentoAnexo
 from app.workers.base import _execute_snapshot_write as _execute_with_retry
 
 
@@ -21,6 +22,12 @@ logger = structlog.get_logger()
 SCHEDULE_BRT = ("08:05", "14:15")
 INGESTION_STAGE = "S0_INGESTAO"
 MAX_ANALYSIS_ATTEMPTS = 3
+STAGE_ORDER = {
+    "LISTA_ESPERA": 1,
+    "ENQUADRADA": 2,
+    "DOCUMENTADA": 3,
+    "QUALIFICADA": 4,
+}
 
 
 def _get_existing_operation(supabase: Any, cotacao_id: str) -> dict[str, Any] | None:
@@ -86,6 +93,7 @@ def _persist_quote(
         "data_expiracao": (
             cotacao.data_expiracao.isoformat() if cotacao.data_expiracao else None
         ),
+        "ambiente": "PRODUCAO",
         "status_ingestao": "PROCESSANDO",
         "payload_bruto": cotacao.bruto,
     }
@@ -119,7 +127,168 @@ def _update_quote_status(
 async def _start_analysis(operation_id: str):
     from app.workers.tasks.orchestrator import start_analysis
 
-    return await start_analysis(operation_id)
+    return await start_analysis(operation_id, ate_fase=2)
+
+
+def _triage_reason(
+    cotacao: Cotacao,
+    *,
+    ticket_minimo: float,
+    ticket_maximo: float,
+    pct_max_contrato: float,
+    dias_minimos_expiracao: int,
+) -> str | None:
+    from datetime import date, timedelta
+
+    limite_data = date.today() + timedelta(days=dias_minimos_expiracao)
+    if not cotacao.contrato_like:
+        return f"tipo_nao_elegivel:{cotacao.tipo or 'vazio'}"
+    if not cotacao.documento.e_pj:
+        return f"cedente_nao_pj:{cotacao.documento.tipo}"
+    if not cotacao.data_expiracao or cotacao.data_expiracao < limite_data:
+        return "janela_expiracao_insuficiente"
+    enquadrado = cotacao.enquadrar(pct_max_contrato)
+    if enquadrado < ticket_minimo:
+        return "abaixo_ticket_minimo"
+    if enquadrado > ticket_maximo:
+        return "acima_ticket_maximo"
+    return None
+
+
+def _load_quote_state(supabase: Any, cotacao_id: str) -> dict[str, Any]:
+    try:
+        result = _execute_with_retry(
+            cotacao_id,
+            "broadfactor_ingestao",
+            "load_quote_state",
+            lambda: supabase.table("cotacoes_broadfactor")
+            .select("cotacao_id,estagio,estagio_max,operation_id")
+            .eq("cotacao_id", cotacao_id)
+            .maybe_single()
+            .execute(),
+        )
+        return result.data or {}
+    except Exception as exc:
+        logger.warning(
+            "broadfactor_ingestao.quote_state_unavailable",
+            cotacao_id=cotacao_id,
+            error=str(exc),
+        )
+        return {}
+
+
+def _stage_max(current: str | None, candidate: str) -> str:
+    current = current or "LISTA_ESPERA"
+    return current if STAGE_ORDER.get(current, 0) >= STAGE_ORDER[candidate] else candidate
+
+
+def _update_quote_stage(
+    supabase: Any,
+    cotacao_id: str,
+    estagio: str,
+    *,
+    motivo: str | None = None,
+    operation_id: str | None = None,
+    n_documentos: int | None = None,
+    tipos_documento: list[str] | None = None,
+    estagio_max: str | None = None,
+) -> None:
+    data: dict[str, Any] = {
+        "estagio": estagio,
+        "estagio_motivo": motivo,
+        "estagio_atualizado_em": datetime.now(timezone.utc).isoformat(),
+        "status_ingestao": estagio,
+    }
+    if estagio != "ENCERRADA":
+        data["estagio_max"] = _stage_max(estagio_max, estagio)
+    if operation_id is not None:
+        data["operation_id"] = operation_id
+    if n_documentos is not None:
+        data["n_documentos"] = n_documentos
+    if tipos_documento is not None:
+        data["tipos_documento"] = tipos_documento
+    try:
+        _execute_with_retry(
+            operation_id or cotacao_id,
+            "broadfactor_ingestao",
+            "update_quote_stage",
+            lambda: supabase.table("cotacoes_broadfactor")
+            .update(data)
+            .eq("cotacao_id", cotacao_id)
+            .execute(),
+        )
+    except Exception as exc:
+        logger.error(
+            "broadfactor_ingestao.stage_update_failed",
+            cotacao_id=cotacao_id,
+            estagio=estagio,
+            error=str(exc),
+        )
+
+
+def _documentos_info(documentos: list[DocumentoAnexo]) -> tuple[int, list[str]]:
+    tipos = sorted({doc.tipo for doc in documentos if doc.tipo})
+    return len(documentos), tipos
+
+
+def _mark_missing_quotes_closed(supabase: Any, seen_ids: set[str]) -> int:
+    result = _execute_with_retry(
+        "broadfactor_ingestao",
+        "broadfactor_ingestao",
+        "load_active_quotes_for_closure",
+        lambda: supabase.table("cotacoes_broadfactor")
+        .select("cotacao_id,estagio,estagio_max")
+        .eq("ambiente", "PRODUCAO")
+        .neq("estagio", "ENCERRADA")
+        .execute(),
+    )
+    closed = 0
+    for row in result.data or []:
+        cotacao_id = row.get("cotacao_id")
+        if not cotacao_id or cotacao_id in seen_ids:
+            continue
+        estagio_max = _stage_max(row.get("estagio_max"), row.get("estagio") or "LISTA_ESPERA")
+        _update_quote_stage(
+            supabase,
+            cotacao_id,
+            "ENCERRADA",
+            motivo="cotacao_ausente_na_listagem",
+            estagio_max=estagio_max,
+        )
+        closed += 1
+    return closed
+
+
+def _count_stages(supabase: Any) -> dict[str, int]:
+    result = _execute_with_retry(
+        "broadfactor_ingestao",
+        "broadfactor_ingestao",
+        "count_quote_stages",
+        lambda: supabase.table("cotacoes_broadfactor")
+        .select("estagio")
+        .eq("ambiente", "PRODUCAO")
+        .execute(),
+    )
+    return dict(Counter(row.get("estagio") for row in result.data or [] if row.get("estagio")))
+
+
+def _listar_cotacoes(
+    client: Any,
+    *,
+    ticket_minimo: float,
+    ticket_maximo: float,
+    pct_max_contrato: float,
+    dias_minimos_expiracao: int,
+) -> list[Cotacao]:
+    if hasattr(client, "listar_cotacoes"):
+        return client.listar_cotacoes()
+    aprovadas, descartadas = client.triar(
+        ticket_minimo=ticket_minimo,
+        ticket_maximo=ticket_maximo,
+        pct_max_contrato=pct_max_contrato,
+        dias_minimos_expiracao=dias_minimos_expiracao,
+    )
+    return [*aprovadas, *(cotacao for cotacao, _motivo in descartadas)]
 
 
 async def run_broadfactor_ingestao(
@@ -127,7 +296,7 @@ async def run_broadfactor_ingestao(
     dry_run: bool = False,
     limit: int | None = None,
 ) -> dict[str, Any]:
-    """Triage quotes and, unless dry-running, create and analyze operations."""
+    """Run the Broadfactor quote funnel without paid report components."""
     from app.services.eligibility_params_service import get_eligibility_config
 
     if limit is not None and limit < 1:
@@ -149,8 +318,9 @@ async def run_broadfactor_ingestao(
 
     try:
         client = BroadfactorClient()
-        aprovadas, descartadas = await asyncio.to_thread(
-            client.triar,
+        cotacoes = await asyncio.to_thread(
+            _listar_cotacoes,
+            client,
             ticket_minimo=float(params["ticket_minimo"]),
             ticket_maximo=float(params["ticket_maximo"]),
             pct_max_contrato=pct_max_contrato,
@@ -171,13 +341,27 @@ async def run_broadfactor_ingestao(
             "falhas": 1,
         }
 
+    descartadas: list[tuple[Cotacao, str]] = []
+    aprovadas: list[Cotacao] = []
+    for cotacao in cotacoes:
+        motivo = _triage_reason(
+            cotacao,
+            ticket_minimo=float(params["ticket_minimo"]),
+            ticket_maximo=float(params["ticket_maximo"]),
+            pct_max_contrato=pct_max_contrato,
+            dias_minimos_expiracao=int(params["dias_minimos_expiracao"]),
+        )
+        if motivo:
+            descartadas.append((cotacao, motivo))
+        else:
+            aprovadas.append(cotacao)
     motivos = Counter(motivo for _, motivo in descartadas)
     falhas = 0
 
     if dry_run:
         summary = {
             "status": "dry_run",
-            "total": len(aprovadas) + len(descartadas),
+            "total": len(cotacoes),
             "aprovadas": len(aprovadas),
             "descartadas": len(descartadas),
             "descartadas_por_motivo": dict(sorted(motivos.items())),
@@ -191,27 +375,7 @@ async def run_broadfactor_ingestao(
         return summary
 
     from app.core.database import supabase
-    from app.services.ingestion_discard_service import record_ingestion_discard
     from app.services.operation_service import OperationService
-
-    for cotacao, motivo in descartadas:
-        try:
-            record_ingestion_discard(
-                cotacao_id=cotacao.id,
-                cnpj=cotacao.documento.numero,
-                valor_solicitado=cotacao.valor,
-                margem_disponivel=cotacao.margem_disponivel,
-                valor_enquadrado=cotacao.enquadrar(pct_max_contrato),
-                motivo=motivo,
-                estagio=INGESTION_STAGE,
-            )
-        except Exception as exc:
-            falhas += 1
-            logger.error(
-                "broadfactor_ingestao.discard_persist_failed",
-                cotacao_id=cotacao.id,
-                error=str(exc),
-            )
 
     operation_service = OperationService()
     analysis_jobs: list[tuple[str, str, int, asyncio.Task]] = []
@@ -221,101 +385,126 @@ async def run_broadfactor_ingestao(
     tentativas_esgotadas = 0
     processadas = 0
 
-    for cotacao in aprovadas:
+    seen_ids = {cotacao.id for cotacao in cotacoes}
+    try:
+        encerradas = _mark_missing_quotes_closed(supabase, seen_ids)
+    except Exception as exc:
+        encerradas = 0
+        falhas += 1
+        logger.error("broadfactor_ingestao.close_missing_failed", error=str(exc))
+
+    for cotacao in cotacoes:
         try:
-            existing = _get_existing_operation(supabase, cotacao.id)
-            if existing and existing.get("status") != "failed":
-                duplicadas += 1
-                logger.info(
-                    "broadfactor_ingestao.duplicate_skipped",
-                    cotacao_id=cotacao.id,
-                    operation_id=existing.get("id"),
-                    operation_status=existing.get("status"),
-                )
-                continue
-
-            if limit is not None and processadas >= limit:
-                break
-
-            if existing:
-                attempts = int(existing.get("analysis_attempts") or 1)
-                if attempts >= MAX_ANALYSIS_ATTEMPTS:
-                    tentativas_esgotadas += 1
-                    logger.error(
-                        "broadfactor_ingestao.retry_exhausted",
-                        cotacao_id=cotacao.id,
-                        operation_id=existing.get("id"),
-                        analysis_attempts=attempts,
-                    )
-                    _update_quote_status(
-                        supabase,
-                        cotacao.id,
-                        "ERRO_ANALISE_FINAL",
-                        str(existing["id"]),
-                    )
-                    continue
-
-                claimed = _claim_failed_operation(supabase, existing)
-                if not claimed:
-                    duplicadas += 1
-                    logger.info(
-                        "broadfactor_ingestao.retry_claim_skipped",
-                        cotacao_id=cotacao.id,
-                        operation_id=existing.get("id"),
-                    )
-                    continue
-
-                operation_id = str(claimed["id"])
-                attempt = int(claimed["analysis_attempts"])
-                analysis_jobs.append(
-                    (
-                        cotacao.id,
-                        operation_id,
-                        attempt,
-                        asyncio.create_task(_start_analysis(operation_id)),
-                    )
-                )
-                reprocessadas += 1
-                processadas += 1
-                try:
-                    _update_quote_status(
-                        supabase,
-                        cotacao.id,
-                        "REPROCESSANDO",
-                        operation_id,
-                    )
-                except Exception as status_exc:
-                    falhas += 1
-                    logger.error(
-                        "broadfactor_ingestao.status_update_failed",
-                        cotacao_id=cotacao.id,
-                        operation_id=operation_id,
-                        error=str(status_exc),
-                    )
-                logger.info(
-                    "broadfactor_ingestao.retry_started",
-                    cotacao_id=cotacao.id,
-                    operation_id=operation_id,
-                    analysis_attempt=attempt,
-                    max_analysis_attempts=MAX_ANALYSIS_ATTEMPTS,
-                )
-                continue
-
             valor_enquadrado = cotacao.enquadrar(pct_max_contrato)
             _persist_quote(supabase, cotacao, valor_enquadrado)
-            operation = await operation_service.create(
-                cnpj=cotacao.documento.numero,
-                origem_dados="API_BROADFACTOR",
-                cotacao_id=cotacao.id,
-                valor_solicitado=cotacao.valor,
-                valor_enquadrado=valor_enquadrado,
-                saldo_vincendo=cotacao.saldo_vincendo,
-                margem_disponivel=cotacao.margem_disponivel,
-                prazo_final_meses=int(params["prazo_padrao_meses"]),
-                prazo_vincendo_indisponivel=True,
-                source="broadfactor_ingestao",
+            state = _load_quote_state(supabase, cotacao.id)
+            estagio = state.get("estagio") or "LISTA_ESPERA"
+            estagio_max = state.get("estagio_max")
+            operation_id = str(state["operation_id"]) if state.get("operation_id") else None
+
+            motivo_triagem = _triage_reason(
+                cotacao,
+                ticket_minimo=float(params["ticket_minimo"]),
+                ticket_maximo=float(params["ticket_maximo"]),
+                pct_max_contrato=pct_max_contrato,
+                dias_minimos_expiracao=int(params["dias_minimos_expiracao"]),
             )
-            operation_id = str(operation["id"])
+            if estagio in {"LISTA_ESPERA", "ENCERRADA"}:
+                if motivo_triagem:
+                    _update_quote_stage(
+                        supabase,
+                        cotacao.id,
+                        "LISTA_ESPERA",
+                        motivo=motivo_triagem,
+                        estagio_max=estagio_max,
+                    )
+                    continue
+                estagio = "ENQUADRADA"
+                _update_quote_stage(
+                    supabase,
+                    cotacao.id,
+                    estagio,
+                    estagio_max=estagio_max,
+                )
+            elif estagio == "ENQUADRADA" and motivo_triagem:
+                _update_quote_stage(
+                    supabase,
+                    cotacao.id,
+                    "ENQUADRADA",
+                    motivo=motivo_triagem,
+                    estagio_max=estagio_max,
+                )
+                continue
+
+            if estagio == "ENQUADRADA":
+                try:
+                    documentos = await asyncio.to_thread(
+                        client.documentos_da_cotacao,
+                        cotacao.id,
+                    )
+                except AttributeError:
+                    documentos = []
+                except Exception as exc:
+                    _update_quote_stage(
+                        supabase,
+                        cotacao.id,
+                        "ENQUADRADA",
+                        motivo=f"erro_documentos_broadfactor:{exc}",
+                        estagio_max=estagio_max,
+                    )
+                    continue
+                n_documentos, tipos_documento = _documentos_info(documentos)
+                if n_documentos < 1:
+                    _update_quote_stage(
+                        supabase,
+                        cotacao.id,
+                        "ENQUADRADA",
+                        motivo="sem_documentos_broadfactor",
+                        n_documentos=0,
+                        tipos_documento=[],
+                        estagio_max=estagio_max,
+                    )
+                    continue
+                estagio = "DOCUMENTADA"
+                _update_quote_stage(
+                    supabase,
+                    cotacao.id,
+                    estagio,
+                    n_documentos=n_documentos,
+                    tipos_documento=tipos_documento,
+                    estagio_max=estagio_max,
+                )
+
+            if estagio not in {"DOCUMENTADA", "QUALIFICADA"}:
+                continue
+            if estagio == "QUALIFICADA":
+                duplicadas += 1
+                continue
+            if limit is not None and processadas >= limit:
+                continue
+
+            existing = _get_existing_operation(supabase, cotacao.id)
+            if existing:
+                operation_id = str(existing["id"])
+                duplicadas += 1
+            else:
+                operation = await operation_service.create(
+                    cnpj=cotacao.documento.numero,
+                    origem_dados="API_BROADFACTOR",
+                    cotacao_id=cotacao.id,
+                    valor_solicitado=cotacao.valor,
+                    valor_enquadrado=valor_enquadrado,
+                    saldo_vincendo=cotacao.saldo_vincendo,
+                    margem_disponivel=cotacao.margem_disponivel,
+                    prazo_final_meses=int(params["prazo_padrao_meses"]),
+                    prazo_vincendo_indisponivel=True,
+                    source="broadfactor_ingestao",
+                )
+                operation_id = str(operation["id"])
+                criadas += 1
+
+            if not operation_id:
+                continue
             analysis_jobs.append(
                 (
                     cotacao.id,
@@ -324,7 +513,6 @@ async def run_broadfactor_ingestao(
                     asyncio.create_task(_start_analysis(operation_id)),
                 )
             )
-            criadas += 1
             processadas += 1
             try:
                 _update_quote_status(
@@ -414,12 +602,20 @@ async def run_broadfactor_ingestao(
                         error=str(status_exc),
                     )
 
+    try:
+        estagios = _count_stages(supabase)
+    except Exception as exc:
+        estagios = {}
+        logger.error("broadfactor_ingestao.stage_count_failed", error=str(exc))
+
     summary = {
         "status": "completed",
-        "total": len(aprovadas) + len(descartadas),
+        "total": len(cotacoes),
         "aprovadas": len(aprovadas),
         "descartadas": len(descartadas),
         "descartadas_por_motivo": dict(sorted(motivos.items())),
+        "estagios": estagios,
+        "encerradas": encerradas,
         "criadas": criadas,
         "reprocessadas": reprocessadas,
         "duplicadas": duplicadas,
