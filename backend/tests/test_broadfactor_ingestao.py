@@ -1,5 +1,6 @@
 import os
 import sys
+import asyncio
 from datetime import date
 from types import ModuleType, SimpleNamespace
 
@@ -303,6 +304,40 @@ async def test_partial_analysis_contract_never_dispatches_paid_components(monkey
     assert "contrato_extracao" not in orchestrator.PHASE2_FUNIL_COMPONENTS
     assert "web_research" not in orchestrator.PHASE2_FUNIL_COMPONENTS
     assert "score_engine" not in orchestrator.PHASE2_FUNIL_COMPONENTS
+
+
+@pytest.mark.asyncio
+async def test_ingestion_limits_parallel_operation_analyses(monkeypatch):
+    quotes = [quote(f"C-{index}") for index in range(4)]
+    documents = {item.id: [document()] for item in quotes}
+    _, created, _ = install_funnel(monkeypatch, quotes, documentos=documents)
+    active = 0
+    maximum_active = 0
+
+    async def tracked_analysis(_operation_id):
+        nonlocal active, maximum_active
+        active += 1
+        maximum_active = max(maximum_active, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return {"status": "aguardando_relatorio"}
+
+    monkeypatch.setattr(
+        broadfactor_ingestao.settings,
+        "INGESTAO_MAX_PARALELO",
+        2,
+    )
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_start_analysis",
+        tracked_analysis,
+    )
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert len(created) == 4
+    assert result["criadas"] == 4
+    assert maximum_active == 2
 
 
 def test_persist_quote_keeps_raw_payload():

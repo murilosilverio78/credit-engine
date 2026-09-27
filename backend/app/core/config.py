@@ -35,12 +35,14 @@ class Settings(BaseSettings):
     # Portal da Transparência
     PORTAL_TRANSPARENCIA_TOKEN: str
     PORTAL_EMPTY_BODY_POLICY: Literal["raise", "empty"] = "raise"
+    PORTAL_MIN_INTERVAL_SECONDS: float = 2.2
 
     # Broadfactor
     BROADFACTOR_CLIENT_ID: str = ""
     BROADFACTOR_CLIENT_SECRET: str = ""
     BROADFACTOR_BASE_URL: str = "http://api.dev.antecipagov.com.br"
     INTERNAL_JOB_TOKEN: str = ""
+    INGESTAO_MAX_PARALELO: int = 2
     SHUTDOWN_GRACE_SECONDS: int = 90
     WATCHDOG_MAX_RETOMADAS: int = 1
 

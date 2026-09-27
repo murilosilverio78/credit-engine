@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 from datetime import datetime, timezone
+import time
 from typing import Any
 
 import structlog
@@ -20,7 +21,13 @@ from app.integrations.broadfactor.client import (
     DocumentoAnexo,
     QuotationInactiveError,
 )
+from app.core.config import settings
 from app.workers.base import _execute_snapshot_write as _execute_with_retry
+from app.workers.http_utils import (
+    PortalCycleMetrics,
+    reset_portal_cycle_metrics,
+    set_portal_cycle_metrics,
+)
 
 
 logger = structlog.get_logger()
@@ -133,6 +140,14 @@ async def _start_analysis(operation_id: str):
     from app.workers.tasks.orchestrator import start_analysis
 
     return await start_analysis(operation_id, ate_fase=2)
+
+
+async def _start_analysis_limited(
+    operation_id: str,
+    semaphore: asyncio.Semaphore,
+):
+    async with semaphore:
+        return await _start_analysis(operation_id)
 
 
 def _triage_reason(
@@ -299,7 +314,7 @@ def _listar_cotacoes(
     return [*aprovadas, *(cotacao for cotacao, _motivo in descartadas)]
 
 
-async def run_broadfactor_ingestao(
+async def _run_broadfactor_ingestao(
     *,
     dry_run: bool = False,
     limit: int | None = None,
@@ -387,6 +402,9 @@ async def run_broadfactor_ingestao(
 
     operation_service = OperationService()
     analysis_jobs: list[tuple[str, str, int, asyncio.Task]] = []
+    analysis_semaphore = asyncio.Semaphore(
+        max(int(settings.INGESTAO_MAX_PARALELO), 1)
+    )
     criadas = 0
     reprocessadas = 0
     duplicadas = 0
@@ -552,7 +570,9 @@ async def run_broadfactor_ingestao(
                     cotacao.id,
                     operation_id,
                     attempt,
-                    asyncio.create_task(_start_analysis(operation_id)),
+                    asyncio.create_task(
+                        _start_analysis_limited(operation_id, analysis_semaphore)
+                    ),
                 )
             )
             try:
@@ -665,6 +685,43 @@ async def run_broadfactor_ingestao(
     }
     logger.info("broadfactor_ingestao.completed", **summary)
     return summary
+
+
+async def run_broadfactor_ingestao(
+    *,
+    dry_run: bool = False,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    metrics = PortalCycleMetrics()
+    metrics_token = set_portal_cycle_metrics(metrics)
+    started_at = time.monotonic()
+    cycle_status = "failed"
+    try:
+        result = await _run_broadfactor_ingestao(dry_run=dry_run, limit=limit)
+        cycle_status = str(result.get("status") or "completed")
+        return result
+    except asyncio.CancelledError:
+        cycle_status = "interrupted"
+        logger.warning(
+            "broadfactor_ingestao.interrupted",
+            retomavel=True,
+            retomada="proximo_ciclo_ou_watchdog",
+        )
+        raise
+    finally:
+        elapsed_seconds = round(time.monotonic() - started_at, 3)
+        logger.info(
+            "broadfactor_ingestao.portal_cycle",
+            status=cycle_status,
+            tempo_total_segundos=elapsed_seconds,
+            max_operacoes_paralelas=max(int(settings.INGESTAO_MAX_PARALELO), 1),
+            intervalo_minimo_segundos=max(
+                float(settings.PORTAL_MIN_INTERVAL_SECONDS),
+                0.0,
+            ),
+            **metrics.snapshot(),
+        )
+        reset_portal_cycle_metrics(metrics_token)
 
 
 __all__ = ["MAX_ANALYSIS_ATTEMPTS", "SCHEDULE_BRT", "run_broadfactor_ingestao"]

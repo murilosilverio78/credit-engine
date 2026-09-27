@@ -63,7 +63,11 @@ def valid_context():
     statuses = {
         component: "completed" for component in service.SANCTION_COMPONENTS
     }
-    statuses.update({"brasil_api": "completed", "pessoa_juridica": "completed"})
+    statuses.update({
+        "brasil_api": "completed",
+        "pessoa_juridica": "completed",
+        "contratos_comprasnet": "completed",
+    })
     return operation, snapshots, statuses
 
 
@@ -168,7 +172,7 @@ def test_four_completed_sanction_snapshots_without_sanction_qualify(monkeypatch)
     assert reasons == []
 
 
-def test_unverified_sanction_source_blocks_qualification(monkeypatch):
+def test_failed_sanction_source_marks_unavailability(monkeypatch):
     qualified, reasons = evaluate(
         monkeypatch,
         lambda _operation, snapshots: snapshots.pop("ceis"),
@@ -176,7 +180,59 @@ def test_unverified_sanction_source_blocks_qualification(monkeypatch):
     )
 
     assert qualified is False
-    assert reasons == ["fonte_sancao_nao_verificada:ceis"]
+    assert reasons == ["indisponibilidade_fonte:ceis"]
+
+
+def test_failed_comprasnet_marks_unavailability_not_rejection(monkeypatch):
+    qualified, reasons = evaluate(
+        monkeypatch,
+        lambda _operation, snapshots: snapshots.pop("contratos_comprasnet"),
+        statuses_mutate=lambda statuses: statuses.update(
+            contratos_comprasnet="failed"
+        ),
+    )
+
+    assert qualified is False
+    assert reasons == ["indisponibilidade_fonte:contratos_comprasnet"]
+
+
+def test_source_unavailability_keeps_quote_documented(monkeypatch):
+    operation, snapshots, statuses = valid_context()
+    snapshots.pop("ceis")
+    statuses["ceis"] = "failed"
+    saved = {}
+
+    class Query:
+        def update(self, data):
+            saved.update(data)
+            return self
+
+        def eq(self, *_args):
+            return self
+
+        def execute(self):
+            return SimpleNamespace(data=[])
+
+    monkeypatch.setattr(service, "_load_operation", lambda _operation_id: operation)
+    monkeypatch.setattr(
+        service,
+        "_load_snapshots",
+        lambda _operation_id: (snapshots, statuses),
+    )
+    monkeypatch.setattr(service, "get_eligibility_config", lambda: PARAMS.copy())
+    monkeypatch.setattr(
+        service,
+        "supabase",
+        SimpleNamespace(table=lambda _name: Query()),
+    )
+
+    stage, reasons = service.atualizar_estagio_pos_fase2("C-1", "op-1")
+
+    assert stage == "DOCUMENTADA"
+    assert reasons == ["indisponibilidade_fonte:ceis"]
+    assert saved["estagio"] == "DOCUMENTADA"
+    assert saved["status_ingestao"] == "DOCUMENTADA"
+    assert saved["estagio_motivo"] == "indisponibilidade_fonte:ceis"
 
 
 def test_unverified_registry_status_blocks_qualification(monkeypatch):

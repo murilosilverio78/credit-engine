@@ -9,6 +9,7 @@ from app.workers.tasks.score_engine import gates_deterministicos
 
 
 SANCTION_COMPONENTS = ("ceis", "cnep", "cepim", "acordos_leniencia")
+UNAVAILABLE_SOURCE_PREFIX = "indisponibilidade_fonte:"
 
 
 def _as_float(value: Any) -> float:
@@ -145,9 +146,11 @@ def avaliar_qualificacao_funil(operation_id: str) -> tuple[bool, list[str]]:
 
     for component in SANCTION_COMPONENTS:
         if statuses.get(component) != "completed":
-            motivos.append(f"fonte_sancao_nao_verificada:{component}")
+            motivos.append(f"{UNAVAILABLE_SOURCE_PREFIX}{component}")
 
-    if not _contract_found(snapshots):
+    if statuses.get("contratos_comprasnet") != "completed":
+        motivos.append(f"{UNAVAILABLE_SOURCE_PREFIX}contratos_comprasnet")
+    elif not _contract_found(snapshots):
         motivos.append("contrato_comprasnet_nao_encontrado")
 
     params = get_eligibility_config()

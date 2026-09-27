@@ -96,6 +96,40 @@ function formatDate(date: string) {
     .replace(",", "");
 }
 
+function FunnelReason({ reason }: { reason?: string | null }) {
+  if (!reason) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+
+  const reasons = reason.split("; ");
+  const unavailable = reasons
+    .filter((item) => item.startsWith("indisponibilidade_fonte:"))
+    .map((item) => item.split(":", 2)[1].replaceAll("_", " "));
+  const criteria = reasons.filter(
+    (item) => !item.startsWith("indisponibilidade_fonte:"),
+  );
+
+  if (unavailable.length > 0) {
+    const detail = [
+      `Fonte indisponível: ${unavailable.join(", ")}`,
+      ...(criteria.length > 0
+        ? [`Critério não atendido: ${criteria.join("; ")}`]
+        : []),
+    ].join("; ");
+    return (
+      <span className="text-amber-800" title={detail}>
+        {detail}
+      </span>
+    );
+  }
+
+  return (
+    <span className="text-red-700" title={reason}>
+      Critério não atendido: {reason}
+    </span>
+  );
+}
+
 function RatingBadge({ rating }: { rating: Rating | null }) {
   if (!rating) {
     return <span className="text-muted-foreground">—</span>;
@@ -440,10 +474,9 @@ export default function OperationsPage() {
                       <StatusBadge status={operation.status} />
                     </td>
                     <td
-                      className="truncate border-b-[0.5px] border-border px-2.5 py-2 text-[11px] text-muted-foreground"
-                      title={operation.estagio_motivo ?? undefined}
+                      className="truncate border-b-[0.5px] border-border px-2.5 py-2 text-[11px]"
                     >
-                      {operation.estagio_motivo || "—"}
+                      <FunnelReason reason={operation.estagio_motivo} />
                     </td>
                     <td className="border-b-[0.5px] border-border px-2.5 py-2 font-mono text-[11px] text-muted-foreground">
                       {formatDate(operation.created_at)}
