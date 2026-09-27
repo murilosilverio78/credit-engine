@@ -7,6 +7,19 @@ import pytest
 
 for key in ("SECRET_KEY", "TWOCAPTCHA_API_KEY", "RESEND_API_KEY"):
     os.environ.setdefault(key, "test")
+os.environ.setdefault("ANTHROPIC_API_KEY", "test")
+os.environ.setdefault("PORTAL_TRANSPARENCIA_TOKEN", "test")
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql+asyncpg://user:pass@localhost/test",
+)
+os.environ.setdefault(
+    "SUPABASE_SERVICE_KEY",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+    "eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UifQ."
+    "testsignature",
+)
+os.environ.setdefault("SUPABASE_URL", "http://localhost")
 
 from app.services import funil_qualificacao_service as service  # noqa: E402
 
@@ -144,9 +157,21 @@ def test_all_qualification_criteria_pass_together(monkeypatch):
     assert reasons == []
 
 
+def test_four_completed_sanction_snapshots_without_sanction_qualify(monkeypatch):
+    qualified, reasons = evaluate(
+        monkeypatch,
+        lambda _operation, snapshots: snapshots.pop("pessoa_juridica"),
+        statuses_mutate=lambda statuses: statuses.pop("pessoa_juridica"),
+    )
+
+    assert qualified is True
+    assert reasons == []
+
+
 def test_unverified_sanction_source_blocks_qualification(monkeypatch):
     qualified, reasons = evaluate(
         monkeypatch,
+        lambda _operation, snapshots: snapshots.pop("ceis"),
         statuses_mutate=lambda statuses: statuses.update(ceis="failed"),
     )
 
@@ -164,14 +189,17 @@ def test_unverified_registry_status_blocks_qualification(monkeypatch):
     assert reasons == ["situacao_cadastral_nao_verificada"]
 
 
-def test_unverified_ceaf_source_blocks_qualification(monkeypatch):
-    qualified, reasons = evaluate(
-        monkeypatch,
-        statuses_mutate=lambda statuses: statuses.update(pessoa_juridica="failed"),
-    )
+def test_real_sanction_blocks_qualification(monkeypatch):
+    def add_sanction(_operation, snapshots):
+        snapshots["ceis"].update(
+            possui_sancao=True,
+            registros=[{"situacao": "ATIVO"}],
+        )
+
+    qualified, reasons = evaluate(monkeypatch, add_sanction)
 
     assert qualified is False
-    assert reasons == ["fonte_sancao_nao_verificada:ceaf"]
+    assert reasons == ["Sancao ativa em CEIS"]
 
 
 def test_reevaluation_promotes_previously_rejected_quote(monkeypatch):

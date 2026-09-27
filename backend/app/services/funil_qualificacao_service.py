@@ -147,13 +147,6 @@ def avaliar_qualificacao_funil(operation_id: str) -> tuple[bool, list[str]]:
         if statuses.get(component) != "completed":
             motivos.append(f"fonte_sancao_nao_verificada:{component}")
 
-    pessoa_juridica = snapshots.get("pessoa_juridica") or {}
-    if (
-        statuses.get("pessoa_juridica") != "completed"
-        or "sancionado_ceaf" not in pessoa_juridica
-    ):
-        motivos.append("fonte_sancao_nao_verificada:ceaf")
-
     if not _contract_found(snapshots):
         motivos.append("contrato_comprasnet_nao_encontrado")
 
