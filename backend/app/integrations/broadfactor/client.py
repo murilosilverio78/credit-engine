@@ -45,6 +45,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -62,6 +63,53 @@ API_PREFIX = "/integracao"
 DEFAULT_TIMEOUT = 30
 TOKEN_SKEW_S = 120          # renova o token 2 min antes de expirar
 MAX_RETRIES = 3
+
+
+@dataclass(frozen=True)
+class _TokenState:
+    token: str
+    expires_at: float
+    claims: dict
+
+
+class _BroadfactorTokenCache:
+    """Cache compartilhado com renovacao single-flight entre clientes."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._scope: tuple[str, str, str] | None = None
+        self._state: _TokenState | None = None
+
+    def get_or_refresh(self, scope, refresh) -> _TokenState:
+        with self._lock:
+            if (
+                self._scope == scope
+                and self._state is not None
+                and time.time() < self._state.expires_at
+            ):
+                return self._state
+
+            state = refresh()
+            self._scope = scope
+            self._state = state
+            return state
+
+    def invalidate(self, scope, token: str | None = None) -> None:
+        with self._lock:
+            if self._scope != scope or self._state is None:
+                return
+            if token is not None and self._state.token != token:
+                return
+            self._scope = None
+            self._state = None
+
+    def clear(self) -> None:
+        with self._lock:
+            self._scope = None
+            self._state = None
+
+
+_BROADFACTOR_TOKEN_CACHE = _BroadfactorTokenCache()
 
 
 # --------------------------------------------------------------------------
@@ -563,6 +611,7 @@ class BroadfactorClient:
         self.client_secret = client_secret
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self._token_scope = (self.base_url, self.client_id, self.client_secret)
         self._token: str | None = None
         self._expira_em: float = 0.0
         self._claims: dict = {}
@@ -572,7 +621,7 @@ class BroadfactorClient:
         )
 
     # ------------------------------------------------------------ auth
-    def _autenticar(self) -> None:
+    def _buscar_token(self) -> _TokenState:
         url = f"{self.base_url}{API_PREFIX}/autenticar/token"
         # HTTP Basic. A documentacao manda headers client_id/client_secret,
         # o que retorna 400 'Required request header Authorization ... not present'.
@@ -582,15 +631,25 @@ class BroadfactorClient:
             raise AuthError(f"falha de autenticacao: HTTP {r.status_code}",
                             status=r.status_code, endpoint=url)
         j = r.json()
-        self._token = j["token"]
+        token = j["token"]
         # expiracaoMs, em milissegundos — nao 'expiracao' em segundos
         ttl_ms = j.get("expiracaoMs") or 3_600_000
-        self._expira_em = time.time() + (ttl_ms / 1000) - TOKEN_SKEW_S
-        self._claims = self._decodificar_jwt(self._token) or {}
+        expires_at = time.time() + (ttl_ms / 1000) - TOKEN_SKEW_S
+        claims = self._decodificar_jwt(token) or {}
         logger.info(
             "broadfactor.authenticated",
-            tenant=self.tenant.get("companyName"),
+            tenant=claims.get("tenant", {}).get("companyName"),
         )
+        return _TokenState(token, expires_at, claims)
+
+    def _autenticar(self) -> None:
+        state = _BROADFACTOR_TOKEN_CACHE.get_or_refresh(
+            self._token_scope,
+            self._buscar_token,
+        )
+        self._token = state.token
+        self._expira_em = state.expires_at
+        self._claims = state.claims
 
     @staticmethod
     def _decodificar_jwt(tok: str) -> dict | None:
@@ -608,8 +667,7 @@ class BroadfactorClient:
         return self._claims.get("tenant", {})
 
     def _garantir_token(self) -> None:
-        if not self._token or time.time() >= self._expira_em:
-            self._autenticar()
+        self._autenticar()
 
     # ------------------------------------------------------------ transporte
     def _req(self, method: str, caminho: str, *, body=None) -> Result:
@@ -633,9 +691,15 @@ class BroadfactorClient:
                     continue
                 return Result(Outcome.ERROR, message=str(e), endpoint=caminho)
 
-            if r.status_code == 401 and tentativa < MAX_RETRIES:
-                self._autenticar()   # token expirado no meio do voo
-                continue
+            if r.status_code == 401:
+                rejected_token = self._token
+                _BROADFACTOR_TOKEN_CACHE.invalidate(
+                    self._token_scope,
+                    rejected_token,
+                )
+                if tentativa < MAX_RETRIES:
+                    self._autenticar()   # token expirado no meio do voo
+                    continue
             if r.status_code >= 500 and tentativa < MAX_RETRIES:
                 time.sleep(2 ** tentativa)
                 continue
