@@ -131,3 +131,71 @@ def test_ingestion_is_rejected_during_shutdown(monkeypatch):
     assert response.json()["detail"] == (
         "Serviço em encerramento; tente novamente em instantes"
     )
+
+
+def test_ip_diagnostic_requires_internal_token(monkeypatch):
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+
+    response = make_client().get("/api/v1/internal/diagnostico/ip")
+
+    assert response.status_code == 401
+
+
+def test_ip_diagnostic_returns_outbound_ip_and_portal_probe(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code, payload=None):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            assert kwargs == {"timeout": 15.0, "verify": True}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, url, **kwargs):
+            calls.append((url, kwargs))
+            if url == internal.IPIFY_URL:
+                return FakeResponse(200, {"ip": "203.0.113.10"})
+            return FakeResponse(504)
+
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    monkeypatch.setattr(internal.settings, "PORTAL_TRANSPARENCIA_TOKEN", "portal-key")
+    monkeypatch.setattr(internal.settings, "HTTPX_VERIFY_SSL", True)
+    monkeypatch.setattr(internal.httpx, "Client", FakeClient)
+
+    response = make_client().get(
+        "/api/v1/internal/diagnostico/ip",
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ip_saida"] == "203.0.113.10"
+    assert data["ipify"]["status_code"] == 200
+    assert data["ipify"]["tempo_ms"] >= 0
+    assert data["portal_transparencia"] == {
+        "status_code": 504,
+        "tempo_ms": data["portal_transparencia"]["tempo_ms"],
+        "erro": None,
+    }
+    assert data["portal_transparencia"]["tempo_ms"] >= 0
+    assert calls == [
+        (internal.IPIFY_URL, {}),
+        (
+            internal.PORTAL_DIAGNOSTIC_URL,
+            {
+                "headers": {"chave-api-dados": "portal-key"},
+                "params": {"cnpj": internal.PORTAL_DIAGNOSTIC_CNPJ},
+            },
+        ),
+    ]
