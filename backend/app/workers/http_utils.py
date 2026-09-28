@@ -160,22 +160,30 @@ def _retry_delay(attempt: int) -> float:
 
 
 def _rate_limit_delay(response: httpx.Response) -> float:
+    requested_delay: float | None = None
     retry_after = response.headers.get("retry-after")
     if retry_after:
         try:
-            return max(float(retry_after), 0.0)
+            requested_delay = max(float(retry_after), 0.0)
         except ValueError:
             try:
                 retry_at = parsedate_to_datetime(retry_after)
                 if retry_at.tzinfo is None:
                     retry_at = retry_at.replace(tzinfo=timezone.utc)
-                return max(
+                requested_delay = max(
                     (retry_at - datetime.now(timezone.utc)).total_seconds(),
                     0.0,
                 )
             except (TypeError, ValueError, OverflowError):
                 pass
-    return _jitter(float(settings.PORTAL_429_DEFAULT_COOLDOWN_SECONDS))
+    if requested_delay is None:
+        requested_delay = _jitter(
+            float(settings.PORTAL_429_DEFAULT_COOLDOWN_SECONDS)
+        )
+    return min(
+        requested_delay,
+        max(float(settings.PORTAL_429_MAX_COOLDOWN_SECONDS), 0.0),
+    )
 
 
 def fetch_json_with_retry(
@@ -226,16 +234,17 @@ def fetch_json_with_retry(
             if status == 429:
                 delay = _rate_limit_delay(exc.response)
                 _PORTAL_RATE_LIMITER.suspend(delay)
-                if attempt >= max_retries:
-                    _record_terminal_failure(status=status)
-                    raise
                 logger.warning(
                     "portal_transparencia.rate_limited",
                     url=url.split("?", 1)[0],
                     status=status,
                     tentativa=attempt + 1,
+                    retry_after_header=exc.response.headers.get("retry-after"),
                     cooldown_s=delay,
                 )
+                if attempt >= max_retries:
+                    _record_terminal_failure(status=status)
+                    raise
                 continue
             if attempt >= max_retries:
                 _record_terminal_failure(status=status)

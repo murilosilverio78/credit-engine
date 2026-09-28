@@ -210,6 +210,51 @@ def test_429_suspends_global_limiter_but_504_does_not(monkeypatch):
     assert suspended == [17.0]
 
 
+def test_429_caps_global_cooldown_and_logs_requested_retry_after(monkeypatch):
+    suspended = []
+    warnings = []
+    monkeypatch.setattr(
+        http_utils.settings,
+        "PORTAL_429_MAX_COOLDOWN_SECONDS",
+        120.0,
+    )
+    monkeypatch.setattr(
+        http_utils._PORTAL_RATE_LIMITER,
+        "suspend",
+        lambda delay: suspended.append(delay),
+    )
+    monkeypatch.setattr(
+        http_utils.logger,
+        "warning",
+        lambda event, **values: warnings.append((event, values)),
+    )
+
+    def rate_limited(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"Retry-After": "600"}, request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(rate_limited)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            http_utils.fetch_json_with_retry(
+                client,
+                "https://portal.test/recurso",
+                max_retries=0,
+            )
+
+    assert suspended == [120.0]
+    assert warnings == [
+        (
+            "portal_transparencia.rate_limited",
+            {
+                "url": "https://portal.test/recurso",
+                "status": 429,
+                "tentativa": 1,
+                "retry_after_header": "600",
+                "cooldown_s": 120.0,
+            },
+        )
+    ]
+
+
 def test_retry_crosses_simulated_instability_window(monkeypatch):
     request_count = 0
     delays = []

@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     PORTAL_EMPTY_BODY_POLICY: Literal["raise", "empty"] = "raise"
     PORTAL_MIN_INTERVAL_SECONDS: float = 2.2
     PORTAL_429_DEFAULT_COOLDOWN_SECONDS: float = 60.0
+    PORTAL_429_MAX_COOLDOWN_SECONDS: float = 120.0
     SANCTION_SNAPSHOT_TTL_HOURS: float = 12.0
 
     # Broadfactor
