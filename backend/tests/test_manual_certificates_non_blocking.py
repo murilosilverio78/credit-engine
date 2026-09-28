@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 import os
 from types import SimpleNamespace
 
@@ -228,6 +229,115 @@ def test_partial_funnel_run_refreshes_free_components(monkeypatch):
     assert "contrato_extracao" in reusable
     assert "web_research" in reusable
     assert "score_engine" in reusable
+
+
+def _completed_snapshot(component, *, age_hours=0):
+    return {
+        "component": component,
+        "completed_at": (
+            datetime.now(timezone.utc) - timedelta(hours=age_hours)
+        ).isoformat(),
+    }
+
+
+def test_recovery_reprocesses_only_failed_component(monkeypatch):
+    components = {
+        *orchestrator.PHASE1_COMPONENTS,
+        *orchestrator.PHASE2_FUNIL_COMPONENTS,
+    }
+    snapshots = {
+        component: _completed_snapshot(component)
+        for component in components - {"ceis"}
+    }
+    monkeypatch.setattr(
+        orchestrator,
+        "_completed_component_snapshots",
+        lambda _operation_id: snapshots,
+    )
+    monkeypatch.setattr(orchestrator, "component_ttl_hours", lambda _component: 12)
+
+    reusable = orchestrator._reusable_components_for_run(
+        "op-1",
+        ate_fase=2,
+        recovery=True,
+    )
+    calls = []
+
+    def worker(_operation_id):
+        calls.append("ceis")
+        return {"status": "completed"}
+
+    reused = asyncio.run(
+        orchestrator._run_or_reuse_component(
+            "cnep",
+            worker,
+            "op-1",
+            reusable,
+        )
+    )
+    rerun = asyncio.run(
+        orchestrator._run_or_reuse_component(
+            "ceis",
+            worker,
+            "op-1",
+            reusable,
+        )
+    )
+
+    assert reusable == components - {"ceis"}
+    assert reused == {"status": "completed", "reused": True}
+    assert rerun == {"status": "completed"}
+    assert calls == ["ceis"]
+
+
+def test_recovery_reprocesses_comprasnet_when_contracts_failed(monkeypatch):
+    snapshots = {
+        "contratos_comprasnet": _completed_snapshot("contratos_comprasnet"),
+        "recursos_recebidos": _completed_snapshot("recursos_recebidos"),
+    }
+    monkeypatch.setattr(
+        orchestrator,
+        "_completed_component_snapshots",
+        lambda _operation_id: snapshots,
+    )
+    monkeypatch.setattr(orchestrator, "component_ttl_hours", lambda _component: 12)
+
+    reusable = orchestrator._reusable_components_for_run(
+        "op-1",
+        ate_fase=2,
+        recovery=True,
+    )
+
+    assert "contratos" not in reusable
+    assert "contratos_comprasnet" not in reusable
+    assert "recursos_recebidos" in reusable
+
+
+def test_recovery_refreshes_expired_sanctions_but_keeps_other_snapshots(monkeypatch):
+    snapshots = {
+        "ceis": _completed_snapshot("ceis", age_hours=13),
+        "contratos": _completed_snapshot("contratos", age_hours=13),
+        "contratos_comprasnet": _completed_snapshot(
+            "contratos_comprasnet",
+            age_hours=13,
+        ),
+    }
+    monkeypatch.setattr(orchestrator, "component_ttl_hours", lambda _component: 12)
+    monkeypatch.setattr(
+        orchestrator,
+        "_completed_component_snapshots",
+        lambda _operation_id: snapshots,
+    )
+
+    reusable = orchestrator._reusable_components_for_run(
+        "op-1",
+        ate_fase=2,
+        recovery=True,
+    )
+
+    assert "ceis" not in reusable
+    assert "contratos" in reusable
+    assert "contratos_comprasnet" in reusable
 
 
 def test_phase3_4_resume_reuses_web_research_and_recalculates_score(monkeypatch):

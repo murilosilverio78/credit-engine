@@ -12,6 +12,7 @@ import structlog
 
 from app.core.database import supabase
 from app.services.analysis_runtime import track_analysis
+from app.services.cache_service import component_ttl_hours
 from app.workers.base import _execute_snapshot_write as _execute_with_retry
 
 logger = structlog.get_logger()
@@ -31,6 +32,13 @@ PHASE2_FUNIL_COMPONENTS = (
     "contratos",
     "contratos_comprasnet",
     "recursos_recebidos",
+    "acordos_leniencia",
+    "ceis",
+    "cnep",
+    "cepim",
+)
+SANCTION_COMPONENTS = (
+    "pessoa_juridica",
     "acordos_leniencia",
     "ceis",
     "cnep",
@@ -355,10 +363,57 @@ def _completed_components(operation_id: str) -> set[str]:
     }
 
 
+def _completed_component_snapshots(operation_id: str) -> dict[str, dict[str, Any]]:
+    result = _execute_db(
+        operation_id,
+        "load_reusable_component_snapshots",
+        lambda: supabase.table("component_snapshots")
+        .select("component,completed_at,updated_at")
+        .eq("operation_id", operation_id)
+        .eq("status", "completed")
+        .execute(),
+    )
+    return {
+        row["component"]: row
+        for row in (result.data or [])
+        if row.get("component")
+    }
+
+
+def _fresh_sanction_snapshots(
+    snapshots: dict[str, dict[str, Any]],
+) -> set[str]:
+    now = datetime.now(timezone.utc)
+    fresh = set(snapshots)
+    for component in SANCTION_COMPONENTS:
+        snapshot = snapshots.get(component)
+        if snapshot is None:
+            continue
+        completed_at = _parse_datetime(
+            snapshot.get("completed_at") or snapshot.get("updated_at")
+        )
+        cutoff = now - timedelta(
+            hours=max(component_ttl_hours(component), 0.0)
+        )
+        if completed_at is None or completed_at <= cutoff:
+            fresh.discard(component)
+    return fresh
+
+
 def _reusable_components_for_run(
     operation_id: str,
     ate_fase: int | None,
+    *,
+    recovery: bool = False,
 ) -> set[str]:
+    if recovery:
+        snapshots = _completed_component_snapshots(operation_id)
+        reusable_components = _fresh_sanction_snapshots(snapshots)
+        # Comprasnet derives its lookup keys from the Portal contract result.
+        if "contratos" not in reusable_components:
+            reusable_components.discard("contratos_comprasnet")
+        return reusable_components
+
     reusable_components = _completed_components(operation_id)
     if ate_fase == 2:
         # Funnel reevaluation must refresh every free input whose value can
@@ -385,11 +440,22 @@ async def _run_or_reuse_component(
     return await _run_component(run_fn, operation_id)
 
 
-async def start_analysis(operation_id: str, *, ate_fase: int | None = None):
+async def start_analysis(
+    operation_id: str,
+    *,
+    ate_fase: int | None = None,
+    recovery: bool = False,
+):
     """Run the pipeline and persist any unhandled failure with its stage."""
     async with track_analysis(operation_id):
         stage_token = _PIPELINE_STAGE.set("pipeline_initialization")
         try:
+            if recovery:
+                return await _run_analysis(
+                    operation_id,
+                    ate_fase=ate_fase,
+                    recovery=True,
+                )
             return await _run_analysis(operation_id, ate_fase=ate_fase)
         except Exception as exc:
             stage = _PIPELINE_STAGE.get()
@@ -406,7 +472,12 @@ async def start_analysis(operation_id: str, *, ate_fase: int | None = None):
             _PIPELINE_STAGE.reset(stage_token)
 
 
-async def _run_analysis(operation_id: str, *, ate_fase: int | None = None):
+async def _run_analysis(
+    operation_id: str,
+    *,
+    ate_fase: int | None = None,
+    recovery: bool = False,
+):
     """
     Start the analysis.
 
@@ -443,7 +514,11 @@ async def _run_analysis(operation_id: str, *, ate_fase: int | None = None):
         .execute(),
     )
 
-    reusable_components = _reusable_components_for_run(operation_id, ate_fase)
+    reusable_components = _reusable_components_for_run(
+        operation_id,
+        ate_fase,
+        recovery=recovery,
+    )
     upstream_complete_before_run = all(
         component in reusable_components
         for component in (*PHASE1_COMPONENTS, *PHASE2_COMPONENTS)

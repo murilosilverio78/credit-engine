@@ -6,6 +6,7 @@ from typing import Optional
 import structlog
 
 from app.core.database import supabase
+from app.core.config import settings
 from app.workers.base import _execute_snapshot_write
 
 
@@ -29,6 +30,13 @@ DEFAULT_TTL: dict[str, int] = {
     "serpro": 24,
     "web_research": 48,
     "score_engine": 0,
+}
+SANCTION_COMPONENTS = {
+    "pessoa_juridica",
+    "ceis",
+    "cnep",
+    "cepim",
+    "acordos_leniencia",
 }
 
 _TTL_OVERRIDES: dict[str, int] = {}
@@ -66,12 +74,22 @@ def _get_ttl_overrides() -> dict[str, int]:
     return _TTL_OVERRIDES
 
 
-def _ttl_hours(component: str) -> int:
+def _ttl_hours(component: str) -> float:
     # score_engine contém a decisão final de risco e deve sempre recalcular.
     if component == "score_engine":
         return 0
     overrides = _get_ttl_overrides()
-    return overrides.get(component, DEFAULT_TTL.get(component, 0))
+    default = (
+        settings.SANCTION_SNAPSHOT_TTL_HOURS
+        if component in SANCTION_COMPONENTS
+        else DEFAULT_TTL.get(component, 0)
+    )
+    return float(overrides.get(component, default))
+
+
+def component_ttl_hours(component: str) -> float:
+    """Return the effective TTL shared by CNPJ cache and snapshot recovery."""
+    return _ttl_hours(component)
 
 
 class CacheService:

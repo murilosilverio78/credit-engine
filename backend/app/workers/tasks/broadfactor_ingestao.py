@@ -136,17 +136,23 @@ def _update_quote_status(
     )
 
 
-async def _start_analysis(operation_id: str):
+async def _start_analysis(operation_id: str, *, recovery: bool = False):
     from app.workers.tasks.orchestrator import start_analysis
 
+    if recovery:
+        return await start_analysis(operation_id, ate_fase=2, recovery=True)
     return await start_analysis(operation_id, ate_fase=2)
 
 
 async def _start_analysis_limited(
     operation_id: str,
     semaphore: asyncio.Semaphore,
+    *,
+    recovery: bool = False,
 ):
     async with semaphore:
+        if recovery:
+            return await _start_analysis(operation_id, recovery=True)
         return await _start_analysis(operation_id)
 
 
@@ -521,6 +527,7 @@ async def _run_broadfactor_ingestao(
                 continue
             existing = _get_existing_operation(supabase, cotacao.id)
             attempt = 1
+            recovering = False
             status_ingestao = "OPERACAO_CRIADA"
             if existing:
                 operation_id = str(existing["id"])
@@ -541,6 +548,7 @@ async def _run_broadfactor_ingestao(
                         continue
                     attempt = int(claimed.get("analysis_attempts") or attempt + 1)
                     reprocessadas += 1
+                    recovering = True
                     status_ingestao = "REPROCESSANDO"
                 else:
                     duplicadas += 1
@@ -571,7 +579,11 @@ async def _run_broadfactor_ingestao(
                     operation_id,
                     attempt,
                     asyncio.create_task(
-                        _start_analysis_limited(operation_id, analysis_semaphore)
+                        _start_analysis_limited(
+                            operation_id,
+                            analysis_semaphore,
+                            recovery=recovering,
+                        )
                     ),
                 )
             )

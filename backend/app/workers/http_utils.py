@@ -1,5 +1,8 @@
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+import random
 from threading import Lock
 import time
 from typing import Any
@@ -17,6 +20,10 @@ logger = structlog.get_logger()
 @dataclass
 class PortalCycleMetrics:
     total_calls: int = 0
+    responses_429: int = 0
+    responses_504: int = 0
+    timeout_events: int = 0
+    terminal_429: int = 0
     terminal_504: int = 0
     terminal_timeouts: int = 0
     _lock: Lock = field(default_factory=Lock, repr=False)
@@ -24,6 +31,21 @@ class PortalCycleMetrics:
     def record_call(self) -> None:
         with self._lock:
             self.total_calls += 1
+
+    def record_status(self, status: int) -> None:
+        with self._lock:
+            if status == 429:
+                self.responses_429 += 1
+            elif status == 504:
+                self.responses_504 += 1
+
+    def record_timeout(self) -> None:
+        with self._lock:
+            self.timeout_events += 1
+
+    def record_terminal_429(self) -> None:
+        with self._lock:
+            self.terminal_429 += 1
 
     def record_terminal_504(self) -> None:
         with self._lock:
@@ -37,6 +59,10 @@ class PortalCycleMetrics:
         with self._lock:
             return {
                 "total_chamadas_portal": self.total_calls,
+                "respostas_429": self.responses_429,
+                "respostas_504": self.responses_504,
+                "eventos_timeout": self.timeout_events,
+                "falhas_429_apos_retries": self.terminal_429,
                 "falhas_504_apos_retries": self.terminal_504,
                 "timeouts_apos_retries": self.terminal_timeouts,
             }
@@ -51,13 +77,22 @@ class PortalRateLimiter:
 
     def wait(self, min_interval_seconds: float) -> None:
         interval = max(float(min_interval_seconds), 0.0)
-        with self._lock:
-            now = time.monotonic()
-            delay = max(self._next_allowed - now, 0.0)
-            if delay:
-                time.sleep(delay)
+        while True:
+            with self._lock:
                 now = time.monotonic()
-            self._next_allowed = now + interval
+                delay = max(self._next_allowed - now, 0.0)
+                if not delay:
+                    self._next_allowed = now + interval
+                    return
+            time.sleep(delay)
+
+    def suspend(self, cooldown_seconds: float) -> None:
+        cooldown = max(float(cooldown_seconds), 0.0)
+        with self._lock:
+            self._next_allowed = max(
+                self._next_allowed,
+                time.monotonic() + cooldown,
+            )
 
     def reset(self) -> None:
         with self._lock:
@@ -90,7 +125,9 @@ def _record_terminal_failure(exc: BaseException | None = None, *, status: int | 
     metrics = _PORTAL_CYCLE_METRICS.get()
     if metrics is None:
         return
-    if status == 504:
+    if status == 429:
+        metrics.record_terminal_429()
+    elif status == 504:
         metrics.record_terminal_504()
     elif isinstance(exc, httpx.TimeoutException):
         metrics.record_terminal_timeout()
@@ -110,12 +147,35 @@ def _pagination_params(url: str, params: dict[str, Any] | None) -> dict[str, Any
     }
 
 
-def _retry_delay(response: httpx.Response | None, attempt: int) -> float:
-    if response is not None:
-        retry_after = response.headers.get("retry-after")
-        if retry_after and retry_after.isdigit():
-            return min(float(retry_after), 15.0)
-    return min(float(2 ** attempt), 15.0)
+RETRY_BACKOFF_SECONDS = (2.2, 8.0, 20.0, 40.0)
+
+
+def _jitter(value: float) -> float:
+    return value * random.uniform(0.8, 1.2)
+
+
+def _retry_delay(attempt: int) -> float:
+    index = min(attempt, len(RETRY_BACKOFF_SECONDS) - 1)
+    return _jitter(RETRY_BACKOFF_SECONDS[index])
+
+
+def _rate_limit_delay(response: httpx.Response) -> float:
+    retry_after = response.headers.get("retry-after")
+    if retry_after:
+        try:
+            return max(float(retry_after), 0.0)
+        except ValueError:
+            try:
+                retry_at = parsedate_to_datetime(retry_after)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                return max(
+                    (retry_at - datetime.now(timezone.utc)).total_seconds(),
+                    0.0,
+                )
+            except (TypeError, ValueError, OverflowError):
+                pass
+    return _jitter(float(settings.PORTAL_429_DEFAULT_COOLDOWN_SECONDS))
 
 
 def fetch_json_with_retry(
@@ -123,7 +183,7 @@ def fetch_json_with_retry(
     url: str,
     headers: dict[str, str] | None = None,
     params: dict[str, Any] | None = None,
-    max_retries: int = 3,
+    max_retries: int = 4,
 ) -> list | dict:
     """Fetch JSON with retry/backoff for transient Portal da Transparencia errors."""
     retry_exceptions = (
@@ -153,17 +213,34 @@ def fetch_json_with_retry(
                         f"Portal retornou corpo vazio em {url.split('?', 1)[0]} "
                         f"apos {max_retries + 1} tentativas"
                     )
-                time.sleep(_retry_delay(response, attempt))
+                time.sleep(_retry_delay(attempt))
                 continue
             return response.json()
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             if status != 429 and status < 500:
                 raise
+            metrics = _PORTAL_CYCLE_METRICS.get()
+            if metrics is not None:
+                metrics.record_status(status)
+            if status == 429:
+                delay = _rate_limit_delay(exc.response)
+                _PORTAL_RATE_LIMITER.suspend(delay)
+                if attempt >= max_retries:
+                    _record_terminal_failure(status=status)
+                    raise
+                logger.warning(
+                    "portal_transparencia.rate_limited",
+                    url=url.split("?", 1)[0],
+                    status=status,
+                    tentativa=attempt + 1,
+                    cooldown_s=delay,
+                )
+                continue
             if attempt >= max_retries:
                 _record_terminal_failure(status=status)
                 raise
-            delay = _retry_delay(exc.response, attempt)
+            delay = _retry_delay(attempt)
             logger.warning(
                 "portal_transparencia.retry",
                 url=url.split("?", 1)[0],
@@ -173,10 +250,13 @@ def fetch_json_with_retry(
             )
             time.sleep(delay)
         except retry_exceptions as exc:
+            metrics = _PORTAL_CYCLE_METRICS.get()
+            if metrics is not None and isinstance(exc, httpx.TimeoutException):
+                metrics.record_timeout()
             if attempt >= max_retries:
                 _record_terminal_failure(exc)
                 raise
-            delay = _retry_delay(response, attempt)
+            delay = _retry_delay(attempt)
             logger.warning(
                 "portal_transparencia.retry",
                 url=url.split("?", 1)[0],

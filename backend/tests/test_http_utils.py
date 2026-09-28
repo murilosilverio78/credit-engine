@@ -122,8 +122,30 @@ def test_rate_limiter_spaces_calls_from_different_threads(monkeypatch):
 @pytest.mark.parametrize(
     ("failure", "expected"),
     [
-        ("504", {"falhas_504_apos_retries": 1, "timeouts_apos_retries": 0}),
-        ("timeout", {"falhas_504_apos_retries": 0, "timeouts_apos_retries": 1}),
+        (
+            "429",
+            {
+                "falhas_429_apos_retries": 1,
+                "falhas_504_apos_retries": 0,
+                "timeouts_apos_retries": 0,
+            },
+        ),
+        (
+            "504",
+            {
+                "falhas_429_apos_retries": 0,
+                "falhas_504_apos_retries": 1,
+                "timeouts_apos_retries": 0,
+            },
+        ),
+        (
+            "timeout",
+            {
+                "falhas_429_apos_retries": 0,
+                "falhas_504_apos_retries": 0,
+                "timeouts_apos_retries": 1,
+            },
+        ),
     ],
 )
 def test_cycle_metrics_count_terminal_portal_failures(failure, expected):
@@ -133,7 +155,7 @@ def test_cycle_metrics_count_terminal_portal_failures(failure, expected):
     def fail(request: httpx.Request) -> httpx.Response:
         if failure == "timeout":
             raise httpx.ReadTimeout("timed out", request=request)
-        return httpx.Response(504, request=request)
+        return httpx.Response(int(failure), request=request)
 
     try:
         with httpx.Client(transport=httpx.MockTransport(fail)) as client:
@@ -149,6 +171,64 @@ def test_cycle_metrics_count_terminal_portal_failures(failure, expected):
     snapshot = metrics.snapshot()
     assert snapshot["total_chamadas_portal"] == 1
     assert {
+        "falhas_429_apos_retries": snapshot["falhas_429_apos_retries"],
         "falhas_504_apos_retries": snapshot["falhas_504_apos_retries"],
         "timeouts_apos_retries": snapshot["timeouts_apos_retries"],
     } == expected
+
+
+def test_429_suspends_global_limiter_but_504_does_not(monkeypatch):
+    suspended = []
+    monkeypatch.setattr(
+        http_utils._PORTAL_RATE_LIMITER,
+        "suspend",
+        lambda delay: suspended.append(delay),
+    )
+
+    def rate_limited(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"Retry-After": "17"}, request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(rate_limited)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            http_utils.fetch_json_with_retry(
+                client,
+                "https://portal.test/recurso",
+                max_retries=0,
+            )
+
+    def unavailable(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(504, request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(unavailable)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            http_utils.fetch_json_with_retry(
+                client,
+                "https://portal.test/recurso",
+                max_retries=0,
+            )
+
+    assert suspended == [17.0]
+
+
+def test_retry_crosses_simulated_instability_window(monkeypatch):
+    request_count = 0
+    delays = []
+    monkeypatch.setattr(http_utils.random, "uniform", lambda lower, upper: 1.0)
+    monkeypatch.setattr(http_utils.time, "sleep", lambda delay: delays.append(delay))
+
+    def unstable(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        if request_count < 5:
+            return httpx.Response(504, request=request)
+        return _response(b'{"status": "ok"}', request)
+
+    with httpx.Client(transport=httpx.MockTransport(unstable)) as client:
+        result = http_utils.fetch_json_with_retry(
+            client,
+            "https://portal.test/recurso",
+        )
+
+    assert result == {"status": "ok"}
+    assert request_count == 5
+    assert delays == [2.2, 8.0, 20.0, 40.0]

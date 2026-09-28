@@ -130,7 +130,7 @@ def install_funnel(monkeypatch, cotacoes, documentos=None, initial_quotes=None):
             closed += 1
         return closed
 
-    async def start_analysis(operation_id):
+    async def start_analysis(operation_id, **_kwargs):
         analyses.append(operation_id)
         return {"status": "aguardando_relatorio"}
 
@@ -307,6 +307,21 @@ async def test_partial_analysis_contract_never_dispatches_paid_components(monkey
 
 
 @pytest.mark.asyncio
+async def test_recovery_is_forwarded_to_partial_analysis(monkeypatch):
+    calls = []
+
+    async def start_analysis(operation_id, *, ate_fase=None, recovery=False):
+        calls.append((operation_id, ate_fase, recovery))
+
+    from app.workers.tasks import orchestrator
+
+    monkeypatch.setattr(orchestrator, "start_analysis", start_analysis)
+    await broadfactor_ingestao._start_analysis("op-1", recovery=True)
+
+    assert calls == [("op-1", 2, True)]
+
+
+@pytest.mark.asyncio
 async def test_ingestion_limits_parallel_operation_analyses(monkeypatch):
     quotes = [quote(f"C-{index}") for index in range(4)]
     documents = {item.id: [document()] for item in quotes}
@@ -441,6 +456,12 @@ async def test_failed_operation_is_reprocessed_without_creating_another(monkeypa
         "analysis_attempts": 1,
     }
     statuses = []
+    recovery_calls = []
+
+    async def start_recovery(operation_id, *, recovery=False):
+        recovery_calls.append((operation_id, recovery))
+        return {"status": "aguardando_relatorio"}
+
     monkeypatch.setattr(broadfactor_ingestao, "_get_existing_operation", lambda *_: existing)
     monkeypatch.setattr(
         broadfactor_ingestao,
@@ -454,12 +475,14 @@ async def test_failed_operation_is_reprocessed_without_creating_another(monkeypa
             (cotacao_id, status, operation_id)
         ),
     )
+    monkeypatch.setattr(broadfactor_ingestao, "_start_analysis", start_recovery)
 
     result = await broadfactor_ingestao.run_broadfactor_ingestao()
 
     assert database.quotes["C-retry"]["estagio"] == "DOCUMENTADA"
     assert created == []
-    assert analyses == ["operation-C-retry"]
+    assert analyses == []
+    assert recovery_calls == [("operation-C-retry", True)]
     assert statuses == [
         ("C-retry", "REPROCESSANDO", "operation-C-retry"),
         ("C-retry", "ANALISE_CONCLUIDA", "operation-C-retry"),
