@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     PORTAL_MAX_POR_DIA: int = 10000
     PORTAL_MAX_ESPERA_SEGUNDOS: float = 120.0
     SANCTION_SNAPSHOT_TTL_HOURS: float = 12.0
+    COMPRASNET_MAX_UASGS: int = 30
+    COMPRASNET_BUSCA_TIMEOUT_SECONDS: float = 45.0
+    COMPRASNET_UASG_INTERVAL_SECONDS: float = 0.2
 
     # Broadfactor
     BROADFACTOR_CLIENT_ID: str = ""

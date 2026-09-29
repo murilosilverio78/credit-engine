@@ -1,6 +1,9 @@
 import os
 from datetime import date
+from io import BytesIO
 from types import SimpleNamespace
+
+import pytest
 
 
 for key in ("SECRET_KEY", "TWOCAPTCHA_API_KEY", "RESEND_API_KEY"):
@@ -13,6 +16,52 @@ from app.workers.tasks import contratos_comprasnet  # noqa: E402
 
 CNPJ = "02.955.426/0001-24"
 TODAY = date(2026, 9, 6)
+
+
+@pytest.fixture(autouse=True)
+def no_comprasnet_candidate_pause(monkeypatch):
+    monkeypatch.setattr(
+        contratos_comprasnet.settings,
+        "COMPRASNET_UASG_INTERVAL_SECONDS",
+        0.0,
+    )
+
+
+def text_pdf(text: str = "") -> bytes:
+    escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    stream = f"BT /F1 12 Tf 72 720 Td ({escaped}) Tj ET".encode("ascii")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
+        ),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n"
+        + stream
+        + b"\nendstream",
+    ]
+    output = BytesIO(b"%PDF-1.4\n")
+    output.seek(0, 2)
+    offsets = [0]
+    for index, body in enumerate(objects, start=1):
+        offsets.append(output.tell())
+        output.write(f"{index} 0 obj\n".encode("ascii"))
+        output.write(body)
+        output.write(b"\nendobj\n")
+    xref = output.tell()
+    output.write(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    output.write(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.write(f"{offset:010d} 00000 n \n".encode("ascii"))
+    output.write(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref}\n%%EOF\n"
+        ).encode("ascii")
+    )
+    return output.getvalue()
 
 
 def receipt(value, uasg):
@@ -163,6 +212,104 @@ def test_uasg_discovery_uses_other_portal_contracts_active_first():
     ]
 
 
+def test_pdf_candidate_finds_pf_contract_before_unrelated_portal_uasgs(monkeypatch):
+    class FakeBroadfactor:
+        def contratos_da_cotacao(self, _cotacao_id):
+            return [SimpleNamespace(numero_contrato="000042026")]
+
+        def baixar_contrato(self, _cotacao_id, _numero):
+            return text_pdf("Gestao/unidade: 200344")
+
+        def recebimentos(self, *_args, **_kwargs):
+            return [
+                receipt(900_000, "158145"),
+                receipt(800_000, "158403"),
+                receipt(100, "200344"),
+            ]
+
+    client = FakeComprasnet(
+        {
+            "/api/contrato/ugorigem/200344/numeroano/000042026": raw_contract(
+                "14757507000107"
+            ),
+            "/api/contrato/42/faturas": [],
+            "/api/contrato/42/empenhos": [],
+        }
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_operation",
+        lambda _operation_id: {"cotacao_id": "C-PF", "margem_disponivel": None},
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_contracts_snapshot",
+        lambda _operation_id: {
+            "contratos_detalhe": [
+                {
+                    "numero": f"0000{index}/2025",
+                    "unidade_codigo": uasg,
+                    "ativo": True,
+                }
+                for index, uasg in enumerate(
+                    ["158145", "158403", "158408", "158587"],
+                    start=1,
+                )
+            ]
+        },
+    )
+
+    result = contratos_comprasnet._fetch(
+        "14757507000107",
+        operation_id="op-pf",
+        today=TODAY,
+        broadfactor_client=FakeBroadfactor(),
+        comprasnet_client=client,
+    )
+
+    assert result["status_consulta"] == "ENCONTRADO"
+    assert result["fontes_candidatos"][0] == {
+        "uasg": "200344",
+        "origem": "CONTRATO_PDF",
+        "numero_preferido": "000042026",
+    }
+    assert result["uasgs_tentadas"] == [
+        {"uasg": "200344", "origem": "CONTRATO_PDF"}
+    ]
+    assert client.calls[0].startswith("/api/contrato/ugorigem/200344/")
+
+
+def test_pdf_without_text_does_not_break_component(monkeypatch):
+    class FakeBroadfactor:
+        def contratos_da_cotacao(self, _cotacao_id):
+            return [SimpleNamespace(numero_contrato="000422026")]
+
+        def baixar_contrato(self, _cotacao_id, _numero):
+            return text_pdf()
+
+        def recebimentos(self, *_args, **_kwargs):
+            return [receipt(100, "999999")]
+
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_operation",
+        lambda _operation_id: {"cotacao_id": "C-1", "margem_disponivel": None},
+    )
+    monkeypatch.setattr(contratos_comprasnet, "_load_contracts_snapshot", lambda _: {})
+
+    result = contratos_comprasnet._fetch(
+        _digits_cnpj(CNPJ),
+        operation_id="op-1",
+        broadfactor_client=FakeBroadfactor(),
+        comprasnet_client=FakeComprasnet({}),
+    )
+
+    assert result["status_consulta"] == "NAO_VERIFICADO"
+    assert result["fontes_candidatos"] == [
+        {"uasg": "999999", "origem": "RECEBIDO", "numero_preferido": None}
+    ]
+
+
 def test_direct_lookup_rejects_supplier_mismatch_and_tries_next_uasg():
     client = FakeComprasnet(
         {
@@ -269,6 +416,93 @@ def test_lookup_failure_is_distinct_from_valid_response_without_match(monkeypatc
     )
 
     assert result["motivo"] == "falha_consulta_comprasnet"
+
+
+def test_truncated_search_is_not_verified(monkeypatch):
+    class FakeBroadfactor:
+        def contratos_da_cotacao(self, _cotacao_id):
+            return [SimpleNamespace(numero_contrato="000422026")]
+
+        def recebimentos(self, *_args, **_kwargs):
+            return [receipt(100, "222222")]
+
+    monkeypatch.setattr(contratos_comprasnet.settings, "COMPRASNET_MAX_UASGS", 1)
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_operation",
+        lambda _operation_id: {"cotacao_id": "C-1", "margem_disponivel": None},
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_contracts_snapshot",
+        lambda _operation_id: {
+            "contratos_detalhe": [
+                {
+                    "numero": "00042/2026",
+                    "unidade_codigo": "111111",
+                    "ativo": True,
+                },
+                {
+                    "numero": "00001/2026",
+                    "unidade_codigo": "222222",
+                    "ativo": True,
+                },
+            ]
+        },
+    )
+
+    result = contratos_comprasnet._fetch(
+        _digits_cnpj(CNPJ),
+        operation_id="op-1",
+        broadfactor_client=FakeBroadfactor(),
+        comprasnet_client=FakeComprasnet({}),
+    )
+
+    assert result["status_consulta"] == "NAO_VERIFICADO"
+    assert result["motivo"] == "busca_truncada"
+    assert result["busca_exaustiva"] is False
+    assert result["uasgs_tentadas"] == [
+        {"uasg": "111111", "origem": "CONTRATOS_NUMERO"}
+    ]
+
+
+def test_exhaustive_strong_source_without_match_is_confirmed(monkeypatch):
+    class FakeBroadfactor:
+        def contratos_da_cotacao(self, _cotacao_id):
+            return [SimpleNamespace(numero_contrato="000422026")]
+
+        def recebimentos(self, *_args, **_kwargs):
+            return []
+
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_operation",
+        lambda _operation_id: {"cotacao_id": "C-1", "margem_disponivel": None},
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_contracts_snapshot",
+        lambda _operation_id: {
+            "contratos_detalhe": [
+                {
+                    "numero": "00042/2026",
+                    "unidade_codigo": "111111",
+                    "ativo": True,
+                }
+            ]
+        },
+    )
+
+    result = contratos_comprasnet._fetch(
+        _digits_cnpj(CNPJ),
+        operation_id="op-1",
+        broadfactor_client=FakeBroadfactor(),
+        comprasnet_client=FakeComprasnet({}),
+    )
+
+    assert result["status_consulta"] == "NAO_ENCONTRADO_CONFIRMADO"
+    assert result["motivo"] == "contrato_sem_match_cnpj"
+    assert result["busca_exaustiva"] is True
 
 
 def test_contract_and_financial_metrics_use_real_api_formats():
@@ -593,6 +827,51 @@ def test_manual_operation_uses_contract_number_and_portal_uasg(monkeypatch):
     )
 
 
+def test_manual_uasg_has_priority_over_all_other_sources(monkeypatch):
+    client = FakeComprasnet(
+        {
+            "/api/contrato/ugorigem/200344/numeroano/000182026": raw_contract(),
+            "/api/contrato/42/faturas": [],
+            "/api/contrato/42/empenhos": [],
+        }
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_operation",
+        lambda _operation_id: {
+            "cotacao_id": None,
+            "contrato_id": "00018/2026",
+            "uasg": "200344",
+            "margem_disponivel": None,
+        },
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_contracts_snapshot",
+        lambda _operation_id: {
+            "contratos_detalhe": [
+                {
+                    "numero": "00018/2026",
+                    "unidade_codigo": "154069",
+                    "ativo": True,
+                }
+            ]
+        },
+    )
+
+    result = contratos_comprasnet._fetch(
+        _digits_cnpj(CNPJ),
+        operation_id="op-1",
+        today=TODAY,
+        comprasnet_client=client,
+    )
+
+    assert result["status_consulta"] == "ENCONTRADO"
+    assert result["fontes_candidatos"][0]["origem"] == "MANUAL"
+    assert result["fontes_candidatos"][0]["uasg"] == "200344"
+    assert result["diagnostico_busca"]["tentativas"][0]["origem"] == "MANUAL"
+
+
 def test_manual_operation_rejects_contract_from_another_cnpj(monkeypatch):
     client = FakeComprasnet(
         {
@@ -658,6 +937,6 @@ def test_public_api_failure_is_recorded_instead_of_raised(monkeypatch):
         comprasnet_client=FakeComprasnet({}),
     )
 
-    assert result["status_consulta"] == "NAO_ENCONTRADO"
+    assert result["status_consulta"] == "NAO_VERIFICADO"
     assert result["motivo"] == "falha_consulta_comprasnet"
     assert "Broadfactor unavailable" in result["error"]

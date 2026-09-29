@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 import math
 import re
 import statistics
+import time
 import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
@@ -12,6 +14,7 @@ from datetime import date
 from typing import Any
 
 import httpx
+from pypdf import PdfReader
 import structlog
 
 from app.core.config import settings
@@ -24,7 +27,9 @@ from app.workers.http_utils import fetch_json_with_retry
 logger = structlog.get_logger()
 
 COMPRASNET_BASE_URL = "https://contratos.comprasnet.gov.br"
-MAX_DIRECT_ATTEMPTS = 5
+MAX_CONTRACT_PDF_BYTES = 10 * 1024 * 1024
+MAX_CONTRACT_PDF_PAGES = 15
+STRONG_UASG_SOURCES = {"CONTRATO_PDF", "CONTRATOS_NUMERO"}
 SINGLE_PAYMENT_HIGH_VALUE = 100_000.0
 MARGIN_CONTRACT_RATIO = 0.70
 MARGIN_DIVERGENCE_TOLERANCE_PCT = 10.0
@@ -132,7 +137,7 @@ def _load_operation(operation_id: str) -> dict[str, Any]:
         lambda: supabase.table("operations")
         .select(
             "cnpj,cotacao_id,contrato_id,margem_disponivel,prazo_vincendo_meses,"
-            "prazo_final_meses,prazo_vincendo_indisponivel"
+            "prazo_final_meses,prazo_vincendo_indisponivel,uasg"
         )
         .eq("id", operation_id)
         .single()
@@ -193,10 +198,76 @@ def _ordered_uasgs(receipts: list[Recebimento]) -> list[str]:
     return [uasg for uasg, _ in sorted(totals.items(), key=lambda item: -item[1])]
 
 
+def _extract_uasgs_from_contract_pdf(content: bytes | None) -> list[str]:
+    if not content or len(content) > MAX_CONTRACT_PDF_BYTES:
+        return []
+    try:
+        reader = PdfReader(BytesIO(content))
+    except Exception:
+        return []
+
+    found: list[str] = []
+    seen: set[str] = set()
+    pattern = re.compile(
+        r"(?:gest[aã]o\s*/\s*unidade|uasg)\s*(?::|-)?\s*(\d{6})",
+        re.IGNORECASE,
+    )
+    for page in reader.pages[:MAX_CONTRACT_PDF_PAGES]:
+        try:
+            text = page.extract_text() or ""
+        except Exception:
+            continue
+        for match in pattern.findall(text):
+            if match not in seen:
+                found.append(match)
+                seen.add(match)
+    return found
+
+
+def _contract_pdf_candidates(
+    client: BroadfactorClient,
+    cotacao_id: str,
+    contracts: list[Any],
+) -> list[_UasgCandidate]:
+    download = getattr(client, "baixar_contrato", None)
+    if not callable(download):
+        return []
+
+    candidates: list[_UasgCandidate] = []
+    seen: set[str] = set()
+    for contract in contracts:
+        number = str(getattr(contract, "numero_contrato", "") or "")
+        try:
+            content = download(cotacao_id, number)
+        except Exception as exc:
+            logger.warning(
+                "contratos_comprasnet.contract_pdf_unavailable",
+                cotacao_id=cotacao_id,
+                numero_contrato=number,
+                error=str(exc),
+            )
+            continue
+        for codigo in _extract_uasgs_from_contract_pdf(content):
+            if codigo in seen:
+                continue
+            candidates.append(
+                _UasgCandidate(
+                    codigo=codigo,
+                    origem="CONTRATO_PDF",
+                    numero_preferido=_normalize_contract_number(number) or None,
+                )
+            )
+            seen.add(codigo)
+    return candidates
+
+
 def _discover_uasg_candidates(
     contract_numbers: list[str],
     contracts_snapshot: dict[str, Any],
     receipts: list[Recebimento],
+    *,
+    pdf_candidates: list[_UasgCandidate] | None = None,
+    manual_uasg: str | None = None,
 ) -> list[_UasgCandidate]:
     expected_numbers = set(contract_numbers)
     exact: list[_UasgCandidate] = []
@@ -229,6 +300,14 @@ def _discover_uasg_candidates(
 
     candidates: list[_UasgCandidate] = []
     seen: set[str] = set()
+    manual_code = _digits(manual_uasg)
+    if len(manual_code) == 6:
+        candidates.append(_UasgCandidate(manual_code, "MANUAL"))
+        seen.add(manual_code)
+    for candidate in pdf_candidates or []:
+        if candidate.codigo not in seen:
+            candidates.append(candidate)
+            seen.add(candidate.codigo)
     for candidate in portal_candidates:
         if candidate.codigo not in seen:
             candidates.append(candidate)
@@ -274,18 +353,31 @@ def _find_contract(
     uasgs: list[_UasgCandidate],
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     attempts: list[dict[str, Any]] = []
-    direct_calls = 0
+    attempted_uasgs: list[str] = []
+    source_error = False
+    truncated_reason: str | None = None
+    max_uasgs = max(int(settings.COMPRASNET_MAX_UASGS), 0)
+    timeout_seconds = max(float(settings.COMPRASNET_BUSCA_TIMEOUT_SECONDS), 0.0)
+    interval_seconds = max(float(settings.COMPRASNET_UASG_INTERVAL_SECONDS), 0.0)
+    started_at = time.monotonic()
 
-    for uasg in uasgs:
+    for index, uasg in enumerate(uasgs):
+        if index >= max_uasgs:
+            truncated_reason = "limite_uasgs"
+            break
+        if time.monotonic() - started_at >= timeout_seconds:
+            truncated_reason = "limite_tempo"
+            break
+        attempted_uasgs.append(uasg.codigo)
         numbers = (
             [uasg.numero_preferido]
             if uasg.numero_preferido
             else contract_numbers
         )
         for number in numbers:
-            if direct_calls >= MAX_DIRECT_ATTEMPTS:
+            if time.monotonic() - started_at >= timeout_seconds:
+                truncated_reason = "limite_tempo"
                 break
-            direct_calls += 1
             try:
                 payload = client.get(
                     f"/api/contrato/ugorigem/{uasg.codigo}/numeroano/{number}"
@@ -307,8 +399,14 @@ def _find_contract(
                             "busca": "DIRETA",
                             "tentativas": attempts,
                             "fallback_usado": False,
+                            "busca_exaustiva": False,
+                            "busca_truncada": False,
+                            "motivo_truncamento": None,
+                            "erro_fonte": source_error,
+                            "uasgs_tentadas": attempted_uasgs,
                         }
             except Exception as exc:
+                source_error = True
                 attempts.append(
                     {
                         "tipo": "DIRETA",
@@ -326,14 +424,16 @@ def _find_contract(
                     numero=number,
                     error=str(exc),
                 )
-        if direct_calls >= MAX_DIRECT_ATTEMPTS:
+        if truncated_reason:
             break
+        if index + 1 < min(len(uasgs), max_uasgs) and interval_seconds:
+            time.sleep(interval_seconds)
 
     fallback_uasg = next(
         (candidate for candidate in uasgs if candidate.origem == "CONTRATOS_NUMERO"),
         None,
     )
-    if fallback_uasg:
+    if fallback_uasg and not truncated_reason:
         try:
             payload = client.get(f"/api/contrato/ug/{fallback_uasg.codigo}")
             candidates = _as_items(payload)
@@ -353,8 +453,14 @@ def _find_contract(
                         "busca": "FALLBACK_UG",
                         "tentativas": attempts,
                         "fallback_usado": True,
+                        "busca_exaustiva": False,
+                        "busca_truncada": False,
+                        "motivo_truncamento": None,
+                        "erro_fonte": source_error,
+                        "uasgs_tentadas": attempted_uasgs,
                     }
         except Exception as exc:
+            source_error = True
             attempts.append(
                 {
                     "tipo": "FALLBACK_UG",
@@ -370,10 +476,20 @@ def _find_contract(
                 error=str(exc),
             )
 
+    exhaustive = (
+        truncated_reason is None
+        and not source_error
+        and len(attempted_uasgs) == len(uasgs)
+    )
     return None, {
         "busca": None,
         "tentativas": attempts,
         "fallback_usado": fallback_uasg is not None,
+        "busca_exaustiva": exhaustive,
+        "busca_truncada": truncated_reason is not None,
+        "motivo_truncamento": truncated_reason,
+        "erro_fonte": source_error,
+        "uasgs_tentadas": attempted_uasgs,
     }
 
 
@@ -599,10 +715,12 @@ def _margin_consistency(
 def _failure(
     reason: str,
     origem_numero_contrato: str | None = None,
+    *,
+    status_consulta: str = "NAO_VERIFICADO",
     **details: Any,
 ) -> dict[str, Any]:
     return {
-        "status_consulta": "NAO_ENCONTRADO",
+        "status_consulta": status_consulta,
         "motivo": reason,
         "origem_numero_contrato": origem_numero_contrato,
         "contrato_comprasnet": _empty_contract(),
@@ -639,6 +757,8 @@ def _fetch(
     contract_number_source: str | None = None
     numbers: list[str] = []
     receipts: list[Recebimento] = []
+    pdf_candidates: list[_UasgCandidate] = []
+    source_errors: list[str] = []
 
     if not cotacao_id:
         number = _normalize_contract_number(operation.get("contrato_id"))
@@ -667,6 +787,11 @@ def _fetch(
                     origem_numero_contrato=contract_number_source,
                     cotacao_id=cotacao_id,
                 )
+            pdf_candidates = _contract_pdf_candidates(
+                broadfactor_client,
+                cotacao_id,
+                contracts,
+            )
 
         contracts_snapshot = _load_contracts_snapshot(operation_id)
         if cotacao_id:
@@ -678,19 +803,38 @@ def _fetch(
                 )
             except Exception as exc:
                 receipts = []
+                source_errors.append("recebimentos_broadfactor")
                 logger.warning(
                     "contratos_comprasnet.receipts_fallback_unavailable",
                     operation_id=operation_id,
                     cotacao_id=cotacao_id,
                     error=str(exc),
                 )
-        uasgs = _discover_uasg_candidates(numbers, contracts_snapshot, receipts)
+        uasgs = _discover_uasg_candidates(
+            numbers,
+            contracts_snapshot,
+            receipts,
+            pdf_candidates=pdf_candidates,
+            manual_uasg=operation.get("uasg"),
+        )
+        candidate_sources = [
+            {
+                "uasg": candidate.codigo,
+                "origem": candidate.origem,
+                "numero_preferido": candidate.numero_preferido,
+            }
+            for candidate in uasgs
+        ]
         if not uasgs:
             return _failure(
                 "uasg_indisponivel",
                 origem_numero_contrato=contract_number_source,
                 cotacao_id=cotacao_id,
                 numeros_contrato=numbers,
+                uasgs_tentadas=[],
+                busca_exaustiva=False,
+                fontes_candidatos=[],
+                erros_fonte=source_errors,
             )
 
         raw_contract, search = _find_contract(
@@ -700,21 +844,47 @@ def _fetch(
             uasgs,
         )
         if raw_contract is None:
-            attempts = search.get("tentativas") or []
-            lookup_succeeded = any("erro" not in attempt for attempt in attempts)
+            source_failed = bool(source_errors) or bool(search.get("erro_fonte"))
+            has_strong_source = any(
+                candidate.origem in STRONG_UASG_SOURCES for candidate in uasgs
+            )
+            confirmed = (
+                bool(search.get("busca_exaustiva"))
+                and has_strong_source
+                and not source_failed
+            )
+            if confirmed:
+                reason = "contrato_sem_match_cnpj"
+                status_consulta = "NAO_ENCONTRADO_CONFIRMADO"
+            elif source_failed:
+                reason = "falha_consulta_comprasnet"
+                status_consulta = "NAO_VERIFICADO"
+            elif search.get("busca_truncada"):
+                reason = "busca_truncada"
+                status_consulta = "NAO_VERIFICADO"
+            else:
+                reason = "fonte_forte_indisponivel"
+                status_consulta = "NAO_VERIFICADO"
             return _failure(
-                (
-                    "contrato_sem_match_cnpj"
-                    if lookup_succeeded
-                    else "falha_consulta_comprasnet"
-                ),
+                reason,
                 origem_numero_contrato=contract_number_source,
+                status_consulta=status_consulta,
                 cotacao_id=cotacao_id,
                 numeros_contrato=numbers,
                 uasgs_tentadas=[
-                    {"uasg": candidate.codigo, "origem": candidate.origem}
-                    for candidate in uasgs[:MAX_DIRECT_ATTEMPTS]
+                    {
+                        "uasg": code,
+                        "origem": next(
+                            candidate.origem
+                            for candidate in uasgs
+                            if candidate.codigo == code
+                        ),
+                    }
+                    for code in search.get("uasgs_tentadas") or []
                 ],
+                busca_exaustiva=bool(search.get("busca_exaustiva")),
+                fontes_candidatos=candidate_sources,
+                erros_fonte=source_errors,
                 diagnostico_busca=search,
             )
 
@@ -769,6 +939,19 @@ def _fetch(
             "fonte_prazo_vincendo": "COMPRASNET",
             "fonte_valor_global": "COMPRASNET",
             "consistencia_margem": consistency,
+            "uasgs_tentadas": [
+                {
+                    "uasg": code,
+                    "origem": next(
+                        candidate.origem
+                        for candidate in uasgs
+                        if candidate.codigo == code
+                    ),
+                }
+                for code in search.get("uasgs_tentadas") or []
+            ],
+            "busca_exaustiva": False,
+            "fontes_candidatos": candidate_sources,
             "diagnostico_busca": search,
             "erros_enriquecimento": enrichment_errors,
             "flags": flags,
