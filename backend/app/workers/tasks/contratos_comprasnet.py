@@ -108,7 +108,11 @@ class ComprasnetClient:
 
     def get(self, path: str) -> list | dict:
         try:
-            return fetch_json_with_retry(self._client, f"{self.base_url}{path}")
+            return fetch_json_with_retry(
+                self._client,
+                f"{self.base_url}{path}",
+                portal_request=False,
+            )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 return []

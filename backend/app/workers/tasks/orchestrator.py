@@ -670,6 +670,13 @@ async def _run_analysis(
             result=result,
         )
     if len(failed_phase2) == len(phase2_components):
+        if partial_until_phase2:
+            logger.warning(
+                "pipeline.phase2_all_sources_unavailable",
+                operation_id=operation_id,
+                results=phase2_results,
+            )
+            return await _complete_phase2_for_funil(operation_id)
         message = "pipeline abortado: falha em componente da fase 2"
         _mark_operation_failed(operation_id, message)
         logger.error("pipeline.phase2_failed", operation_id=operation_id, results=phase2_results)
@@ -678,6 +685,13 @@ async def _run_analysis(
     incomplete = _incomplete_components(operation_id, phase2_components)
     if incomplete:
         if len(incomplete) == len(phase2_components):
+            if partial_until_phase2:
+                logger.warning(
+                    "pipeline.phase2_all_sources_incomplete",
+                    operation_id=operation_id,
+                    incomplete_components=incomplete,
+                )
+                return await _complete_phase2_for_funil(operation_id)
             message = "pipeline abortado: fase 2 incompleta: " + ", ".join(incomplete)
             _mark_operation_failed(operation_id, message)
             logger.error(

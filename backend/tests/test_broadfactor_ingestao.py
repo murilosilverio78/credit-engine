@@ -17,6 +17,7 @@ from app.integrations.broadfactor.client import (  # noqa: E402
     QuotationInactiveError,
 )
 from app.workers.tasks import broadfactor_ingestao  # noqa: E402
+from app.workers import http_utils  # noqa: E402
 
 
 PARAMS = {
@@ -353,6 +354,64 @@ async def test_ingestion_limits_parallel_operation_analyses(monkeypatch):
     assert len(created) == 4
     assert result["criadas"] == 4
     assert maximum_active == 2
+
+
+@pytest.mark.asyncio
+async def test_cycle_guardrail_stops_ingestion_and_leaves_quotes_pending(monkeypatch):
+    quotes = [quote(f"C-{index}") for index in range(3)]
+    initial = [
+        {
+            "cotacao_id": item.id,
+            "ambiente": "PRODUCAO",
+            "estagio": "DOCUMENTADA",
+            "estagio_max": "DOCUMENTADA",
+        }
+        for item in quotes
+    ]
+    database, created, _ = install_funnel(
+        monkeypatch,
+        quotes,
+        initial_quotes=initial,
+    )
+    logs = []
+
+    async def exhaust_cycle(_operation_id):
+        metrics = http_utils.current_portal_cycle_metrics()
+        assert metrics is not None
+        for _ in range(2000):
+            metrics.record_call(daily_consumed=2000, minute_consumed=1)
+        with pytest.raises(http_utils.PortalCycleLimitExceeded):
+            http_utils.acquire_portal_call()
+        return {"status": "aguardando_relatorio"}
+
+    monkeypatch.setattr(broadfactor_ingestao, "_start_analysis", exhaust_cycle)
+    monkeypatch.setattr(broadfactor_ingestao.settings, "INGESTAO_MAX_PARALELO", 1)
+    monkeypatch.setattr(http_utils.settings, "PORTAL_MAX_POR_CICLO", 2000)
+    monkeypatch.setattr(http_utils.settings, "PORTAL_MIN_INTERVAL_SECONDS", 0.0)
+    http_utils._PORTAL_RATE_LIMITER.reset()
+    monkeypatch.setattr(
+        broadfactor_ingestao.logger,
+        "error",
+        lambda event, **values: logs.append((event, values)),
+    )
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert len(created) == 1
+    assert result["status"] == "portal_cycle_limit"
+    assert result["pendentes_guardrail"] == 2
+    assert all(
+        database.quotes[item.id].get("estagio_motivo") is None
+        for item in quotes[1:]
+    )
+    cycle_log = next(
+        values for event, values in logs if event == "portal_guardrail.ciclo_excedido"
+    )
+    assert cycle_log == {
+        "total_consumido": 2000,
+        "limite": 2000,
+        "cotacoes_pendentes": 2,
+    }
 
 
 def test_persist_quote_keeps_raw_payload():

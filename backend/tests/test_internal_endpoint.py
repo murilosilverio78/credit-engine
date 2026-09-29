@@ -174,6 +174,21 @@ def test_ip_diagnostic_returns_outbound_ip_and_portal_probe(monkeypatch):
     monkeypatch.setattr(internal.settings, "PORTAL_PROXY_TOKEN", "proxy-secret")
     monkeypatch.setattr(internal.settings, "HTTPX_VERIFY_SSL", True)
     monkeypatch.setattr(internal.httpx, "Client", FakeClient)
+    monkeypatch.setattr(internal, "acquire_portal_call", lambda: None)
+    monkeypatch.setattr(
+        internal,
+        "portal_guardrail_snapshot",
+        lambda: {
+            "minuto": {"consumo": 12, "limite": 150},
+            "ciclo": {"consumo": 345, "limite": 2000, "ativo": True},
+            "dia": {
+                "consumo": 678,
+                "limite": 10000,
+                "data": "2026-09-28",
+                "erro": None,
+            },
+        },
+    )
 
     response = make_client().get(
         "/api/v1/internal/diagnostico/ip",
@@ -191,6 +206,9 @@ def test_ip_diagnostic_returns_outbound_ip_and_portal_probe(monkeypatch):
         "erro": None,
     }
     assert data["portal_transparencia"]["tempo_ms"] >= 0
+    assert data["guardrails"]["minuto"] == {"consumo": 12, "limite": 150}
+    assert data["guardrails"]["ciclo"]["consumo"] == 345
+    assert data["guardrails"]["dia"]["consumo"] == 678
     assert calls == [
         (internal.IPIFY_URL, {}),
         (

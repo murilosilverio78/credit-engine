@@ -324,6 +324,7 @@ async def _run_broadfactor_ingestao(
     *,
     dry_run: bool = False,
     limit: int | None = None,
+    metrics: PortalCycleMetrics | None = None,
 ) -> dict[str, Any]:
     """Run the Broadfactor quote funnel without paid report components."""
     from app.services.eligibility_params_service import get_eligibility_config
@@ -408,14 +409,14 @@ async def _run_broadfactor_ingestao(
 
     operation_service = OperationService()
     analysis_jobs: list[tuple[str, str, int, asyncio.Task]] = []
-    analysis_semaphore = asyncio.Semaphore(
-        max(int(settings.INGESTAO_MAX_PARALELO), 1)
-    )
+    max_parallel = max(int(settings.INGESTAO_MAX_PARALELO), 1)
+    analysis_semaphore = asyncio.Semaphore(max_parallel)
     criadas = 0
     reprocessadas = 0
     duplicadas = 0
     tentativas_esgotadas = 0
     processadas = 0
+    pendentes_guardrail = 0
 
     seen_ids = {cotacao.id for cotacao in cotacoes}
     try:
@@ -425,7 +426,44 @@ async def _run_broadfactor_ingestao(
         falhas += 1
         logger.error("broadfactor_ingestao.close_missing_failed", error=str(exc))
 
-    for cotacao in cotacoes:
+    for index, cotacao in enumerate(cotacoes):
+        active_tasks = [
+            task
+            for _, _, _, task in analysis_jobs
+            if not task.done()
+        ]
+        if len(active_tasks) >= max_parallel:
+            await asyncio.wait(active_tasks, return_when=asyncio.FIRST_COMPLETED)
+
+        if metrics is not None and metrics.is_cycle_exceeded():
+            remaining = cotacoes[index:]
+            for pending_quote in remaining:
+                try:
+                    _persist_quote(
+                        supabase,
+                        pending_quote,
+                        pending_quote.enquadrar(pct_max_contrato),
+                    )
+                    _update_quote_status(
+                        supabase,
+                        pending_quote.id,
+                        "PENDENTE_GUARDRAIL",
+                    )
+                    pendentes_guardrail += 1
+                except Exception as exc:
+                    falhas += 1
+                    logger.error(
+                        "broadfactor_ingestao.pending_quote_persist_failed",
+                        cotacao_id=pending_quote.id,
+                        error=str(exc),
+                    )
+            logger.error(
+                "portal_guardrail.ciclo_excedido",
+                total_consumido=metrics.snapshot()["consumo_ciclo"],
+                limite=settings.PORTAL_MAX_POR_CICLO,
+                cotacoes_pendentes=pendentes_guardrail,
+            )
+            break
         try:
             valor_enquadrado = cotacao.enquadrar(pct_max_contrato)
             _persist_quote(supabase, cotacao, valor_enquadrado)
@@ -682,7 +720,7 @@ async def _run_broadfactor_ingestao(
         logger.error("broadfactor_ingestao.stage_count_failed", error=str(exc))
 
     summary = {
-        "status": "completed",
+        "status": "portal_cycle_limit" if pendentes_guardrail else "completed",
         "total": len(cotacoes),
         "aprovadas": len(aprovadas),
         "descartadas": len(descartadas),
@@ -693,6 +731,7 @@ async def _run_broadfactor_ingestao(
         "reprocessadas": reprocessadas,
         "duplicadas": duplicadas,
         "tentativas_esgotadas": tentativas_esgotadas,
+        "pendentes_guardrail": pendentes_guardrail,
         "falhas": falhas,
     }
     logger.info("broadfactor_ingestao.completed", **summary)
@@ -709,7 +748,11 @@ async def run_broadfactor_ingestao(
     started_at = time.monotonic()
     cycle_status = "failed"
     try:
-        result = await _run_broadfactor_ingestao(dry_run=dry_run, limit=limit)
+        result = await _run_broadfactor_ingestao(
+            dry_run=dry_run,
+            limit=limit,
+            metrics=metrics,
+        )
         cycle_status = str(result.get("status") or "completed")
         return result
     except asyncio.CancelledError:

@@ -15,12 +15,51 @@ for key in ("SECRET_KEY", "TWOCAPTCHA_API_KEY", "RESEND_API_KEY"):
 from app.workers import http_utils  # noqa: E402
 
 
+class FakeDailyUsage:
+    def __init__(self, consumed=0):
+        self.consumed = consumed
+        self.alerted = False
+
+    def claim(self, limit):
+        if self.consumed >= limit:
+            return http_utils.DailyClaim(False, self.consumed, usage_date="2026-09-28")
+        self.consumed += 1
+        alert_now = not self.alerted and self.consumed >= int(limit * 0.7 + 0.999)
+        self.alerted = self.alerted or alert_now
+        return http_utils.DailyClaim(
+            True,
+            self.consumed,
+            alert_now=alert_now,
+            usage_date="2026-09-28",
+        )
+
+    def current(self):
+        return http_utils.DailyClaim(True, self.consumed, usage_date="2026-09-28")
+
+
 @pytest.fixture(autouse=True)
 def reset_portal_rate_limiter(monkeypatch):
     monkeypatch.setattr(http_utils.settings, "PORTAL_MIN_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(http_utils.settings, "PORTAL_MAX_POR_MINUTO", 10_000)
+    monkeypatch.setattr(http_utils.settings, "PORTAL_MAX_POR_CICLO", 10_000)
+    monkeypatch.setattr(http_utils.settings, "PORTAL_MAX_POR_DIA", 100_000)
+    monkeypatch.setattr(http_utils.settings, "PORTAL_MAX_ESPERA_SEGUNDOS", 120.0)
+    monkeypatch.setattr(http_utils, "_PORTAL_DAILY_USAGE", FakeDailyUsage())
     http_utils._PORTAL_RATE_LIMITER.reset()
     yield
     http_utils._PORTAL_RATE_LIMITER.reset()
+
+
+def _install_fake_clock(monkeypatch):
+    clock = {"now": 0.0, "sleeps": []}
+
+    def sleep(delay):
+        clock["sleeps"].append(delay)
+        clock["now"] += delay + 0.001
+
+    monkeypatch.setattr(http_utils.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(http_utils.time, "sleep", sleep)
+    return clock
 
 
 def _response(content: bytes, request: httpx.Request) -> httpx.Response:
@@ -55,6 +94,149 @@ def test_portal_headers_omit_proxy_header_when_token_is_empty(monkeypatch):
     assert http_utils.portal_headers("portal-key") == {
         "chave-api-dados": "portal-key",
     }
+
+
+def test_151st_call_waits_for_sliding_minute_window(monkeypatch):
+    clock = _install_fake_clock(monkeypatch)
+    monkeypatch.setattr(http_utils.settings, "PORTAL_MAX_POR_MINUTO", 150)
+    metrics = http_utils.PortalCycleMetrics()
+    token = http_utils.set_portal_cycle_metrics(metrics)
+    try:
+        for _ in range(151):
+            http_utils.acquire_portal_call()
+    finally:
+        http_utils.reset_portal_cycle_metrics(token)
+
+    assert len(clock["sleeps"]) == 1
+    assert clock["sleeps"][0] == pytest.approx(60.0)
+    assert metrics.snapshot()["guardrail_minuto_acionado"] == 1
+
+
+def test_minute_wait_above_limit_becomes_unavailable(monkeypatch):
+    _install_fake_clock(monkeypatch)
+    monkeypatch.setattr(http_utils.settings, "PORTAL_MAX_POR_MINUTO", 150)
+    monkeypatch.setattr(http_utils.settings, "PORTAL_MAX_ESPERA_SEGUNDOS", 10.0)
+    for _ in range(150):
+        http_utils.acquire_portal_call()
+
+    with pytest.raises(
+        http_utils.PortalMinuteWaitExceeded,
+        match="minuto_espera_excedida",
+    ):
+        http_utils.acquire_portal_call()
+
+
+def test_daily_limit_blocks_new_calls_as_source_unavailable(monkeypatch):
+    monkeypatch.setattr(http_utils.settings, "PORTAL_MAX_POR_DIA", 10_000)
+    monkeypatch.setattr(
+        http_utils,
+        "_PORTAL_DAILY_USAGE",
+        FakeDailyUsage(consumed=10_000),
+    )
+    metrics = http_utils.PortalCycleMetrics()
+    token = http_utils.set_portal_cycle_metrics(metrics)
+    try:
+        with pytest.raises(
+            http_utils.PortalDailyLimitExceeded,
+            match="dia_excedido",
+        ):
+            http_utils.acquire_portal_call()
+    finally:
+        http_utils.reset_portal_cycle_metrics(token)
+
+    assert metrics.snapshot()["guardrail_dia_acionado"] == 1
+
+
+def test_seventy_percent_alert_is_emitted_once_per_window(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(http_utils.settings, "PORTAL_MAX_POR_MINUTO", 10)
+    monkeypatch.setattr(
+        http_utils.logger,
+        "warning",
+        lambda event, **values: warnings.append((event, values)),
+    )
+
+    for _ in range(9):
+        http_utils.acquire_portal_call()
+
+    minute_alerts = [
+        values
+        for event, values in warnings
+        if event == "portal_guardrail.alerta" and values["guardrail"] == "minuto"
+    ]
+    assert minute_alerts == [{"guardrail": "minuto", "consumo": 7, "limite": 10}]
+
+
+def test_cycle_and_daily_seventy_percent_alerts_are_each_emitted_once(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(http_utils.settings, "PORTAL_MAX_POR_CICLO", 10)
+    monkeypatch.setattr(http_utils.settings, "PORTAL_MAX_POR_DIA", 10)
+    monkeypatch.setattr(
+        http_utils,
+        "_PORTAL_DAILY_USAGE",
+        FakeDailyUsage(),
+    )
+    monkeypatch.setattr(
+        http_utils.logger,
+        "warning",
+        lambda event, **values: warnings.append((event, values)),
+    )
+    metrics = http_utils.PortalCycleMetrics()
+    token = http_utils.set_portal_cycle_metrics(metrics)
+    try:
+        for _ in range(9):
+            http_utils.acquire_portal_call()
+    finally:
+        http_utils.reset_portal_cycle_metrics(token)
+
+    alerts = [
+        values["guardrail"]
+        for event, values in warnings
+        if event == "portal_guardrail.alerta"
+    ]
+    assert alerts.count("ciclo") == 1
+    assert alerts.count("dia") == 1
+
+
+def test_cycle_is_exhausted_exactly_at_configured_limit(monkeypatch):
+    monkeypatch.setattr(http_utils.settings, "PORTAL_MAX_POR_CICLO", 3)
+    metrics = http_utils.PortalCycleMetrics()
+    token = http_utils.set_portal_cycle_metrics(metrics)
+    try:
+        for _ in range(3):
+            http_utils.acquire_portal_call()
+
+        assert metrics.is_cycle_exceeded() is True
+        assert metrics.snapshot()["guardrail_ciclo_acionado"] == 1
+        with pytest.raises(http_utils.PortalCycleLimitExceeded):
+            http_utils.acquire_portal_call()
+    finally:
+        http_utils.reset_portal_cycle_metrics(token)
+
+    assert metrics.snapshot()["guardrail_ciclo_acionado"] == 1
+
+
+def test_non_portal_request_does_not_consume_guardrails():
+    request = httpx.Request("GET", "https://contratos.comprasnet.gov.br/teste")
+    metrics = http_utils.PortalCycleMetrics()
+    token = http_utils.set_portal_cycle_metrics(metrics)
+    try:
+        with httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _request: _response(b'{"ok": true}', request)
+            )
+        ) as client:
+            result = http_utils.fetch_json_with_retry(
+                client,
+                str(request.url),
+                portal_request=False,
+            )
+    finally:
+        http_utils.reset_portal_cycle_metrics(token)
+
+    assert result == {"ok": True}
+    assert metrics.snapshot()["consumo_ciclo"] == 0
+    assert http_utils._PORTAL_DAILY_USAGE.consumed == 0
 
 
 def test_empty_body_retries_then_succeeds(monkeypatch):

@@ -10,7 +10,12 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.services.analysis_runtime import is_shutting_down
 from app.services.operation_watchdog_service import run_operation_watchdog
-from app.workers.http_utils import portal_api_url, portal_headers
+from app.workers.http_utils import (
+    acquire_portal_call,
+    portal_api_url,
+    portal_guardrail_snapshot,
+    portal_headers,
+)
 from app.workers.tasks.broadfactor_ingestao import run_broadfactor_ingestao
 
 
@@ -42,10 +47,14 @@ def verify_internal_token(
 def _timed_get(
     client: httpx.Client,
     url: str,
+    *,
+    guard_portal: bool = False,
     **kwargs,
 ) -> tuple[httpx.Response | None, dict]:
     started_at = time.monotonic()
     try:
+        if guard_portal:
+            acquire_portal_call()
         response = client.get(url, **kwargs)
         error = None
     except Exception as exc:
@@ -75,6 +84,7 @@ def _run_ip_diagnostic() -> dict:
         _, portal = _timed_get(
             client,
             portal_api_url("/pessoa-juridica"),
+            guard_portal=True,
             headers=portal_headers(),
             params={"cnpj": PORTAL_DIAGNOSTIC_CNPJ},
         )
@@ -83,6 +93,7 @@ def _run_ip_diagnostic() -> dict:
         "ip_saida": ip_saida,
         "ipify": ipify,
         "portal_transparencia": portal,
+        "guardrails": portal_guardrail_snapshot(),
     }
 
 
