@@ -92,6 +92,19 @@ def _contract_found(snapshots: dict[str, Any]) -> bool:
     return comprasnet.get("status_consulta") == "ENCONTRADO"
 
 
+def _contract_verification_unavailable(snapshots: dict[str, Any]) -> bool:
+    comprasnet = snapshots.get("contratos_comprasnet") or {}
+    status = comprasnet.get("status_consulta")
+    if status == "NAO_VERIFICADO":
+        return True
+    return (
+        status == "NAO_ENCONTRADO"
+        and comprasnet.get("motivo")
+        in {"uasg_indisponivel", "contrato_sem_match_cnpj"}
+        and comprasnet.get("busca_exaustiva") is not True
+    )
+
+
 def _prazo_dias(operation: dict[str, Any], snapshots: dict[str, Any]) -> int:
     comprasnet = snapshots.get("contratos_comprasnet") or {}
     months = _as_int(
@@ -148,7 +161,10 @@ def avaliar_qualificacao_funil(operation_id: str) -> tuple[bool, list[str]]:
         if statuses.get(component) != "completed":
             motivos.append(f"{UNAVAILABLE_SOURCE_PREFIX}{component}")
 
-    if statuses.get("contratos_comprasnet") != "completed":
+    if (
+        statuses.get("contratos_comprasnet") != "completed"
+        or _contract_verification_unavailable(snapshots)
+    ):
         motivos.append(f"{UNAVAILABLE_SOURCE_PREFIX}contratos_comprasnet")
     elif not _contract_found(snapshots):
         motivos.append("contrato_comprasnet_nao_encontrado")

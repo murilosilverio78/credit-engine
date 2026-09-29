@@ -30,6 +30,7 @@ class PropostaInput(BaseModel):
     cotacao_id: Optional[str] = None
     valor_solicitado: Optional[float] = None
     contrato_id: Optional[str] = None
+    uasg: Optional[str] = None
     contrato_saldo: Optional[float] = None
     margem_disponivel: Optional[float] = None
     prazo_dias: Optional[int] = None
@@ -42,6 +43,16 @@ class PropostaInput(BaseModel):
         digits = re.sub(r"\D", "", v)
         if len(digits) != 14:
             raise ValueError("CNPJ deve ter 14 dígitos")
+        return digits
+
+    @field_validator("uasg")
+    @classmethod
+    def validate_uasg(cls, v):
+        if v is None or not str(v).strip():
+            return None
+        digits = re.sub(r"\D", "", str(v))
+        if len(digits) != 6:
+            raise ValueError("UASG deve ter 6 dígitos")
         return digits
 
 
@@ -297,6 +308,7 @@ async def create_operation(payload: PropostaInput, background_tasks: BackgroundT
         valor_enquadrado=eligibility.valor_enquadrado,
         saldo_vincendo=eligibility.saldo_vincendo,
         contrato_id=payload.contrato_id,
+        uasg=payload.uasg,
         contrato_saldo=payload.contrato_saldo,
         margem_disponivel=payload.margem_disponivel,
         prazo_dias=payload.prazo_dias,

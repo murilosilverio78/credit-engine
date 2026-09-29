@@ -54,3 +54,20 @@ def test_pdf_cover_falls_back_to_legacy_contract_balance_and_term():
 
     assert "R$ 300.000,00" in result
     assert "2,0 meses" in result
+
+
+def test_pdf_labels_default_term_when_contract_was_not_verified():
+    operation = {
+        "cnpj": "14757507000107",
+        "prazo_final_meses": 12,
+        "fonte_prazo_vincendo": "DEFAULT",
+    }
+    snapshots = {
+        "contratos_comprasnet": {
+            "parsed_result": {"status_consulta": "NAO_VERIFICADO"}
+        }
+    }
+
+    result = cover_section(operation, snapshots, {})
+
+    assert "12 meses (prazo padrão, contrato não verificado)" in result

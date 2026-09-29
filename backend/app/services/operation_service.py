@@ -35,6 +35,7 @@ class OperationService:
         valor_enquadrado: Optional[float] = None,
         saldo_vincendo: Optional[float] = None,
         contrato_id: Optional[str] = None,
+        uasg: Optional[str] = None,
         contrato_saldo: Optional[float] = None,
         margem_disponivel: Optional[float] = None,
         prazo_dias: Optional[int] = None,
@@ -61,6 +62,8 @@ class OperationService:
             data["saldo_vincendo"] = saldo_vincendo
         if contrato_id is not None:
             data["contrato_id"] = contrato_id
+        if uasg is not None:
+            data["uasg"] = uasg
         if contrato_saldo is not None:
             data["contrato_saldo"] = contrato_saldo
         if margem_disponivel is not None:

@@ -286,6 +286,9 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
     legal = record(snapshots.get("pessoa_juridica", {}).get("parsed_result"))
     contracts = record(snapshots.get("contratos", {}).get("parsed_result"))
     resources = record(snapshots.get("recursos_recebidos", {}).get("parsed_result"))
+    comprasnet = record(
+        snapshots.get("contratos_comprasnet", {}).get("parsed_result")
+    )
     concentration = record(resources.get("concentracao"))
     tax_regimes = array(company.get("regime_tributario"))
     partners = array(company.get("qsa"))
@@ -328,6 +331,12 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
         term = "-"
     if operation.get("fonte_prazo_vincendo") == "COMPRASNET" and term != "-":
         term += " (Comprasnet)"
+    elif (
+        operation.get("fonte_prazo_vincendo") == "DEFAULT"
+        and comprasnet.get("status_consulta") != "ENCONTRADO"
+        and term != "-"
+    ):
+        term += " (prazo padrão, contrato não verificado)"
     suggested_rate = (
         "-"
         if operation.get("taxa_sugerida") is None

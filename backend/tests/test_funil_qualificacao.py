@@ -108,7 +108,8 @@ def evaluate(monkeypatch, mutate=None, *, statuses_mutate=None):
         (
             "contrato_comprasnet",
             lambda _op, snapshots: snapshots["contratos_comprasnet"].update(
-                status_consulta="NAO_ENCONTRADO"
+                status_consulta="NAO_ENCONTRADO_CONFIRMADO",
+                busca_exaustiva=True,
             ),
             "contrato_comprasnet_nao_encontrado",
         ),
@@ -189,6 +190,29 @@ def test_failed_comprasnet_marks_unavailability_not_rejection(monkeypatch):
         lambda _operation, snapshots: snapshots.pop("contratos_comprasnet"),
         statuses_mutate=lambda statuses: statuses.update(
             contratos_comprasnet="failed"
+        ),
+    )
+
+    assert qualified is False
+    assert reasons == ["indisponibilidade_fonte:contratos_comprasnet"]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"status_consulta": "NAO_VERIFICADO", "busca_exaustiva": False},
+        {
+            "status_consulta": "NAO_ENCONTRADO",
+            "motivo": "contrato_sem_match_cnpj",
+        },
+        {"status_consulta": "NAO_ENCONTRADO", "motivo": "uasg_indisponivel"},
+    ],
+)
+def test_unverified_comprasnet_marks_unavailability(monkeypatch, result):
+    qualified, reasons = evaluate(
+        monkeypatch,
+        lambda _operation, snapshots: snapshots.update(
+            contratos_comprasnet=result
         ),
     )
 

@@ -415,7 +415,7 @@ async def test_operation_create_ignora_falha_ao_vincular(monkeypatch):
     service = OperationService()
     monkeypatch.setattr(service, "_init_snapshots", no_snapshots)
 
-    operation = await service.create("12345678000190", "MANUAL")
+    operation = await service.create("12345678000190", "MANUAL", uasg="200344")
 
     assert operation == {
         "id": "op-created",
@@ -423,6 +423,7 @@ async def test_operation_create_ignora_falha_ao_vincular(monkeypatch):
         "origem_dados": "MANUAL",
         "status": "pending",
         "source": "frontend_mvp",
+        "uasg": "200344",
         "prazo_vincendo_indisponivel": False,
     }
     assert db.rpc_calls[0][0] == "vincular_cliente_operacao"

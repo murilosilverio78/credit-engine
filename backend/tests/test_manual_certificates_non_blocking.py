@@ -313,6 +313,44 @@ def test_recovery_reprocesses_comprasnet_when_contracts_failed(monkeypatch):
     assert "recursos_recebidos" in reusable
 
 
+@pytest.mark.parametrize(
+    "parsed_result",
+    [
+        {"status_consulta": "NAO_VERIFICADO", "busca_exaustiva": False},
+        {
+            "status_consulta": "NAO_ENCONTRADO",
+            "motivo": "contrato_sem_match_cnpj",
+        },
+        {"status_consulta": "NAO_ENCONTRADO", "motivo": "uasg_indisponivel"},
+    ],
+)
+def test_recovery_reprocesses_unverified_comprasnet(monkeypatch, parsed_result):
+    components = {
+        *orchestrator.PHASE1_COMPONENTS,
+        *orchestrator.PHASE2_FUNIL_COMPONENTS,
+    }
+    snapshots = {
+        component: _completed_snapshot(component)
+        for component in components
+    }
+    snapshots["contratos_comprasnet"]["parsed_result"] = parsed_result
+    monkeypatch.setattr(
+        orchestrator,
+        "_completed_component_snapshots",
+        lambda _operation_id: snapshots,
+    )
+    monkeypatch.setattr(orchestrator, "component_ttl_hours", lambda _component: 12)
+
+    reusable = orchestrator._reusable_components_for_run(
+        "op-1",
+        ate_fase=2,
+        recovery=True,
+    )
+
+    assert "contratos" in reusable
+    assert "contratos_comprasnet" not in reusable
+
+
 def test_recovery_refreshes_expired_sanctions_but_keeps_other_snapshots(monkeypatch):
     snapshots = {
         "ceis": _completed_snapshot("ceis", age_hours=13),

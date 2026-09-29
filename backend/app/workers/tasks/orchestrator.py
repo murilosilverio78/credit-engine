@@ -368,7 +368,7 @@ def _completed_component_snapshots(operation_id: str) -> dict[str, dict[str, Any
         operation_id,
         "load_reusable_component_snapshots",
         lambda: supabase.table("component_snapshots")
-        .select("component,completed_at,updated_at")
+        .select("component,completed_at,updated_at,parsed_result")
         .eq("operation_id", operation_id)
         .eq("status", "completed")
         .execute(),
@@ -400,6 +400,19 @@ def _fresh_sanction_snapshots(
     return fresh
 
 
+def _comprasnet_snapshot_is_reusable(snapshot: dict[str, Any] | None) -> bool:
+    parsed = (snapshot or {}).get("parsed_result") or {}
+    status = parsed.get("status_consulta")
+    if status == "NAO_VERIFICADO":
+        return False
+    if (
+        parsed.get("motivo") in {"uasg_indisponivel", "contrato_sem_match_cnpj"}
+        and parsed.get("busca_exaustiva") is not True
+    ):
+        return False
+    return True
+
+
 def _reusable_components_for_run(
     operation_id: str,
     ate_fase: int | None,
@@ -411,6 +424,10 @@ def _reusable_components_for_run(
         reusable_components = _fresh_sanction_snapshots(snapshots)
         # Comprasnet derives its lookup keys from the Portal contract result.
         if "contratos" not in reusable_components:
+            reusable_components.discard("contratos_comprasnet")
+        elif not _comprasnet_snapshot_is_reusable(
+            snapshots.get("contratos_comprasnet")
+        ):
             reusable_components.discard("contratos_comprasnet")
         return reusable_components
 
