@@ -88,6 +88,10 @@ const formSchema = z.object({
       "Informe um prazo inteiro maior que zero.",
     ),
   contrato_id: z.string(),
+  uasg: z.string().refine(
+    (value) => !value || /^\d{6}$/.test(digitsOnly(value)),
+    "Informe uma UASG com 6 dígitos.",
+  ),
 });
 
 type AnalysisFormValues = z.infer<typeof formSchema>;
@@ -105,6 +109,7 @@ const validationFields = new Set<CreateOperationField>([
   "contrato_saldo",
   "prazo_dias",
   "contrato_id",
+  "uasg",
 ]);
 
 const genericValidationMessage =
@@ -284,6 +289,7 @@ export default function NewOperationPage() {
     defaultValues: {
       cnpj: "",
       contrato_id: "",
+      uasg: "",
       contrato_saldo: "",
       prazo_dias: "",
       valor_solicitado: "",
@@ -352,6 +358,9 @@ export default function NewOperationPage() {
     }
     if (values.contrato_id.trim()) {
       payload.contrato_id = values.contrato_id.trim();
+    }
+    if (values.uasg.trim()) {
+      payload.uasg = digitsOnly(values.uasg);
     }
 
     createOperationMutation.mutate(payload);
@@ -497,25 +506,54 @@ export default function NewOperationPage() {
               </div>
             </div>
 
-            <div className="mb-3.5">
-              <label
-                className="mb-1.5 block text-xs font-medium text-muted-foreground"
-                htmlFor="contrato_id"
-              >
-                Contrato ID
-              </label>
-              <input
-                {...register("contrato_id")}
-                aria-invalid={Boolean(errors.contrato_id)}
-                className={cn(inputClassName, "font-mono")}
-                data-testid="op-contrato-id"
-                id="contrato_id"
-                placeholder="Ex: 00123/2024"
-              />
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                Informe o nº do contrato para habilitar a consulta ao Comprasnet.
-              </p>
-              <FieldError message={errors.contrato_id?.message} />
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className="mb-3.5">
+                <label
+                  className="mb-1.5 block text-xs font-medium text-muted-foreground"
+                  htmlFor="contrato_id"
+                >
+                  Contrato ID
+                </label>
+                <input
+                  {...register("contrato_id")}
+                  aria-invalid={Boolean(errors.contrato_id)}
+                  className={cn(inputClassName, "font-mono")}
+                  data-testid="op-contrato-id"
+                  id="contrato_id"
+                  placeholder="Ex: 00123/2024"
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Informe o nº do contrato para consultar o Comprasnet.
+                </p>
+                <FieldError message={errors.contrato_id?.message} />
+              </div>
+              <div className="mb-3.5">
+                <label
+                  className="mb-1.5 block text-xs font-medium text-muted-foreground"
+                  htmlFor="uasg"
+                >
+                  UASG
+                </label>
+                <input
+                  {...register("uasg")}
+                  aria-invalid={Boolean(errors.uasg)}
+                  className={cn(inputClassName, "font-mono")}
+                  data-testid="op-uasg"
+                  id="uasg"
+                  inputMode="numeric"
+                  maxLength={6}
+                  onChange={(event) => {
+                    setValue("uasg", digitsOnly(event.target.value).slice(0, 6), {
+                      shouldValidate: Boolean(errors.uasg),
+                    });
+                  }}
+                  placeholder="200344"
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Opcional — prioriza a unidade informada na busca.
+                </p>
+                <FieldError message={errors.uasg?.message} />
+              </div>
             </div>
 
             <div className="my-4 border-t-[0.5px] border-border" />

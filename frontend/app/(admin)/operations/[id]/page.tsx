@@ -167,6 +167,23 @@ function proposalTerm(operation: OperationDetails) {
   return "—";
 }
 
+function usesUnverifiedDefaultTerm(operation: OperationDetails) {
+  if (operation.fonte_prazo_vincendo !== "DEFAULT") {
+    return false;
+  }
+  const snapshot = operation.components?.find(
+    (component) => component.component === "contratos_comprasnet",
+  );
+  const result =
+    typeof snapshot?.parsed_result === "object" && snapshot.parsed_result !== null
+      ? (snapshot.parsed_result as ParsedResult)
+      : {};
+  return (
+    result.status_consulta === "NAO_VERIFICADO" ||
+    operation.prazo_vincendo_indisponivel === true
+  );
+}
+
 function taxaPercentInput(value: number | null | undefined) {
   if (value === null || value === undefined) {
     return "";
@@ -965,6 +982,10 @@ function CompletedView({
               {operation.fonte_prazo_vincendo === "COMPRASNET" ? (
                 <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-normal text-blue-700">
                   Comprasnet
+                </span>
+              ) : usesUnverifiedDefaultTerm(operation) ? (
+                <span className="text-[10px] font-normal text-amber-700">
+                  Prazo padrão, contrato não verificado
                 </span>
               ) : null}
             </p>

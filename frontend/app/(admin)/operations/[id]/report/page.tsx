@@ -122,8 +122,12 @@ const comprasnetFailureMessages: Record<string, string> = {
   numero_contrato_indisponivel: "Nº de contrato indisponível.",
   uasg_indisponivel: "UASG do contrato não identificada.",
   contrato_sem_match_cnpj: "Contrato não encontrado para este CNPJ no Comprasnet.",
+  busca_truncada:
+    "Contrato não verificado: a busca atingiu o limite de tempo ou de UASGs.",
+  fonte_forte_indisponivel:
+    "Contrato não verificado: nenhuma fonte forte confirmou a UASG.",
   falha_consulta_comprasnet:
-    "Falha ao consultar o Comprasnet (indisponibilidade da fonte).",
+    "Contrato não verificado: falha ou indisponibilidade de uma das fontes.",
 };
 
 const contractNumberSourceLabels: Record<string, string> = {
@@ -243,6 +247,20 @@ function operationTerm(operation: OperationDetails) {
     })} meses`;
   }
   return "—";
+}
+
+function usesUnverifiedDefaultTerm(operation: OperationDetails) {
+  if (operation.fonte_prazo_vincendo !== "DEFAULT") {
+    return false;
+  }
+  const snapshot = operation.components?.find(
+    (component) => component.component === "contratos_comprasnet",
+  );
+  const result = asRecord(snapshot?.parsed_result);
+  return (
+    result.status_consulta === "NAO_VERIFICADO" ||
+    operation.prazo_vincendo_indisponivel === true
+  );
 }
 
 function formatDate(value: unknown) {
@@ -398,6 +416,10 @@ function OperationConferencePanel({ operation }: { operation: OperationDetails }
           {operation.fonte_prazo_vincendo === "COMPRASNET" ? (
             <span className="ml-1.5 rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-normal text-blue-700">
               Comprasnet
+            </span>
+          ) : usesUnverifiedDefaultTerm(operation) ? (
+            <span className="mt-1 block text-[9px] font-normal text-amber-700">
+              Prazo padrão, contrato não verificado
             </span>
           ) : null}
         </Metric>

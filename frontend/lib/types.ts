@@ -43,6 +43,7 @@ export interface Operation {
   prazo_vincendo_meses?: number | null;
   prazo_vincendo_indisponivel?: boolean | null;
   contrato_saldo?: number | null;
+  uasg?: string | null;
   margem_disponivel?: number | null;
   origem_dados?: "API_BROADFACTOR" | "MANUAL" | null;
   cotacao_id?: string | null;
@@ -105,6 +106,7 @@ export interface PropostaInput {
   cotacao_id?: string;
   valor_solicitado?: number;
   contrato_id?: string;
+  uasg?: string;
   contrato_saldo?: number;
   margem_disponivel?: number;
   prazo_dias?: number;
