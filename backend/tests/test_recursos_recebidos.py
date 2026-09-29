@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 import httpx
+from app.workers.http_utils import portal_api_url, portal_headers
 
 TOKEN = os.getenv("PORTAL_TRANSPARENCIA_TOKEN")
 CNPJ  = os.getenv("TEST_CNPJ", "03012610000101")
@@ -24,13 +25,11 @@ print(f"🔍 Consultando CNPJ: {CNPJ}")
 print(f"🔑 Token: {TOKEN[:8]}...")
 print("-" * 60)
 
-BASE_URL = "https://api.portaldatransparencia.gov.br/api-de-dados"
-
 def _mes_ano(d):
     return d.strftime("%m/%Y")
 
 def fetch(cnpj, token):
-    headers = {"chave-api-dados": token}
+    headers = portal_headers(token)
     hoje = date.today()
     mes_fim    = _mes_ano(hoje)
     mes_inicio = _mes_ano(hoje.replace(year=hoje.year - 1))
@@ -39,7 +38,7 @@ def fetch(cnpj, token):
     for pagina in range(1, 6):
         # Monta URL como string para evitar encoding do "/" pelo httpx
         url = (
-            f"{BASE_URL}/despesas/recursos-recebidos"
+            f"{portal_api_url('/despesas/recursos-recebidos')}"
             f"?codigoFavorecido={cnpj}"
             f"&mesAnoInicio={mes_inicio}"
             f"&mesAnoFim={mes_fim}"

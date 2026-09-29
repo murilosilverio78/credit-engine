@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 import httpx
+from app.workers.http_utils import portal_api_url, portal_headers
 
 TOKEN = os.getenv("PORTAL_TRANSPARENCIA_TOKEN")
 CNPJ  = os.getenv("TEST_CNPJ", "03012610000101")
@@ -23,14 +24,12 @@ print(f"🔍 Consultando CNPJ: {CNPJ}")
 print(f"🔑 Token: {TOKEN[:8]}...")
 print("-" * 60)
 
-BASE_URL = "https://api.portaldatransparencia.gov.br/api-de-dados"
-
 def fetch(cnpj, token):
     cnpj_limpo = cnpj.replace(".", "").replace("/", "").replace("-", "")
     with httpx.Client(timeout=15, verify=False) as client:
         resp = client.get(
-            f"{BASE_URL}/pessoa-juridica",
-            headers={"chave-api-dados": token},
+            portal_api_url("/pessoa-juridica"),
+            headers=portal_headers(token),
             params={"cnpj": cnpj_limpo},
         )
         resp.raise_for_status()

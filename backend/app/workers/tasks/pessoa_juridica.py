@@ -9,13 +9,17 @@ import os
 
 import httpx
 from app.workers.base import BaseComponentTask
-from app.workers.http_utils import PortalRespostaVaziaError, fetch_json_with_retry
+from app.workers.http_utils import (
+    PortalRespostaVaziaError,
+    fetch_json_with_retry,
+    portal_api_url,
+    portal_headers,
+)
 import structlog
 
 logger = structlog.get_logger()
 
 SSL_VERIFY = os.getenv("SSL_VERIFY", "true").lower() != "false"
-BASE_URL = "https://api.portaldatransparencia.gov.br/api-de-dados"
 
 
 def _fetch(cnpj: str, token: str = None) -> dict:
@@ -23,14 +27,14 @@ def _fetch(cnpj: str, token: str = None) -> dict:
     api_token = token or settings.PORTAL_TRANSPARENCIA_TOKEN
 
     cnpj_limpo = cnpj.replace(".", "").replace("/", "").replace("-", "")
-    headers = {"chave-api-dados": api_token}
+    headers = portal_headers(api_token)
     sem_registro = False
 
     with httpx.Client(timeout=15, verify=SSL_VERIFY) as client:
         try:
             response_data = fetch_json_with_retry(
                 client,
-                f"{BASE_URL}/pessoa-juridica",
+                portal_api_url("/pessoa-juridica"),
                 headers=headers,
                 params={"cnpj": cnpj_limpo},
             )

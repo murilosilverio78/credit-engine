@@ -11,13 +11,12 @@ import httpx
 import time
 from datetime import date
 from app.workers.base import BaseComponentTask
-from app.workers.http_utils import fetch_json_with_retry
+from app.workers.http_utils import fetch_json_with_retry, portal_api_url, portal_headers
 import structlog
 
 logger = structlog.get_logger()
 
 SSL_VERIFY = os.getenv("SSL_VERIFY", "true").lower() != "false"
-BASE_URL = "https://api.portaldatransparencia.gov.br/api-de-dados"
 MAX_PAGES = 200
 MAX_SECONDS = 180
 
@@ -61,7 +60,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
     from app.core.config import settings
     api_token = token or settings.PORTAL_TRANSPARENCIA_TOKEN
 
-    headers = {"chave-api-dados": api_token}
+    headers = portal_headers(api_token)
     contratos = []
 
     started = time.monotonic()
@@ -82,7 +81,7 @@ def _fetch(cnpj: str, token: str = None) -> dict:
 
             data = fetch_json_with_retry(
                 client,
-                f"{BASE_URL}/contratos/cpf-cnpj",
+                portal_api_url("/contratos/cpf-cnpj"),
                 headers=headers,
                 params={"cpfCnpj": cnpj, "pagina": pagina, "tamanhoPagina": 50},
             )

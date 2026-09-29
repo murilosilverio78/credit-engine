@@ -4,6 +4,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
 import httpx
+from app.workers.http_utils import portal_api_url, portal_headers
 
 TOKEN = os.getenv("PORTAL_TRANSPARENCIA_TOKEN")
 CNPJ  = os.getenv("TEST_CNPJ", "03012610000101")
@@ -15,12 +16,12 @@ print("Consultando CEIS - CNPJ: " + CNPJ)
 print("-" * 60)
 
 def fetch(cnpj, token):
-    headers = {"chave-api-dados": token}
+    headers = portal_headers(token)
     registros = []
     for pagina in range(1, 6):
         with httpx.Client(timeout=20, verify=False) as client:
             resp = client.get(
-                "https://api.portaldatransparencia.gov.br/api-de-dados/ceis",
+                portal_api_url("/ceis"),
                 headers=headers,
                 params={"codigoSancionado": cnpj, "pagina": pagina},
             )

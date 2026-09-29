@@ -17,6 +17,20 @@ from app.core.config import settings
 logger = structlog.get_logger()
 
 
+def portal_api_url(path: str) -> str:
+    base_url = settings.PORTAL_BASE_URL.rstrip("/")
+    return f"{base_url}/api-de-dados/{path.lstrip('/')}"
+
+
+def portal_headers(api_token: str | None = None) -> dict[str, str]:
+    headers = {
+        "chave-api-dados": api_token or settings.PORTAL_TRANSPARENCIA_TOKEN,
+    }
+    if settings.PORTAL_PROXY_TOKEN:
+        headers["X-Proxy-Token"] = settings.PORTAL_PROXY_TOKEN
+    return headers
+
+
 @dataclass
 class PortalCycleMetrics:
     total_calls: int = 0

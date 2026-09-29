@@ -10,14 +10,12 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.services.analysis_runtime import is_shutting_down
 from app.services.operation_watchdog_service import run_operation_watchdog
+from app.workers.http_utils import portal_api_url, portal_headers
 from app.workers.tasks.broadfactor_ingestao import run_broadfactor_ingestao
 
 
 router = APIRouter()
 IPIFY_URL = "https://api.ipify.org?format=json"
-PORTAL_DIAGNOSTIC_URL = (
-    "https://api.portaldatransparencia.gov.br/api-de-dados/pessoa-juridica"
-)
 PORTAL_DIAGNOSTIC_CNPJ = "00000000000191"
 DIAGNOSTIC_TIMEOUT_SECONDS = 15.0
 
@@ -76,8 +74,8 @@ def _run_ip_diagnostic() -> dict:
 
         _, portal = _timed_get(
             client,
-            PORTAL_DIAGNOSTIC_URL,
-            headers={"chave-api-dados": settings.PORTAL_TRANSPARENCIA_TOKEN},
+            portal_api_url("/pessoa-juridica"),
+            headers=portal_headers(),
             params={"cnpj": PORTAL_DIAGNOSTIC_CNPJ},
         )
 

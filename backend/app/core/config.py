@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     CLAUDE_MODEL_EXTRACTION: str = "claude-sonnet-4-6"
 
     # Portal da Transparência
+    PORTAL_BASE_URL: str = "https://api.portaldatransparencia.gov.br"
     PORTAL_TRANSPARENCIA_TOKEN: str
+    PORTAL_PROXY_TOKEN: str = ""
     PORTAL_EMPTY_BODY_POLICY: Literal["raise", "empty"] = "raise"
     PORTAL_MIN_INTERVAL_SECONDS: float = 2.2
     PORTAL_429_DEFAULT_COOLDOWN_SECONDS: float = 60.0

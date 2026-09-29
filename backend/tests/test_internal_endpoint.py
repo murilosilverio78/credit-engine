@@ -170,6 +170,8 @@ def test_ip_diagnostic_returns_outbound_ip_and_portal_probe(monkeypatch):
 
     monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
     monkeypatch.setattr(internal.settings, "PORTAL_TRANSPARENCIA_TOKEN", "portal-key")
+    monkeypatch.setattr(internal.settings, "PORTAL_BASE_URL", "https://proxy.example/")
+    monkeypatch.setattr(internal.settings, "PORTAL_PROXY_TOKEN", "proxy-secret")
     monkeypatch.setattr(internal.settings, "HTTPX_VERIFY_SSL", True)
     monkeypatch.setattr(internal.httpx, "Client", FakeClient)
 
@@ -192,9 +194,12 @@ def test_ip_diagnostic_returns_outbound_ip_and_portal_probe(monkeypatch):
     assert calls == [
         (internal.IPIFY_URL, {}),
         (
-            internal.PORTAL_DIAGNOSTIC_URL,
+            "https://proxy.example/api-de-dados/pessoa-juridica",
             {
-                "headers": {"chave-api-dados": "portal-key"},
+                "headers": {
+                    "chave-api-dados": "portal-key",
+                    "X-Proxy-Token": "proxy-secret",
+                },
                 "params": {"cnpj": internal.PORTAL_DIAGNOSTIC_CNPJ},
             },
         ),

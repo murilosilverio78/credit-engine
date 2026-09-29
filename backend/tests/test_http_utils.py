@@ -32,6 +32,31 @@ def _response(content: bytes, request: httpx.Request) -> httpx.Response:
     )
 
 
+def test_portal_helpers_use_configured_base_url_and_proxy_token(monkeypatch):
+    monkeypatch.setattr(
+        http_utils.settings,
+        "PORTAL_BASE_URL",
+        "https://proxy.example/",
+    )
+    monkeypatch.setattr(http_utils.settings, "PORTAL_PROXY_TOKEN", "proxy-secret")
+
+    assert http_utils.portal_api_url("/ceis") == (
+        "https://proxy.example/api-de-dados/ceis"
+    )
+    assert http_utils.portal_headers("portal-key") == {
+        "chave-api-dados": "portal-key",
+        "X-Proxy-Token": "proxy-secret",
+    }
+
+
+def test_portal_headers_omit_proxy_header_when_token_is_empty(monkeypatch):
+    monkeypatch.setattr(http_utils.settings, "PORTAL_PROXY_TOKEN", "")
+
+    assert http_utils.portal_headers("portal-key") == {
+        "chave-api-dados": "portal-key",
+    }
+
+
 def test_empty_body_retries_then_succeeds(monkeypatch):
     request = httpx.Request("GET", "https://portal.test/recurso")
     responses = iter(

@@ -18,12 +18,11 @@ from app.integrations.broadfactor.client import (
 )
 from app.workers.base import BaseComponentTask
 from app.workers.base import _execute_snapshot_write as _execute_with_retry
-from app.workers.http_utils import fetch_json_with_retry
+from app.workers.http_utils import fetch_json_with_retry, portal_api_url, portal_headers
 
 
 logger = structlog.get_logger()
 
-BASE_URL = "https://api.portaldatransparencia.gov.br/api-de-dados"
 MAX_PAGES = 300
 MAX_SECONDS = 180
 BROADFACTOR_PAGE_SIZE = 50
@@ -276,7 +275,7 @@ def _fetch_portal(
         date(today.year, today.month, 1), -11
     )
     query_end = period_end or today
-    headers = {"chave-api-dados": token or settings.PORTAL_TRANSPARENCIA_TOKEN}
+    headers = portal_headers(token)
 
     resources: list[dict[str, Any]] = []
     started = time.monotonic()
@@ -297,8 +296,8 @@ def _fetch_portal(
                 break
 
             url = (
-                f"{BASE_URL}/despesas/recursos-recebidos"
-                f"?codigoFavorecido={cnpj}"
+                portal_api_url("/despesas/recursos-recebidos")
+                + f"?codigoFavorecido={cnpj}"
                 f"&mesAnoInicio={query_start.strftime('%m/%Y')}"
                 f"&mesAnoFim={query_end.strftime('%m/%Y')}"
                 f"&pagina={page}"
