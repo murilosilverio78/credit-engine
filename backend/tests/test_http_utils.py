@@ -239,6 +239,28 @@ def test_non_portal_request_does_not_consume_guardrails():
     assert http_utils._PORTAL_DAILY_USAGE.consumed == 0
 
 
+def test_non_portal_retry_respects_total_timeout(monkeypatch):
+    clock = _install_fake_clock(monkeypatch)
+    calls = []
+    monkeypatch.setattr(http_utils, "_retry_delay", lambda _attempt: 8.0)
+
+    def unavailable(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(504, request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(unavailable)) as client:
+        with pytest.raises(httpx.TimeoutException, match="deadline exceeded"):
+            http_utils.fetch_json_with_retry(
+                client,
+                "https://contratos.comprasnet.gov.br/teste",
+                portal_request=False,
+                total_timeout_seconds=5,
+            )
+
+    assert len(calls) == 1
+    assert clock["sleeps"] == [5.0]
+
+
 def test_empty_body_retries_then_succeeds(monkeypatch):
     request = httpx.Request("GET", "https://portal.test/recurso")
     responses = iter(

@@ -111,12 +111,18 @@ class ComprasnetClient:
             verify=settings.HTTPX_VERIFY_SSL,
         )
 
-    def get(self, path: str) -> list | dict:
+    def get(
+        self,
+        path: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> list | dict:
         try:
             return fetch_json_with_retry(
                 self._client,
                 f"{self.base_url}{path}",
                 portal_request=False,
+                total_timeout_seconds=timeout_seconds,
             )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
@@ -361,6 +367,9 @@ def _find_contract(
     interval_seconds = max(float(settings.COMPRASNET_UASG_INTERVAL_SECONDS), 0.0)
     started_at = time.monotonic()
 
+    def remaining_search_time() -> float:
+        return max(timeout_seconds - (time.monotonic() - started_at), 0.0)
+
     for index, uasg in enumerate(uasgs):
         if index >= max_uasgs:
             truncated_reason = "limite_uasgs"
@@ -380,7 +389,8 @@ def _find_contract(
                 break
             try:
                 payload = client.get(
-                    f"/api/contrato/ugorigem/{uasg.codigo}/numeroano/{number}"
+                    f"/api/contrato/ugorigem/{uasg.codigo}/numeroano/{number}",
+                    timeout_seconds=remaining_search_time(),
                 )
                 candidates = _as_items(payload)
                 attempts.append(
@@ -435,7 +445,10 @@ def _find_contract(
     )
     if fallback_uasg and not truncated_reason:
         try:
-            payload = client.get(f"/api/contrato/ug/{fallback_uasg.codigo}")
+            payload = client.get(
+                f"/api/contrato/ug/{fallback_uasg.codigo}",
+                timeout_seconds=remaining_search_time(),
+            )
             candidates = _as_items(payload)
             attempts.append(
                 {

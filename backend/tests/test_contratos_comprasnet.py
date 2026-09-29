@@ -107,7 +107,7 @@ class FakeComprasnet:
         self.responses = responses
         self.calls = []
 
-    def get(self, path):
+    def get(self, path, *, timeout_seconds=None):
         self.calls.append(path)
         response = self.responses.get(path, [])
         if isinstance(response, Exception):

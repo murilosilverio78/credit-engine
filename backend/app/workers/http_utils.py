@@ -524,6 +524,7 @@ def fetch_json_with_retry(
     max_retries: int = 4,
     *,
     portal_request: bool = True,
+    total_timeout_seconds: float | None = None,
 ) -> list | dict:
     """Fetch JSON with retry/backoff for transient Portal da Transparencia errors."""
     retry_exceptions = (
@@ -531,12 +532,37 @@ def fetch_json_with_retry(
         httpx.RemoteProtocolError,
         httpx.TimeoutException,
     )
+    deadline = (
+        time.monotonic() + max(float(total_timeout_seconds), 0.0)
+        if total_timeout_seconds is not None
+        else None
+    )
+
+    def remaining_timeout() -> float | None:
+        if deadline is None:
+            return None
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise httpx.TimeoutException("HTTP retry deadline exceeded")
+        return remaining
+
+    def sleep_with_deadline(delay: float) -> None:
+        remaining = remaining_timeout()
+        time.sleep(delay if remaining is None else min(delay, remaining))
+
     for attempt in range(max_retries + 1):
         response: httpx.Response | None = None
         try:
             if portal_request:
                 _before_portal_call()
-            response = client.get(url, headers=headers, params=params)
+            request_timeout = remaining_timeout()
+            request_kwargs: dict[str, Any] = {
+                "headers": headers,
+                "params": params,
+            }
+            if request_timeout is not None:
+                request_kwargs["timeout"] = request_timeout
+            response = client.get(url, **request_kwargs)
             if response.status_code in {429} or response.status_code >= 500:
                 response.raise_for_status()
             response.raise_for_status()
@@ -554,7 +580,7 @@ def fetch_json_with_retry(
                         f"Portal retornou corpo vazio em {url.split('?', 1)[0]} "
                         f"apos {max_retries + 1} tentativas"
                     )
-                time.sleep(_retry_delay(attempt))
+                sleep_with_deadline(_retry_delay(attempt))
                 continue
             return response.json()
         except httpx.HTTPStatusError as exc:
@@ -590,7 +616,7 @@ def fetch_json_with_retry(
                 tentativa=attempt + 1,
                 delay_s=delay,
             )
-            time.sleep(delay)
+            sleep_with_deadline(delay)
         except retry_exceptions as exc:
             metrics = _PORTAL_CYCLE_METRICS.get()
             if metrics is not None and isinstance(exc, httpx.TimeoutException):
@@ -607,6 +633,6 @@ def fetch_json_with_retry(
                 delay_s=delay,
                 error=type(exc).__name__,
             )
-            time.sleep(delay)
+            sleep_with_deadline(delay)
 
     raise RuntimeError("retry loop exited unexpectedly")
