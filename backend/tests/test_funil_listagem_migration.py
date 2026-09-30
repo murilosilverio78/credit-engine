@@ -11,6 +11,7 @@ MIGRATION = (
     / "038_funil_listagem_agregada.sql"
 )
 PENDING_MIGRATION = MIGRATION.with_name("040_funil_pendencias.sql")
+CERTIFICATES_MIGRATION = MIGRATION.with_name("041_funil_pendencias_certidoes.sql")
 
 
 def test_applied_migration_038_matches_origin_main_exactly():
@@ -37,6 +38,27 @@ def test_pending_funil_migration_recreates_and_secures_new_signature():
     assert drop in sql
     assert create in sql
     assert sql.index(drop) < sql.index(create) < sql.index(revoke) < sql.index(grant)
+
+
+def test_certificate_pending_migration_handles_real_pre_report_states():
+    sql = " ".join(CERTIFICATES_MIGRATION.read_text(encoding="utf-8").split())
+    signature = "listar_funil_operacoes(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER, INTEGER)"
+
+    assert f"DROP FUNCTION IF EXISTS {signature};" in sql
+    assert "cs.status IS DISTINCT FROM 'completed'" in sql
+    assert "certidao_cnd_federal_recalcular" in sql
+    assert "balanco_broadfactor_nao_lido" in sql
+    assert f"REVOKE ALL ON FUNCTION {signature} FROM PUBLIC, anon, authenticated;" in sql
+    assert f"GRANT EXECUTE ON FUNCTION {signature} TO service_role;" in sql
+
+    # Espelha o predicado SQL para a operação criada com ate_fase=2: os
+    # snapshots existem, mas ainda estão pending antes do relatório.
+    assert {status: status != "completed" for status in ("pending", "waiting_upload", "completed", "failed")} == {
+        "pending": True,
+        "waiting_upload": True,
+        "completed": False,
+        "failed": True,
+    }
 
 
 def test_funil_rpcs_are_not_executable_by_public_roles():

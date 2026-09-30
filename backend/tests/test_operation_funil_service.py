@@ -168,6 +168,32 @@ def test_list_funil_exposes_quote_fields_and_only_completed_score_report(monkeyp
     assert "score" not in scored
 
 
+def test_list_funil_exposes_pending_certificates_for_pre_report_phase_two_operation(monkeypatch):
+    database = Supabase({}, {"listar_funil_operacoes": [{
+        "cotacao_id": "C-phase-2", "cnpj": "12345678000190", "operation_id": "op-phase-2",
+        "estagio": "QUALIFICADA", "estagio_max": "QUALIFICADA", "created_at": "2026-09-01",
+        "relatorio_gerado": False, "total_count": 1,
+        "pendencias": [
+            {"codigo": "cnd_federal", "rotulo": "CND federal pendente"},
+            {"codigo": "cndt_tst", "rotulo": "CNDT pendente"},
+            {"codigo": "fgts", "rotulo": "FGTS pendente"},
+        ],
+        "score_flags": [],
+    }]})
+    monkeypatch.setattr(service, "supabase", database)
+    monkeypatch.setattr("app.services.eligibility_params_service.get_eligibility_config", lambda: PARAMS)
+    monkeypatch.setattr(service.OperationService, "_funnel_summary", lambda _self: {})
+
+    result = asyncio.run(service.OperationService()._list_funil(
+        estagio="QUALIFICADA", cnpj=None, busca=None, rating=None,
+        relatorio=None, tipo_motivo=None, limit=20, offset=0,
+    ))
+
+    assert [pending["codigo"] for pending in result["items"][0]["pendencias"]] == [
+        "cnd_federal", "cndt_tst", "fgts",
+    ]
+
+
 def test_list_funil_forwards_server_filters_and_total_from_filtered_page(monkeypatch):
     filtered_row = {
         "cotacao_id": "C-41", "cnpj": "12345678000190", "nome_fornecedor": "Fora da primeira página",
