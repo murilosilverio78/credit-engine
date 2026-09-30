@@ -13,6 +13,10 @@ REQUIRED = {
     "sacado_orgao": ("contratos", "recursos_recebidos", "contratos_comprasnet"),
     "documentos": ("contrato_extracao",), "reputacional": ("web_research",), "porte": (),
 }
+OPTIONAL_INPUTS = {
+    "cadastro_regularidade": ("cnd_federal", "cndt_tst", "fgts", "ceaf"),
+    "sacado_orgao": (), "documentos": (), "reputacional": (), "porte": (),
+}
 TERMINAL = {"completed", "failed"}
 
 def _first_row(query):
@@ -63,7 +67,11 @@ def emit_findings(operation_id: str, especialista: str, *, database=None, overri
         if overrides:
             snapshots.update(overrides)
         snapshots["__statuses__"] = statuses
-        input_rows = [(component, statuses.get(component, "override"), snapshots.get(component)) for component in sorted(set(required) | set(overrides or {}))]
+        input_components = set(required) | set(OPTIONAL_INPUTS[especialista]) | set(overrides or {})
+        input_rows = [
+            (component, statuses.get(component, "missing"), snapshots.get(component))
+            for component in sorted(input_components)
+        ]
         fingerprint = entrada_hash({"insumos": input_rows, "valor_enquadrado": operation.get("valor_enquadrado"), "tipos_documento": (quote_catalog or {}).get("documentos_broadfactor"), "overrides": overrides or {}})
         candidates = adapter(snapshots, fingerprint=fingerprint, operation=operation)
         achados = []

@@ -30,6 +30,9 @@ def _catalog():
         "sancao_ativa": ("CEDENTE", "OBJETO"),
         "acordo_leniencia_ativo": ("CEDENTE", "BOOLEANO"),
         "balanco_ausente": ("CEDENTE", "BOOLEANO"),
+        "certidao_cnd_federal_pendente": ("CEDENTE", "OBJETO"),
+        "certidao_cndt_pendente": ("CEDENTE", "OBJETO"),
+        "certidao_fgts_pendente": ("CEDENTE", "OBJETO"),
         "capacidade_operacional": ("CEDENTE", "ENUM"),
     }
     return {
@@ -88,6 +91,21 @@ def test_failed_source_emits_partial_with_unverified_finding(monkeypatch):
     assert db.rpc_calls[0][1]["p_run"]["status"] == "PARCIAL"
     sancao = next(item for item in db.persisted_findings if item["codigo"] == "sancao_ativa")
     assert sancao["estado"] == "NAO_VERIFICADO"
+
+
+def test_optional_certificate_change_creates_a_new_auditable_run(monkeypatch):
+    rows = _cadastro_rows() + [{
+        "operation_id": "op", "component": "cnd_federal", "status": "pending", "parsed_result": None,
+    }]
+    db = FlowDb(rows)
+    _enable_real_hook(monkeypatch, db)
+
+    base._dual_write_findings("op", "brasil_api", {})
+    rows[-1].update(status="completed", parsed_result={"valida": True, "data_validade": "2030-01-01"})
+    base._dual_write_findings("op", "cnd_federal", rows[-1]["parsed_result"])
+
+    assert len(db.rpc_calls) == 2
+    assert db.rpc_calls[0][1]["p_run"]["entrada_hash"] != db.rpc_calls[1][1]["p_run"]["entrada_hash"]
 
 
 def test_porte_reprocessing_uses_new_override_not_old_snapshot(monkeypatch):
