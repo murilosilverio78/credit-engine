@@ -131,6 +131,8 @@ def test_list_funil_exposes_quote_fields_and_only_completed_score_report(monkeyp
             "created_at": "2026-09-01T00:00:00Z", "operation_created_at": "2026-09-01",
             "razao_social": "Fornecedor SA", "source": "x", "rating": "A", "score": 95,
             "taxa_sugerida": 0.02, "relatorio_gerado": True, "total_count": 2,
+            "pendencias": [{"codigo": "cnd_federal", "rotulo": "CND federal pendente"}],
+            "score_flags": ["certidao_cnd_federal_pendente"],
         }, {
             "cotacao_id": "C-2", "cnpj": "12345678000191", "nome_fornecedor": "Sem score",
             "operation_id": "op-sem-score", "estagio": "QUALIFICADA", "estagio_max": "QUALIFICADA",
@@ -160,6 +162,8 @@ def test_list_funil_exposes_quote_fields_and_only_completed_score_report(monkeyp
         "gerado": True, "rating": "A", "score": 95, "taxa_sugerida": 0.02, "operation_id": "op-score",
     }
     assert unscored["relatorio"] is None
+    assert scored["pendencias"] == [{"codigo": "cnd_federal", "rotulo": "CND federal pendente"}]
+    assert scored["score_flags"] == ["certidao_cnd_federal_pendente"]
     assert "status" not in scored
     assert "score" not in scored
 

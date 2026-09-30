@@ -1022,7 +1022,7 @@ async def _complete_analysis(operation_id: str):
         "load_operation_for_completion",
         lambda: supabase.table("operations")
         .select(
-            "valor_solicitado,valor_enquadrado,prazo_dias,prazo_final_meses"
+            "valor_solicitado,valor_enquadrado,valor_operacao_relatorio,prazo_dias,prazo_final_meses"
         )
         .eq("id", operation_id)
         .maybe_single()
@@ -1043,9 +1043,13 @@ async def _complete_analysis(operation_id: str):
         "error_message": None,
     }
     rating = str(data["rating"] or "").upper()
+    valor_operacao_relatorio = operation.get("valor_operacao_relatorio")
     valor_enquadrado = operation.get("valor_enquadrado")
     valor_solicitado = operation.get("valor_solicitado")
-    if valor_enquadrado not in (None, ""):
+    if valor_operacao_relatorio not in (None, ""):
+        valor = _as_float(valor_operacao_relatorio)
+        valor_origem = "valor_operacao_relatorio"
+    elif valor_enquadrado not in (None, ""):
         valor = _as_float(valor_enquadrado)
         valor_origem = "valor_enquadrado"
     else:

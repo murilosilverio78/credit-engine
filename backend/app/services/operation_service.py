@@ -416,6 +416,8 @@ class OperationService:
                 "motivos": mapear_motivos_funil(quote.get("estagio_motivo"), parametros),
                 "n_documentos": quote.get("n_documentos"),
                 "tipos_documento": quote.get("tipos_documento"),
+                "pendencias": quote.get("pendencias") or [],
+                "score_flags": quote.get("score_flags") or [],
                 "relatorio": relatorio,
             })
 

@@ -60,6 +60,10 @@ class ApprovalInput(BaseModel):
     justificativa: Optional[str] = None
 
 
+class ReportRequest(BaseModel):
+    valor_operacao: Optional[float] = None
+
+
 class ResolveEscalationInput(BaseModel):
     approval_id: Optional[str] = None
     action: Literal["escalation_approved", "escalation_rejected"]
@@ -402,6 +406,7 @@ async def generate_operation_report(
     background_tasks: BackgroundTasks,
     request: Request,
     current_user: dict = Depends(get_current_user),
+    payload: Optional[ReportRequest] = None,
 ):
     operation = _operation_snapshot(operation_id)
     if operation.get("status") == "completed" or operation.get("rating") is not None:
@@ -450,13 +455,48 @@ async def generate_operation_report(
             },
         )
 
+    valor_operacao = payload.valor_operacao if payload else None
+    if valor_operacao is not None:
+        from app.services.eligibility_params_service import get_eligibility_config
+
+        valor_enquadrado = operation.get("valor_enquadrado")
+        try:
+            ticket_minimo = float(get_eligibility_config()["ticket_minimo"])
+            limite = float(valor_enquadrado)
+            valor_operacao = float(valor_operacao)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "INVALID_REPORT_OPERATION_AMOUNT",
+                    "message": "Valor da operação indisponível para precificação.",
+                },
+            ) from exc
+        if not ticket_minimo <= valor_operacao <= limite:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "REPORT_OPERATION_AMOUNT_OUT_OF_RANGE",
+                    "message": "Valor da operação deve estar entre o ticket mínimo e o valor enquadrado.",
+                    "ticket_minimo": ticket_minimo,
+                    "valor_enquadrado": limite,
+                },
+            )
+        supabase.table("operations").update({
+            "valor_operacao_relatorio": valor_operacao,
+        }).eq("id", operation_id).execute()
+
     audit.log(
         operation_id=operation_id,
         action="relatorio_solicitado",
         actor_id=current_user.get("id"),
         actor_type=current_user.get("role", "analista"),
         ip_address=request.client.host if request.client else None,
-        payload={"cotacao_id": quote_data.get("cotacao_id")},
+        payload={
+            "cotacao_id": quote_data.get("cotacao_id"),
+            "valor_operacao": valor_operacao,
+            "valor_origem": "valor_operacao_relatorio" if valor_operacao is not None else None,
+        },
     )
 
     from app.workers.tasks.orchestrator import start_report_analysis

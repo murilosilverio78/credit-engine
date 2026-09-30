@@ -36,6 +36,8 @@ RETURNS TABLE (
   score NUMERIC,
   taxa_sugerida NUMERIC,
   relatorio_gerado BOOLEAN,
+  pendencias JSONB,
+  score_flags JSONB,
   total_count BIGINT
 )
 LANGUAGE SQL
@@ -50,15 +52,18 @@ AS $$
       o.rating::TEXT AS operation_rating,
       o.score AS operation_score,
       o.taxa_sugerida AS operation_taxa_sugerida,
-      EXISTS (
-        SELECT 1
-        FROM component_snapshots cs
-        WHERE cs.operation_id = q.operation_id
-          AND cs.component = 'score_engine'
-          AND cs.status = 'completed'
-      ) AS score_engine_completed
+      score_snapshot.parsed_result AS score_engine_result,
+      score_snapshot.operation_id IS NOT NULL AS score_engine_completed
     FROM cotacoes_broadfactor q
     LEFT JOIN operations o ON o.id = q.operation_id
+    LEFT JOIN LATERAL (
+      SELECT cs.operation_id, cs.parsed_result
+      FROM component_snapshots cs
+      WHERE cs.operation_id = q.operation_id
+        AND cs.component = 'score_engine'
+        AND cs.status = 'completed'
+      LIMIT 1
+    ) score_snapshot ON TRUE
     WHERE q.ambiente = 'PRODUCAO'
       AND q.estagio = p_estagio
       AND (p_cnpj IS NULL OR q.cnpj = p_cnpj)
@@ -111,7 +116,38 @@ AS $$
     estagio, estagio_max, estagio_motivo, n_documentos, tipos_documento,
     estagio_atualizado_em, created_at, razao_social, source,
     operation_created_at, operation_rating, operation_score,
-    operation_taxa_sugerida, score_engine_completed, COUNT(*) OVER ()
+    operation_taxa_sugerida, score_engine_completed,
+    (
+      SELECT COALESCE(JSONB_AGG(pendencia), '[]'::JSONB)
+      FROM (
+        SELECT JSONB_BUILD_OBJECT('codigo', 'cnd_federal', 'rotulo', 'CND federal pendente') AS pendencia
+        WHERE EXISTS (
+          SELECT 1 FROM component_snapshots cs
+          WHERE cs.operation_id = com_filtros.operation_id AND cs.component = 'cnd_federal' AND cs.status = 'waiting_upload'
+        )
+        UNION ALL SELECT JSONB_BUILD_OBJECT('codigo', 'cndt_tst', 'rotulo', 'CNDT pendente')
+        WHERE EXISTS (
+          SELECT 1 FROM component_snapshots cs
+          WHERE cs.operation_id = com_filtros.operation_id AND cs.component = 'cndt_tst' AND cs.status = 'waiting_upload'
+        )
+        UNION ALL SELECT JSONB_BUILD_OBJECT('codigo', 'fgts', 'rotulo', 'FGTS pendente')
+        WHERE EXISTS (
+          SELECT 1 FROM component_snapshots cs
+          WHERE cs.operation_id = com_filtros.operation_id AND cs.component = 'fgts' AND cs.status = 'waiting_upload'
+        )
+        UNION ALL SELECT JSONB_BUILD_OBJECT('codigo', 'balanco_ausente', 'rotulo', 'Balanço ausente')
+        WHERE NOT (COALESCE(com_filtros.tipos_documento, '{}'::TEXT[]) && ARRAY['PENULTIMO_BALANCO', 'ULTIMO_BALANCO'])
+        UNION ALL SELECT JSONB_BUILD_OBJECT('codigo', 'contrato_nao_verificado', 'rotulo', 'Contrato não verificado')
+        WHERE EXISTS (
+          SELECT 1 FROM component_snapshots cs
+          WHERE cs.operation_id = com_filtros.operation_id
+            AND cs.component = 'contratos_comprasnet'
+            AND cs.parsed_result->>'status_consulta' = 'NAO_VERIFICADO'
+        )
+      ) itens
+    ),
+    COALESCE(score_engine_result->'flags', '[]'::JSONB),
+    COUNT(*) OVER ()
   FROM com_filtros
   ORDER BY estagio_atualizado_em DESC NULLS LAST, cotacao_id
   LIMIT GREATEST(p_limit, 1)
