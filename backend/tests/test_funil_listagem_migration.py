@@ -12,6 +12,7 @@ MIGRATION = (
 )
 PENDING_MIGRATION = MIGRATION.with_name("040_funil_pendencias.sql")
 CERTIFICATES_MIGRATION = MIGRATION.with_name("041_funil_pendencias_certidoes.sql")
+BALANCE_CATALOG_MIGRATION = MIGRATION.with_name("042_funil_catalogo_balanco.sql")
 
 
 def test_applied_migration_038_matches_origin_main_exactly():
@@ -59,6 +60,20 @@ def test_certificate_pending_migration_handles_real_pre_report_states():
         "completed": False,
         "failed": True,
     }
+
+
+def test_score_and_catalog_migration_share_balance_document_types():
+    from app.services.document_types import BALANCO_DOCUMENT_TYPES
+
+    sql = BALANCE_CATALOG_MIGRATION.read_text(encoding="utf-8")
+    expected = ["PENULTIMO_BALANCO", "ULTIMO_BALANCO", "BALANCO", "DRE"]
+
+    assert set(expected) == BALANCO_DOCUMENT_TYPES
+    for document_type in expected:
+        assert f"'{document_type}'" in sql
+    assert "DROP FUNCTION IF EXISTS listar_funil_operacoes" in sql
+    assert "REVOKE ALL ON FUNCTION listar_funil_operacoes" in sql
+    assert "GRANT EXECUTE ON FUNCTION listar_funil_operacoes" in sql
 
 
 def test_funil_rpcs_are_not_executable_by_public_roles():

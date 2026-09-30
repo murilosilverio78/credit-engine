@@ -105,6 +105,18 @@ def test_broadfactor_balance_document_avoids_penalty(monkeypatch):
     assert "balanco_ausente" not in result["flags"]
 
 
+def test_quote_catalog_balance_or_dre_avoids_penalty_and_is_audited(monkeypatch):
+    for document_type in ("PENULTIMO_BALANCO", "ULTIMO_BALANCO", "DRE"):
+        result = _consolidate(monkeypatch, {
+            **_valid_certificates(),
+            "catalogo_broadfactor": {"documentos_broadfactor": [{"tipo": document_type}]},
+        })
+
+        assert result["penalizacao_balanco"] == 0
+        assert "balanco_ausente" not in result["flags"]
+        assert "balanco_via_catalogo_broadfactor" in result["flags"]
+
+
 def test_uploaded_balance_document_avoids_penalty(monkeypatch):
     snapshots = {
         **_valid_certificates(),

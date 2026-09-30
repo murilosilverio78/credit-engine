@@ -496,10 +496,17 @@ def regularity_section(engine: dict[str, Any]) -> str:
         [item.get("certidao"), item.get("estado"), number(item.get("haircut"), 2)]
         for item in map(record, array(regularity.get("haircuts")))
     ]
+    catalog_balance_note = ""
+    if "balanco_via_catalogo_broadfactor" in array(engine.get("flags")):
+        catalog_balance_note = (
+            '<p class="note">Balanço considerado presente pelo catálogo da '
+            'Broadfactor (não analisado).</p>'
+        )
     return f"""
     <section class="page-section avoid-break">
       <h1>4. Regularidade</h1>
       <div class="calc">{calculation}</div>
+      {catalog_balance_note}
       {table(["Certidao", "Estado", "Haircut"], haircuts)}
     </section>
     """

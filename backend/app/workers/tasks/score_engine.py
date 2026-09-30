@@ -23,6 +23,7 @@ import anthropic
 import structlog
 
 from app.services.eligibility_service import PCT_MARGEM_SOBRE_SALDO
+from app.services.document_types import BALANCO_DOCUMENT_TYPES
 from app.utils.encoding import fix_dict_encoding
 from app.workers.base import BaseComponentTask
 from app.workers.base import _execute_snapshot_write as _execute_with_retry
@@ -82,7 +83,6 @@ CERTIDAO_AUSENCIA_CONFIG = {
     "cndt_tst": ("penalidade_cndt_ausente", "certidao_cndt_pendente"),
     "fgts": ("penalidade_fgts_ausente", "certidao_fgts_pendente"),
 }
-BALANCO_DOCUMENT_TYPES = {"PENULTIMO_BALANCO", "BALANCO", "DRE"}
 BALANCO_PENALTY_PARAMETER = "penalidade_balanco_ausente"
 ESSENTIAL_COMPONENTS = (
     "brasil_api",
@@ -623,7 +623,13 @@ def _apply_missing_balance_penalty(
     snapshots: dict[str, Any],
 ) -> tuple[dict[str, Any], float, list[dict[str, Any]], list[str]]:
     if _document_types(snapshots) & BALANCO_DOCUMENT_TYPES:
-        return dict(porte), 0.0, [], []
+        catalog_types = _document_types(snapshots.get("catalogo_broadfactor"))
+        catalog_flag = (
+            ["balanco_via_catalogo_broadfactor"]
+            if catalog_types & BALANCO_DOCUMENT_TYPES
+            else []
+        )
+        return dict(porte), 0.0, [], catalog_flag
 
     flags = ["balanco_ausente"]
     try:
@@ -1780,6 +1786,34 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
             for snap in result.data or []:
                 if snap.get("parsed_result"):
                     snapshots[snap["component"]] = snap["parsed_result"]
+
+            # O funil não executa contrato_extracao, mas a cotação já traz o
+            # catálogo Broadfactor. O complemento é somente em memória: não
+            # aciona componente pago nem cria snapshot persistente.
+            extracted_types = _document_types(snapshots.get("contrato_extracao"))
+            quote_result = _execute_db(
+                operation_id,
+                "load_quote_document_catalog_for_score",
+                lambda: supabase.table("cotacoes_broadfactor")
+                .select("tipos_documento")
+                .eq("operation_id", operation_id)
+                .maybe_single()
+                .execute(),
+            )
+            quote_types = {
+                str(document_type).strip().upper()
+                for document_type in (quote_result.data or {}).get("tipos_documento", [])
+                if str(document_type).strip()
+            }
+            catalog_only_types = sorted(quote_types - extracted_types)
+            if catalog_only_types:
+                snapshots["catalogo_broadfactor"] = {
+                    "documentos_broadfactor": [
+                        {"tipo": document_type}
+                        for document_type in catalog_only_types
+                    ],
+                    "fonte": "catalogo_cotacao",
+                }
 
             try:
                 document_result = _execute_db(

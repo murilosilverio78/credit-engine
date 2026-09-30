@@ -1,4 +1,4 @@
-from app.services.report_pdf_service import cover_section, pricing_section
+from app.services.report_pdf_service import cover_section, pricing_section, regularity_section
 
 
 def test_pdf_cover_shows_operation_conference_and_concentration():
@@ -86,6 +86,12 @@ def test_pdf_without_report_operation_value_keeps_existing_conference():
 
     assert "Valor da operação (precificação)" not in result
     assert "Valor solicitado" in result
+
+
+def test_pdf_explains_balance_catalog_presence_without_document_analysis():
+    result = regularity_section({"flags": ["balanco_via_catalogo_broadfactor"]})
+
+    assert "Balanço considerado presente pelo catálogo da Broadfactor (não analisado)." in result
 
 
 def test_pdf_labels_default_term_when_contract_was_not_verified():
