@@ -396,12 +396,23 @@ function Metric({
 
 function OperationConferencePanel({ operation }: { operation: OperationDetails }) {
   const balance = operation.saldo_vincendo ?? operation.contrato_saldo;
+  const hasPricingValue = operation.valor_operacao_relatorio != null;
   return (
     <section className="report-section mt-3 rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
       <h2 className="mb-3 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
         Conferência da operação
       </h2>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+      <div className={cn("grid gap-2 sm:grid-cols-2", hasPricingValue ? "lg:grid-cols-3" : "lg:grid-cols-5")}>
+        {hasPricingValue ? (
+          <Metric label="Valor da operação (precificação)">
+            <span className="text-sm font-semibold text-foreground">
+              {formatOptionalCurrency(operation.valor_operacao_relatorio)}
+            </span>
+            <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
+              cotação: {formatOptionalCurrency(operation.valor_solicitado)}
+            </span>
+          </Metric>
+        ) : null}
         <Metric label="Valor solicitado">
           <span className="text-sm">{formatOptionalCurrency(operation.valor_solicitado)}</span>
         </Metric>
