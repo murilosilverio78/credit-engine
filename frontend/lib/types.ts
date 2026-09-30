@@ -176,9 +176,9 @@ export interface FunnelItem {
 }
 
 export interface FunnelSummary {
-  total_fila: number;
-  estagios: Partial<Record<FunilEstagio, number>>;
-  relatorios_gerados: number;
+  total_fila: number | null;
+  estagios: Partial<Record<FunilEstagio, number>> | null;
+  relatorios_gerados: number | null;
 }
 
 export interface PaginatedFunnel extends FunnelSummary {

@@ -30,6 +30,7 @@ import type {
   PaginatedFunnel,
   PaginatedManualAnalyses,
   FunilEstagio,
+  Rating,
   UserRole,
 } from "@/lib/types";
 import { clearAuthToken, getAuthToken } from "@/lib/auth-token";
@@ -141,12 +142,22 @@ export function getFunnelOperations(
   stage: FunilEstagio,
   limit = 20,
   offset = 0,
+  filters: {
+    busca?: string;
+    rating?: Rating | "";
+    relatorio?: "" | "gerado" | "pendente";
+    tipoMotivo?: "" | "criterio" | "indisponibilidade";
+  } = {},
 ) {
   const params = new URLSearchParams({
     limit: String(limit),
     offset: String(offset),
     estagio: stage,
   });
+  if (filters.busca) params.set("busca", filters.busca);
+  if (filters.rating) params.set("rating", filters.rating);
+  if (filters.relatorio) params.set("relatorio", filters.relatorio);
+  if (filters.tipoMotivo) params.set("tipo_motivo", filters.tipoMotivo);
   return request<PaginatedFunnel>(`/api/v1/admin/operations?${params}`);
 }
 
@@ -154,12 +165,14 @@ export function getManualAnalyses(
   incluirTestes = false,
   limit = 20,
   offset = 0,
+  busca?: string,
 ) {
   const params = new URLSearchParams({
     limit: String(limit),
     offset: String(offset),
     incluir_testes: String(incluirTestes),
   });
+  if (busca) params.set("busca", busca);
   return request<PaginatedManualAnalyses>(
     `/api/v1/admin/operations/manual?${params}`,
   );

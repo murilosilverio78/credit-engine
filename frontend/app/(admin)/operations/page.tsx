@@ -4,7 +4,7 @@ import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { FileText, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { generateOperationReport, getFunnelOperations, getManualAnalyses } from "@/lib/api";
 import { formatTaxaAm } from "@/lib/format";
@@ -47,7 +47,7 @@ function FunnelReasons({ reasons }: { reasons: FunnelItem["motivos"] }) {
   const hidden = reasons.slice(2);
   return <div className="flex flex-wrap gap-1">{reasons.slice(0, 2).map((reason) => <span className={cn("inline-flex rounded px-1.5 py-0.5 text-[10px] leading-4", reason.tipo === "indisponibilidade" ? "bg-amber-100 text-amber-900" : "bg-red-100 text-red-800")} key={reason.codigo} title={reason.detalhe}>{reason.rotulo}</span>)}{hidden.length > 0 && <span className="inline-flex rounded bg-muted px-1.5 py-0.5 text-[10px] leading-4" title={hidden.map((reason) => `${reason.rotulo}: ${reason.detalhe}`).join("\n")}>+{hidden.length}</span>}</div>;
 }
-function MetricCard({ label, value, subtitle }: { label: string; value: number; subtitle: string }) {
+function MetricCard({ label, value, subtitle }: { label: string; value: number | string; subtitle: string }) {
   return <div className="rounded-md bg-muted px-3 py-2.5"><p className="mb-1 text-[10px] uppercase tracking-[0.05em] text-muted-foreground">{label}</p><p className="font-mono text-xl font-medium text-foreground">{value}</p><p className="mt-0.5 text-[10px] text-muted-foreground">{subtitle}</p></div>;
 }
 
@@ -94,34 +94,27 @@ export default function OperationsPage() {
   const [includeTests, setIncludeTests] = useState(false);
   const [generatingOperationId, setGeneratingOperationId] = useState<string | null>(null);
   const stage = active === "MANUAIS" ? "LISTA_ESPERA" : active;
-  const funnelQuery = useQuery({ queryKey: ["funnel-operations", { stage, offset }], queryFn: () => getFunnelOperations(stage, PAGE_SIZE, offset), enabled: active !== "MANUAIS", placeholderData: keepPreviousData, refetchInterval: 15_000 });
+  const funnelQuery = useQuery({ queryKey: ["funnel-operations", { stage, offset, search, rating, reportStatus, reasonType }], queryFn: () => getFunnelOperations(stage, PAGE_SIZE, offset, { busca: search, rating, relatorio: reportStatus, tipoMotivo: reasonType }), enabled: active !== "MANUAIS", placeholderData: keepPreviousData, refetchInterval: 15_000 });
   const summaryQuery = useQuery({ queryKey: ["funnel-summary"], queryFn: () => getFunnelOperations("LISTA_ESPERA", 1, 0), refetchInterval: 15_000 });
-  const manualQuery = useQuery({ queryKey: ["manual-analyses", { includeTests, offset }], queryFn: () => getManualAnalyses(includeTests, PAGE_SIZE, offset), enabled: active === "MANUAIS", placeholderData: keepPreviousData });
+  const manualQuery = useQuery({ queryKey: ["manual-analyses", { includeTests, offset, search }], queryFn: () => getManualAnalyses(includeTests, PAGE_SIZE, offset, search), enabled: active === "MANUAIS", placeholderData: keepPreviousData });
   const reportMutation = useMutation({ mutationFn: generateOperationReport, onMutate: (id) => setGeneratingOperationId(id), onSuccess: () => funnelQuery.refetch(), onSettled: () => setGeneratingOperationId(null) });
   const funnelItems = funnelQuery.data?.items ?? [];
   const manualItems = manualQuery.data?.items ?? [];
-  const visibleFunnelItems = useMemo(() => {
-    const cnpj = normalizeCnpj(search); const term = search.trim().toLocaleLowerCase("pt-BR");
-    return funnelItems.filter((item) => {
-      const matchesSearch = !search || normalizeCnpj(item.cnpj).includes(cnpj) || (item.razao_social ?? "").toLocaleLowerCase("pt-BR").includes(term);
-      return matchesSearch && (!rating || item.relatorio?.rating === rating) && (!reportStatus || (reportStatus === "gerado" ? Boolean(item.relatorio?.gerado) : !item.relatorio?.gerado)) && (!reasonType || item.motivos.some((reason) => reason.tipo === reasonType));
-    });
-  }, [funnelItems, rating, reasonType, reportStatus, search]);
-  const visibleManualItems = useMemo(() => {
-    const cnpj = normalizeCnpj(search); const term = search.trim().toLocaleLowerCase("pt-BR");
-    return manualItems.filter((item) => !search || normalizeCnpj(item.cnpj).includes(cnpj) || (item.razao_social ?? "").toLocaleLowerCase("pt-BR").includes(term));
-  }, [manualItems, search]);
+  const visibleFunnelItems = funnelItems;
+  const visibleManualItems = manualItems;
   const isManual = active === "MANUAIS";
   const data = isManual ? manualQuery.data : funnelQuery.data;
   const total = data?.total ?? 0;
   const visible = isManual ? visibleManualItems : visibleFunnelItems;
-  const hasFilters = Boolean(search || rating || reportStatus || reasonType);
+  const hasFilters = Boolean(search || (!isManual && (rating || reportStatus || reasonType)));
+  const summaryUnavailable = summaryQuery.isError || !summaryQuery.data || summaryQuery.data.total_fila === null || summaryQuery.data.estagios === null || summaryQuery.data.relatorios_gerados === null;
+  const summaryValue = (value: number | null | undefined) => summaryUnavailable ? "Indisponível" : value ?? 0;
   function selectTab(next: FunilEstagio | "MANUAIS") { setActive(next); setOffset(0); setSearch(""); setRating(""); setReportStatus(""); setReasonType(""); }
   return <div className="flex min-h-dvh flex-col bg-muted/40">
     <header className="flex items-center justify-between border-b border-border bg-background px-5 py-3.5"><div><h1 className="text-[15px] font-medium text-foreground">Operações</h1><p className="mt-0.5 text-xs text-muted-foreground">Fila de cotações e análises manuais</p></div><Link className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3.5 text-xs text-foreground transition-colors hover:bg-muted" href="/operations/new"><Plus aria-hidden="true" className="h-3.5 w-3.5" />Nova análise</Link></header>
     <section className="flex-1 p-4 px-5" aria-label="Funil de operações">
-      <div className="mb-4 grid grid-cols-2 gap-2.5 md:grid-cols-4 xl:grid-cols-7"><MetricCard label="Total da fila" subtitle="cotações" value={summaryQuery.data?.total_fila ?? 0} />{funnelStages.map((item) => <MetricCard key={item} label={stageLabels[item]} subtitle="no estágio" value={summaryQuery.data?.estagios?.[item] ?? 0} />)}<MetricCard label="Relatórios" subtitle="gerados" value={summaryQuery.data?.relatorios_gerados ?? 0} /></div>
-      <div className="mb-3 flex flex-wrap items-center gap-1.5 border-b border-border">{funnelStages.map((item) => <button className={cn("flex h-9 items-center gap-1.5 border-b-2 px-2.5 text-xs transition-colors", active === item ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")} key={item} onClick={() => selectTab(item)} type="button">{stageLabels[item]}<span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">{summaryQuery.data?.estagios?.[item] ?? 0}</span></button>)}<span aria-hidden="true" className="mx-1 h-5 border-l border-border" /><button className={cn("flex h-9 items-center border-b-2 px-2.5 text-xs transition-colors", isManual ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")} onClick={() => selectTab("MANUAIS")} type="button">Análises manuais</button></div>
+      <div className="mb-4 grid grid-cols-2 gap-2.5 md:grid-cols-4 xl:grid-cols-7"><MetricCard label="Total da fila" subtitle="cotações" value={summaryValue(summaryQuery.data?.total_fila)} />{funnelStages.map((item) => <MetricCard key={item} label={stageLabels[item]} subtitle="no estágio" value={summaryValue(summaryQuery.data?.estagios?.[item])} />)}<MetricCard label="Relatórios" subtitle="gerados" value={summaryValue(summaryQuery.data?.relatorios_gerados)} /></div>
+      <div className="mb-3 flex flex-wrap items-center gap-1.5 border-b border-border">{funnelStages.map((item) => <button className={cn("flex h-9 items-center gap-1.5 border-b-2 px-2.5 text-xs transition-colors", active === item ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")} key={item} onClick={() => selectTab(item)} type="button">{stageLabels[item]}<span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">{summaryValue(summaryQuery.data?.estagios?.[item])}</span></button>)}<span aria-hidden="true" className="mx-1 h-5 border-l border-border" /><button className={cn("flex h-9 items-center border-b-2 px-2.5 text-xs transition-colors", isManual ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")} onClick={() => selectTab("MANUAIS")} type="button">Análises manuais</button></div>
       <div className="mb-3 flex flex-wrap gap-2"><label className="sr-only" htmlFor="operation-search">Buscar por CNPJ ou razão social</label><input className="h-8 w-[245px] rounded-md border border-input bg-background px-2.5 text-xs outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring" id="operation-search" onChange={(event) => { setSearch(event.target.value); setOffset(0); }} placeholder="Buscar CNPJ ou razão social..." type="search" value={search} />{active === "QUALIFICADA" && <><select aria-label="Filtrar por rating" className="h-8 rounded-md border border-input bg-background px-2.5 text-xs" onChange={(event) => { setRating(event.target.value as Rating | ""); setOffset(0); }} value={rating}><option value="">Todos os ratings</option>{ratingOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select><select aria-label="Filtrar por situação do relatório" className="h-8 rounded-md border border-input bg-background px-2.5 text-xs" onChange={(event) => { setReportStatus(event.target.value as "" | "gerado" | "pendente"); setOffset(0); }} value={reportStatus}><option value="">Todo relatório</option><option value="gerado">Gerado</option><option value="pendente">Pendente</option></select></>}{(active === "LISTA_ESPERA" || active === "DOCUMENTADA") && <select aria-label="Filtrar por categoria de motivo" className="h-8 rounded-md border border-input bg-background px-2.5 text-xs" onChange={(event) => { setReasonType(event.target.value as "" | "criterio" | "indisponibilidade"); setOffset(0); }} value={reasonType}><option value="">Todos os motivos</option><option value="criterio">Critério</option><option value="indisponibilidade">Indisponibilidade</option></select>}{isManual && <label className="flex h-8 items-center gap-2 rounded-md border border-input bg-background px-2.5 text-xs"><input checked={includeTests} onChange={(event) => { setIncludeTests(event.target.checked); setOffset(0); }} type="checkbox" />Incluir testes</label>}</div>
       <div className="overflow-x-auto rounded-md border border-border bg-background">{isManual ? <ManualTable error={manualQuery.isError} items={visibleManualItems} loading={manualQuery.isLoading} onOpen={(id) => router.push(`/operations/${id}`)} /> : <FunnelTable error={funnelQuery.isError} generatingOperationId={generatingOperationId} items={visibleFunnelItems} loading={funnelQuery.isLoading} onGenerate={(id) => reportMutation.mutate(id)} onOpen={(id) => router.push(`/operations/${id}`)} stage={stage} />}</div>
       <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground"><p>{hasFilters ? `${visible.length} resultado(s) nesta página de ${total}` : `Mostrando ${total === 0 ? 0 : offset + 1}–${Math.min(offset + (isManual ? manualItems.length : funnelItems.length), total)} de ${total}`}</p><div className="flex gap-1.5"><button className="rounded-md border border-border bg-background px-2.5 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-50" disabled={offset === 0} onClick={() => setOffset((current) => current - PAGE_SIZE)} type="button">← anterior</button><button className="rounded-md border border-border bg-background px-2.5 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-50" disabled={offset + PAGE_SIZE >= total} onClick={() => setOffset((current) => current + PAGE_SIZE)} type="button">próxima →</button></div></div>
