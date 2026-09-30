@@ -4,541 +4,136 @@ import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { FileText, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type KeyboardEvent, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-import {
-  generateOperationReport,
-  getAdminOperations,
-  getPendingOverrides,
-} from "@/lib/api";
+import { generateOperationReport, getFunnelOperations, getManualAnalyses } from "@/lib/api";
 import { formatTaxaAm } from "@/lib/format";
-import {
-  type Operation,
-  type OperationStatus,
-  type Rating,
-  type FunilEstagio,
-} from "@/lib/types";
+import { type FunnelItem, type FunilEstagio, type ManualAnalysis, type Rating } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
-
-const stageTabs: Array<{ value: FunilEstagio; label: string }> = [
-  { value: "LISTA_ESPERA", label: "Lista de espera" },
-  { value: "ENQUADRADA", label: "Enquadradas" },
-  { value: "DOCUMENTADA", label: "Documentadas" },
-  { value: "QUALIFICADA", label: "Qualificadas" },
-  { value: "ENCERRADA", label: "Encerradas" },
-];
-
-const statusOptions: OperationStatus[] = [
-  "pending",
-  "processing",
-  "aguardando_relatorio",
-  "completed",
-  "failed",
-  "manual_review",
-  "approved",
-  "rejected",
-  "escalated",
-];
+const funnelStages: FunilEstagio[] = ["LISTA_ESPERA", "ENQUADRADA", "DOCUMENTADA", "QUALIFICADA", "ENCERRADA"];
+const stageLabels: Record<FunilEstagio, string> = {
+  LISTA_ESPERA: "Não enquadradas", ENQUADRADA: "Sem documentos", DOCUMENTADA: "Em verificação", QUALIFICADA: "Qualificadas", ENCERRADA: "Encerradas",
+};
 const ratingOptions: Rating[] = ["A", "B", "C", "D", "E"];
-
 const ratingColors: Record<Rating, string> = {
-  A: "bg-[#EAF3DE] text-[#27500A]",
-  B: "bg-[#E6F1FB] text-[#0C447C]",
-  C: "bg-[#FAEEDA] text-[#633806]",
-  D: "bg-[#FAECE7] text-[#712B13]",
-  E: "bg-[#FCEBEB] text-[#791F1F]",
+  A: "bg-[#EAF3DE] text-[#27500A]", B: "bg-[#E6F1FB] text-[#0C447C]", C: "bg-[#FAEEDA] text-[#633806]", D: "bg-[#FAECE7] text-[#712B13]", E: "bg-[#FCEBEB] text-[#791F1F]",
 };
 
-const statusColors: Record<OperationStatus, string> = {
-  pending: "bg-muted text-muted-foreground",
-  processing: "animate-pulse bg-blue-100 text-blue-800",
-  aguardando_relatorio: "bg-emerald-100 text-emerald-800",
-  completed: "bg-blue-100 text-blue-800",
-  failed: "bg-red-100 text-red-800",
-  error: "bg-red-100 text-red-800",
-  manual_review: "bg-orange-100 text-orange-800",
-  approved: "bg-green-100 text-green-800",
-  rejected: "bg-red-100 text-red-800",
-  escalated: "bg-amber-100 text-amber-800",
-};
-
-function normalizeCnpj(cnpj: string) {
-  return cnpj.replace(/\D/g, "");
-}
-
+function normalizeCnpj(cnpj: string) { return cnpj.replace(/\D/g, ""); }
 function formatCnpj(cnpj: string) {
   const digits = normalizeCnpj(cnpj);
+  return digits.length === 14 ? digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5") : cnpj;
+}
+function formatBrl(value: number | null | undefined) {
+  return value === null || value === undefined ? "—" : new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(value);
+}
+function formatScore(score: number | null | undefined) { return score === null || score === undefined ? "—" : score.toLocaleString("pt-BR"); }
+function formatDate(value: string | null | undefined) {
+  return value ? new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(value)) : "—";
+}
+function expiration(value: string | null) {
+  if (!value) return { label: "—", urgent: false };
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.ceil((new Date(`${value}T00:00:00`).getTime() - today.getTime()) / 86_400_000);
+  return { label: days < 0 ? "Expirada" : days === 0 ? "Hoje" : `${days} dia${days === 1 ? "" : "s"}`, urgent: days <= 3 };
+}
+function RatingBadge({ rating }: { rating: Rating | null | undefined }) {
+  return rating ? <span className={cn("inline-flex rounded px-2 py-0.5 text-[10px] font-medium", ratingColors[rating])}>{rating}</span> : <span className="text-muted-foreground">—</span>;
+}
+function FunnelReasons({ reasons }: { reasons: FunnelItem["motivos"] }) {
+  if (!reasons.length) return <span className="text-muted-foreground">—</span>;
+  const hidden = reasons.slice(2);
+  return <div className="flex flex-wrap gap-1">{reasons.slice(0, 2).map((reason) => <span className={cn("inline-flex rounded px-1.5 py-0.5 text-[10px] leading-4", reason.tipo === "indisponibilidade" ? "bg-amber-100 text-amber-900" : "bg-red-100 text-red-800")} key={reason.codigo} title={reason.detalhe}>{reason.rotulo}</span>)}{hidden.length > 0 && <span className="inline-flex rounded bg-muted px-1.5 py-0.5 text-[10px] leading-4" title={hidden.map((reason) => `${reason.rotulo}: ${reason.detalhe}`).join("\n")}>+{hidden.length}</span>}</div>;
+}
+function MetricCard({ label, value, subtitle }: { label: string; value: number; subtitle: string }) {
+  return <div className="rounded-md bg-muted px-3 py-2.5"><p className="mb-1 text-[10px] uppercase tracking-[0.05em] text-muted-foreground">{label}</p><p className="font-mono text-xl font-medium text-foreground">{value}</p><p className="mt-0.5 text-[10px] text-muted-foreground">{subtitle}</p></div>;
+}
 
-  if (digits.length !== 14) {
-    return cnpj;
+function FunnelCell({ item, column, onGenerate, generating }: { item: FunnelItem; column: string; onGenerate: (id: string) => void; generating: boolean }) {
+  if (column === "cnpj") return <><span className="font-mono text-[11px]">{formatCnpj(item.cnpj)}</span><span className="mt-0.5 block font-mono text-[10px] text-muted-foreground">{item.cotacao_id}</span></>;
+  if (column === "razao") return <span className="whitespace-normal text-[11px]" title={item.razao_social ?? item.cnpj}>{item.razao_social || formatCnpj(item.cnpj)}</span>;
+  if (column === "tipo") return item.tipo || "—";
+  if (column === "valor") return formatBrl(item.valor_solicitado);
+  if (column === "margem") return formatBrl(item.margem_disponivel);
+  if (column === "enquadrado") return formatBrl(item.valor_enquadrado);
+  if (column === "docs") return item.n_documentos ?? "—";
+  if (column === "expira") { const value = expiration(item.data_expiracao); return <span className={cn(value.urgent && "font-medium text-red-700")}>{value.label}</span>; }
+  if (column === "motivos") return <FunnelReasons reasons={item.motivos} />;
+  if (column === "ultimo-estagio") return item.estagio_max ? stageLabels[item.estagio_max] : "—";
+  if (column === "encerrada") return formatDate(item.estagio_atualizado_em);
+  if (column === "relatorio") return item.relatorio?.gerado ? "Gerado" : "Pendente";
+  if (column === "rating") return <RatingBadge rating={item.relatorio?.rating} />;
+  if (column === "score") return formatScore(item.relatorio?.score);
+  if (column === "taxa") return formatTaxaAm(item.relatorio?.taxa_sugerida);
+  if (column === "acao") {
+    if (!item.operation_id) return <span className="text-muted-foreground">—</span>;
+    if (item.relatorio?.gerado) return <Link className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-[11px] hover:bg-muted" href={`/operations/${item.operation_id}/report`} onClick={(event) => event.stopPropagation()}><FileText aria-hidden="true" className="h-3.5 w-3.5" />Ver relatório</Link>;
+    return <button className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-[11px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50" disabled={generating} onClick={(event) => { event.stopPropagation(); onGenerate(item.operation_id!); }} type="button"><FileText aria-hidden="true" className="h-3.5 w-3.5" />{generating ? "Gerando" : "Gerar relatório"}</button>;
   }
-
-  return digits.replace(
-    /^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,
-    "$1.$2.$3/$4-$5",
-  );
+  return "—";
 }
 
-function formatScore(score: number | null) {
-  return score === null ? "—" : score.toLocaleString("pt-BR");
-}
-
-function formatDate(date: string) {
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "2-digit",
-  })
-    .format(new Date(date))
-    .replace(",", "");
-}
-
-function FunnelReason({ reason }: { reason?: string | null }) {
-  if (!reason) {
-    return <span className="text-muted-foreground">—</span>;
-  }
-
-  const reasons = reason.split("; ");
-  const unavailable = reasons
-    .filter((item) => item.startsWith("indisponibilidade_fonte:"))
-    .map((item) => item.split(":", 2)[1].replaceAll("_", " "));
-  const criteria = reasons.filter(
-    (item) => !item.startsWith("indisponibilidade_fonte:"),
-  );
-
-  if (unavailable.length > 0) {
-    const detail = [
-      `Fonte indisponível: ${unavailable.join(", ")}`,
-      ...(criteria.length > 0
-        ? [`Critério não atendido: ${criteria.join("; ")}`]
-        : []),
-    ].join("; ");
-    return (
-      <span className="text-amber-800" title={detail}>
-        {detail}
-      </span>
-    );
-  }
-
-  return (
-    <span className="text-red-700" title={reason}>
-      Critério não atendido: {reason}
-    </span>
-  );
-}
-
-function RatingBadge({ rating }: { rating: Rating | null }) {
-  if (!rating) {
-    return <span className="text-muted-foreground">—</span>;
-  }
-
-  return (
-    <span
-      className={cn(
-        "inline-flex rounded px-2 py-0.5 text-[10px] font-medium",
-        ratingColors[rating],
-      )}
-    >
-      {rating}
-    </span>
-  );
-}
-
-function StatusBadge({ status }: { status: OperationStatus }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex rounded px-2 py-0.5 text-[10px] font-medium",
-        statusColors[status],
-      )}
-      data-testid="op-status-badge"
-    >
-      {status}
-    </span>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  subtitle,
-}: {
-  label: string;
-  value: number | string;
-  subtitle: string;
-}) {
-  return (
-    <div className="rounded-md bg-muted px-3 py-2.5">
-      <p className="mb-1 text-[10px] uppercase tracking-[0.05em] text-muted-foreground">
-        {label}
-      </p>
-      <p className="font-mono text-xl font-medium text-foreground">{value}</p>
-      <p className="mt-0.5 text-[10px] text-muted-foreground">{subtitle}</p>
-    </div>
-  );
-}
+const columnsByStage: Record<FunilEstagio, Array<[string, string]>> = {
+  LISTA_ESPERA: [["cnpj", "CNPJ"], ["razao", "Razão social"], ["tipo", "Tipo"], ["valor", "Valor pedido"], ["margem", "Margem"], ["expira", "Expira em"], ["motivos", "Motivos"]],
+  ENQUADRADA: [["cnpj", "CNPJ"], ["razao", "Razão social"], ["valor", "Valor pedido"], ["margem", "Margem"], ["enquadrado", "Valor enquadrado"], ["expira", "Expira em"]],
+  DOCUMENTADA: [["cnpj", "CNPJ"], ["razao", "Razão social"], ["valor", "Valor pedido"], ["margem", "Margem"], ["enquadrado", "Valor enquadrado"], ["docs", "Nº docs"], ["expira", "Expira em"], ["motivos", "Motivos"]],
+  QUALIFICADA: [["cnpj", "CNPJ"], ["razao", "Razão social"], ["valor", "Valor pedido"], ["margem", "Margem"], ["enquadrado", "Valor enquadrado"], ["expira", "Expira em"], ["relatorio", "Relatório"], ["rating", "Rating"], ["score", "Score"], ["taxa", "Taxa"], ["acao", "Ação"]],
+  ENCERRADA: [["cnpj", "CNPJ"], ["razao", "Razão social"], ["valor", "Valor pedido"], ["ultimo-estagio", "Último estágio"], ["encerrada", "Encerrada em"]],
+};
 
 export default function OperationsPage() {
   const router = useRouter();
+  const [active, setActive] = useState<FunilEstagio | "MANUAIS">("LISTA_ESPERA");
   const [offset, setOffset] = useState(0);
-  const [cnpjSearch, setCnpjSearch] = useState("");
-  const [status, setStatus] = useState<OperationStatus | "">("");
+  const [search, setSearch] = useState("");
   const [rating, setRating] = useState<Rating | "">("");
-  const [stage, setStage] = useState<FunilEstagio>("LISTA_ESPERA");
-  const [generatingOperationId, setGeneratingOperationId] = useState<
-    string | null
-  >(null);
-
-  const operationsQuery = useQuery({
-    queryKey: ["operations", { limit: PAGE_SIZE, offset, status, stage }],
-    queryFn: () => getAdminOperations(PAGE_SIZE, offset, status, stage),
-    placeholderData: keepPreviousData,
-    refetchInterval: 15_000,
-    refetchIntervalInBackground: true,
-  });
-  const reportMutation = useMutation({
-    mutationFn: generateOperationReport,
-    onMutate: (operationId) => setGeneratingOperationId(operationId),
-    onSuccess: () => operationsQuery.refetch(),
-    onSettled: () => setGeneratingOperationId(null),
-  });
-  const pendingOverridesQuery = useQuery({
-    queryKey: ["overrides", "pending"],
-    queryFn: getPendingOverrides,
-    refetchInterval: 30_000,
-    refetchIntervalInBackground: true,
-  });
-
-  const operations = operationsQuery.data?.items ?? [];
-  const visibleOperations = useMemo(() => {
-    const search = normalizeCnpj(cnpjSearch);
-
-    return operations.filter((operation) => {
-      const matchesCnpj =
-        search.length === 0 || normalizeCnpj(operation.cnpj).includes(search);
-      const matchesStatus = status === "" || operation.status === status;
-      // Status is filtered by the API for pagination consistency; rating remains
-      // local because /admin/operations does not support a rating parameter.
-      const matchesRating = rating === "" || operation.rating === rating;
-
-      return matchesCnpj && matchesStatus && matchesRating;
+  const [reportStatus, setReportStatus] = useState<"" | "gerado" | "pendente">("");
+  const [reasonType, setReasonType] = useState<"" | "criterio" | "indisponibilidade">("");
+  const [includeTests, setIncludeTests] = useState(false);
+  const [generatingOperationId, setGeneratingOperationId] = useState<string | null>(null);
+  const stage = active === "MANUAIS" ? "LISTA_ESPERA" : active;
+  const funnelQuery = useQuery({ queryKey: ["funnel-operations", { stage, offset }], queryFn: () => getFunnelOperations(stage, PAGE_SIZE, offset), enabled: active !== "MANUAIS", placeholderData: keepPreviousData, refetchInterval: 15_000 });
+  const summaryQuery = useQuery({ queryKey: ["funnel-summary"], queryFn: () => getFunnelOperations("LISTA_ESPERA", 1, 0), refetchInterval: 15_000 });
+  const manualQuery = useQuery({ queryKey: ["manual-analyses", { includeTests, offset }], queryFn: () => getManualAnalyses(includeTests, PAGE_SIZE, offset), enabled: active === "MANUAIS", placeholderData: keepPreviousData });
+  const reportMutation = useMutation({ mutationFn: generateOperationReport, onMutate: (id) => setGeneratingOperationId(id), onSuccess: () => funnelQuery.refetch(), onSettled: () => setGeneratingOperationId(null) });
+  const funnelItems = funnelQuery.data?.items ?? [];
+  const manualItems = manualQuery.data?.items ?? [];
+  const visibleFunnelItems = useMemo(() => {
+    const cnpj = normalizeCnpj(search); const term = search.trim().toLocaleLowerCase("pt-BR");
+    return funnelItems.filter((item) => {
+      const matchesSearch = !search || normalizeCnpj(item.cnpj).includes(cnpj) || (item.razao_social ?? "").toLocaleLowerCase("pt-BR").includes(term);
+      return matchesSearch && (!rating || item.relatorio?.rating === rating) && (!reportStatus || (reportStatus === "gerado" ? Boolean(item.relatorio?.gerado) : !item.relatorio?.gerado)) && (!reasonType || item.motivos.some((reason) => reason.tipo === reasonType));
     });
-  }, [cnpjSearch, operations, rating, status]);
+  }, [funnelItems, rating, reasonType, reportStatus, search]);
+  const visibleManualItems = useMemo(() => {
+    const cnpj = normalizeCnpj(search); const term = search.trim().toLocaleLowerCase("pt-BR");
+    return manualItems.filter((item) => !search || normalizeCnpj(item.cnpj).includes(cnpj) || (item.razao_social ?? "").toLocaleLowerCase("pt-BR").includes(term));
+  }, [manualItems, search]);
+  const isManual = active === "MANUAIS";
+  const data = isManual ? manualQuery.data : funnelQuery.data;
+  const total = data?.total ?? 0;
+  const visible = isManual ? visibleManualItems : visibleFunnelItems;
+  const hasFilters = Boolean(search || rating || reportStatus || reasonType);
+  function selectTab(next: FunilEstagio | "MANUAIS") { setActive(next); setOffset(0); setSearch(""); setRating(""); setReportStatus(""); setReasonType(""); }
+  return <div className="flex min-h-dvh flex-col bg-muted/40">
+    <header className="flex items-center justify-between border-b border-border bg-background px-5 py-3.5"><div><h1 className="text-[15px] font-medium text-foreground">Operações</h1><p className="mt-0.5 text-xs text-muted-foreground">Fila de cotações e análises manuais</p></div><Link className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3.5 text-xs text-foreground transition-colors hover:bg-muted" href="/operations/new"><Plus aria-hidden="true" className="h-3.5 w-3.5" />Nova análise</Link></header>
+    <section className="flex-1 p-4 px-5" aria-label="Funil de operações">
+      <div className="mb-4 grid grid-cols-2 gap-2.5 md:grid-cols-4 xl:grid-cols-7"><MetricCard label="Total da fila" subtitle="cotações" value={summaryQuery.data?.total_fila ?? 0} />{funnelStages.map((item) => <MetricCard key={item} label={stageLabels[item]} subtitle="no estágio" value={summaryQuery.data?.estagios?.[item] ?? 0} />)}<MetricCard label="Relatórios" subtitle="gerados" value={summaryQuery.data?.relatorios_gerados ?? 0} /></div>
+      <div className="mb-3 flex flex-wrap items-center gap-1.5 border-b border-border">{funnelStages.map((item) => <button className={cn("flex h-9 items-center gap-1.5 border-b-2 px-2.5 text-xs transition-colors", active === item ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")} key={item} onClick={() => selectTab(item)} type="button">{stageLabels[item]}<span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">{summaryQuery.data?.estagios?.[item] ?? 0}</span></button>)}<span aria-hidden="true" className="mx-1 h-5 border-l border-border" /><button className={cn("flex h-9 items-center border-b-2 px-2.5 text-xs transition-colors", isManual ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")} onClick={() => selectTab("MANUAIS")} type="button">Análises manuais</button></div>
+      <div className="mb-3 flex flex-wrap gap-2"><label className="sr-only" htmlFor="operation-search">Buscar por CNPJ ou razão social</label><input className="h-8 w-[245px] rounded-md border border-input bg-background px-2.5 text-xs outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring" id="operation-search" onChange={(event) => { setSearch(event.target.value); setOffset(0); }} placeholder="Buscar CNPJ ou razão social..." type="search" value={search} />{active === "QUALIFICADA" && <><select aria-label="Filtrar por rating" className="h-8 rounded-md border border-input bg-background px-2.5 text-xs" onChange={(event) => { setRating(event.target.value as Rating | ""); setOffset(0); }} value={rating}><option value="">Todos os ratings</option>{ratingOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select><select aria-label="Filtrar por situação do relatório" className="h-8 rounded-md border border-input bg-background px-2.5 text-xs" onChange={(event) => { setReportStatus(event.target.value as "" | "gerado" | "pendente"); setOffset(0); }} value={reportStatus}><option value="">Todo relatório</option><option value="gerado">Gerado</option><option value="pendente">Pendente</option></select></>}{(active === "LISTA_ESPERA" || active === "DOCUMENTADA") && <select aria-label="Filtrar por categoria de motivo" className="h-8 rounded-md border border-input bg-background px-2.5 text-xs" onChange={(event) => { setReasonType(event.target.value as "" | "criterio" | "indisponibilidade"); setOffset(0); }} value={reasonType}><option value="">Todos os motivos</option><option value="criterio">Critério</option><option value="indisponibilidade">Indisponibilidade</option></select>}{isManual && <label className="flex h-8 items-center gap-2 rounded-md border border-input bg-background px-2.5 text-xs"><input checked={includeTests} onChange={(event) => { setIncludeTests(event.target.checked); setOffset(0); }} type="checkbox" />Incluir testes</label>}</div>
+      <div className="overflow-x-auto rounded-md border border-border bg-background">{isManual ? <ManualTable error={manualQuery.isError} items={visibleManualItems} loading={manualQuery.isLoading} onOpen={(id) => router.push(`/operations/${id}`)} /> : <FunnelTable error={funnelQuery.isError} generatingOperationId={generatingOperationId} items={visibleFunnelItems} loading={funnelQuery.isLoading} onGenerate={(id) => reportMutation.mutate(id)} onOpen={(id) => router.push(`/operations/${id}`)} stage={stage} />}</div>
+      <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground"><p>{hasFilters ? `${visible.length} resultado(s) nesta página de ${total}` : `Mostrando ${total === 0 ? 0 : offset + 1}–${Math.min(offset + (isManual ? manualItems.length : funnelItems.length), total)} de ${total}`}</p><div className="flex gap-1.5"><button className="rounded-md border border-border bg-background px-2.5 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-50" disabled={offset === 0} onClick={() => setOffset((current) => current - PAGE_SIZE)} type="button">← anterior</button><button className="rounded-md border border-border bg-background px-2.5 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-50" disabled={offset + PAGE_SIZE >= total} onClick={() => setOffset((current) => current + PAGE_SIZE)} type="button">próxima →</button></div></div>
+    </section>
+  </div>;
+}
 
-  const total = operationsQuery.data?.total ?? 0;
-  const stageCounts = operationsQuery.data?.estagios ?? {};
-  const completed = operations.filter(
-    (operation) => operation.status === "completed",
-  ).length;
-  const processing = operations.filter(
-    (operation) => operation.status === "processing",
-  ).length;
-  const pendingOverrides = pendingOverridesQuery.data?.length ?? 0;
-  const hasFilters = cnpjSearch !== "" || status !== "" || rating !== "";
-  const firstResult = total === 0 ? 0 : offset + 1;
-  const lastResult = Math.min(offset + operations.length, total);
-  const hasPreviousPage = offset > 0;
-  const hasNextPage = offset + PAGE_SIZE < total;
-
-  function resetPagination() {
-    setOffset(0);
-  }
-
-  function openOperation(
-    operation: Operation,
-    event?: KeyboardEvent<HTMLTableRowElement>,
-  ) {
-    const operationId = operation.operation_id ?? operation.id;
-    if (!operation.operation_id) {
-      return;
-    }
-    if (!event || event.key === "Enter" || event.key === " ") {
-      event?.preventDefault();
-      router.push(`/operations/${operationId}`);
-    }
-  }
-
-  return (
-    <div className="flex min-h-dvh flex-col bg-muted/40">
-      <header className="flex items-center justify-between border-b-[0.5px] border-border bg-background px-5 py-3.5">
-        <div>
-          <h1 className="text-[15px] font-medium text-foreground">Operações</h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Histórico de análises de crédito
-          </p>
-        </div>
-        <Link
-          className="flex h-8 items-center gap-1.5 rounded-md border-[0.5px] border-border bg-background px-3.5 text-xs text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          href="/operations/new"
-        >
-          <Plus aria-hidden="true" className="h-3.5 w-3.5" />
-          Nova análise
-        </Link>
-      </header>
-
-      <section className="flex-1 p-4 px-5" aria-label="Histórico de operações">
-        <div className="mb-4 grid grid-cols-4 gap-2.5">
-          <MetricCard label="Total" subtitle="operações" value={total} />
-          <MetricCard
-            label="Concluídas"
-            subtitle="com score"
-            value={completed}
-          />
-          <MetricCard
-            label="Em análise"
-            subtitle="processando"
-            value={processing}
-          />
-          <MetricCard
-            label="Overrides"
-            subtitle="pendente"
-            value={pendingOverrides}
-          />
-        </div>
-
-        <div className="mb-3 flex flex-wrap gap-1.5 border-b-[0.5px] border-border">
-          {stageTabs.map((tab) => (
-            <button
-              className={cn(
-                "flex h-9 items-center gap-1.5 border-b-2 px-2.5 text-xs transition-colors",
-                stage === tab.value
-                  ? "border-foreground text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-              key={tab.value}
-              onClick={() => {
-                setStage(tab.value);
-                setOffset(0);
-              }}
-              type="button"
-            >
-              {tab.label}
-              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
-                {stageCounts[tab.value] ?? 0}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        <div className="mb-3 flex gap-2">
-          <label className="sr-only" htmlFor="cnpj-search">
-            Buscar por CNPJ
-          </label>
-          <input
-            className="h-8 w-[180px] rounded-md border border-input bg-background px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring"
-            data-testid="filter-cnpj"
-            id="cnpj-search"
-            onChange={(event) => {
-              setCnpjSearch(event.target.value);
-              resetPagination();
-            }}
-            placeholder="Buscar por CNPJ..."
-            type="search"
-            value={cnpjSearch}
-          />
-          <label className="sr-only" htmlFor="status-filter">
-            Filtrar por status
-          </label>
-          <select
-            className="h-8 rounded-md border border-input bg-background px-2.5 text-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
-            data-testid="filter-status"
-            id="status-filter"
-            onChange={(event) => {
-              setStatus(event.target.value as OperationStatus | "");
-              resetPagination();
-            }}
-            value={status}
-          >
-            <option value="">Todos os status</option>
-            {statusOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-          <label className="sr-only" htmlFor="rating-filter">
-            Filtrar por rating
-          </label>
-          <select
-            className="h-8 rounded-md border border-input bg-background px-2.5 text-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
-            data-testid="filter-rating"
-            id="rating-filter"
-            onChange={(event) => {
-              setRating(event.target.value as Rating | "");
-              resetPagination();
-            }}
-            value={rating}
-          >
-            <option value="">Todos os ratings</option>
-            {ratingOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="overflow-hidden rounded-md border-[0.5px] border-border bg-background">
-          <table className="w-full table-fixed border-collapse text-xs">
-            <thead className="bg-muted">
-              <tr>
-                <th className="w-[145px] border-b-[0.5px] border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground">
-                  CNPJ
-                </th>
-                <th className="border-b-[0.5px] border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground">
-                  Razão social
-                </th>
-                <th className="w-[70px] border-b-[0.5px] border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground">
-                  Rating
-                </th>
-                <th className="w-[70px] border-b-[0.5px] border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground">
-                  Score
-                </th>
-                <th className="w-[115px] border-b-[0.5px] border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground">
-                  Taxa sugerida
-                </th>
-                <th className="w-[120px] border-b-[0.5px] border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground">
-                  Status
-                </th>
-                <th className="w-[170px] border-b-[0.5px] border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground">
-                  Motivo
-                </th>
-                <th className="w-[105px] border-b-[0.5px] border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground">
-                  Data
-                </th>
-                <th className="w-[135px] border-b-[0.5px] border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground">
-                  Ação
-                </th>
-              </tr>
-            </thead>
-            <tbody className="[&>tr:last-child>td]:border-b-0">
-              {operationsQuery.isLoading ? (
-                <tr>
-                  <td
-                    className="h-28 text-center text-sm text-muted-foreground"
-                    colSpan={9}
-                  >
-                    Carregando operações...
-                  </td>
-                </tr>
-              ) : operationsQuery.isError ? (
-                <tr>
-                  <td
-                    className="h-28 text-center text-sm text-red-700"
-                    colSpan={9}
-                  >
-                    Não foi possível carregar as operações.
-                  </td>
-                </tr>
-              ) : visibleOperations.length === 0 ? (
-                <tr>
-                  <td
-                    className="h-28 text-center text-sm text-muted-foreground"
-                    colSpan={9}
-                  >
-                    Nenhuma operação encontrada. Inicie uma análise.
-                  </td>
-                </tr>
-              ) : (
-                visibleOperations.map((operation) => (
-                  <tr
-                    aria-label={`Abrir operação ${formatCnpj(operation.cnpj)}`}
-                    className="cursor-pointer focus-within:bg-muted/80 hover:bg-muted/80 focus:bg-muted/80 focus:outline-none"
-                    data-op-id={operation.id}
-                    data-testid="op-row"
-                    key={operation.id}
-                    onClick={() => openOperation(operation)}
-                    onKeyDown={(event) => openOperation(operation, event)}
-                    role="link"
-                    tabIndex={0}
-                  >
-                    <td className="border-b-[0.5px] border-border px-2.5 py-2 font-mono text-[11px]">
-                      {formatCnpj(operation.cnpj)}
-                    </td>
-                    <td className="truncate border-b-[0.5px] border-border px-2.5 py-2 text-[11px]">
-                      {operation.razao_social || formatCnpj(operation.cnpj)}
-                    </td>
-                    <td className="border-b-[0.5px] border-border px-2.5 py-2">
-                      <RatingBadge rating={operation.rating} />
-                    </td>
-                    <td className="border-b-[0.5px] border-border px-2.5 py-2 font-mono text-[11px]">
-                      {formatScore(operation.score)}
-                    </td>
-                    <td className="border-b-[0.5px] border-border px-2.5 py-2 font-mono text-[11px]">
-                      {formatTaxaAm(operation.taxa_sugerida)}
-                    </td>
-                    <td className="border-b-[0.5px] border-border px-2.5 py-2">
-                      <StatusBadge status={operation.status} />
-                    </td>
-                    <td
-                      className="truncate border-b-[0.5px] border-border px-2.5 py-2 text-[11px]"
-                    >
-                      <FunnelReason reason={operation.estagio_motivo} />
-                    </td>
-                    <td className="border-b-[0.5px] border-border px-2.5 py-2 font-mono text-[11px] text-muted-foreground">
-                      {formatDate(operation.created_at)}
-                    </td>
-                    <td className="border-b-[0.5px] border-border px-2.5 py-2">
-                      {stage === "QUALIFICADA" && operation.operation_id ? (
-                        <button
-                          className="inline-flex h-7 items-center gap-1.5 rounded-md border-[0.5px] border-border bg-background px-2 text-[11px] text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-                          disabled={
-                            operation.status === "processing" ||
-                            operation.status === "completed" ||
-                            reportMutation.isPending
-                          }
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            reportMutation.mutate(operation.operation_id!);
-                          }}
-                          type="button"
-                        >
-                          <FileText aria-hidden="true" className="h-3.5 w-3.5" />
-                          {operation.status === "processing" ||
-                          generatingOperationId === operation.operation_id
-                            ? "Gerando"
-                            : "Gerar relatório"}
-                        </button>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-          <p>
-            {hasFilters
-              ? `${visibleOperations.length} resultado(s) nesta página de ${total} operações`
-              : `Mostrando ${firstResult}–${lastResult} de ${total} operações`}
-          </p>
-          <div className="flex gap-1.5">
-            <button
-              className="rounded-md border-[0.5px] border-border bg-background px-2.5 py-1.5 text-[11px] text-foreground transition-colors enabled:hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={!hasPreviousPage || operationsQuery.isFetching}
-              onClick={() => setOffset((current) => current - PAGE_SIZE)}
-              type="button"
-            >
-              ← anterior
-            </button>
-            <button
-              className="rounded-md border-[0.5px] border-border bg-background px-2.5 py-1.5 text-[11px] text-foreground transition-colors enabled:hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={!hasNextPage || operationsQuery.isFetching}
-              onClick={() => setOffset((current) => current + PAGE_SIZE)}
-              type="button"
-            >
-              próxima →
-            </button>
-          </div>
-        </div>
-      </section>
-    </div>
-  );
+function FunnelTable({ stage, items, loading, error, onGenerate, generatingOperationId, onOpen }: { stage: FunilEstagio; items: FunnelItem[]; loading: boolean; error: boolean; onGenerate: (id: string) => void; generatingOperationId: string | null; onOpen: (id: string) => void }) {
+  const columns = columnsByStage[stage];
+  return <table className="w-full border-collapse text-xs"><thead className="bg-muted"><tr>{columns.map(([key, label]) => <th className="whitespace-nowrap border-b border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground" key={key}>{label}</th>)}</tr></thead><tbody className="[&>tr:last-child>td]:border-b-0">{loading || error || items.length === 0 ? <tr><td className={cn("h-28 text-center text-sm", error ? "text-red-700" : "text-muted-foreground")} colSpan={columns.length}>{loading ? "Carregando cotações..." : error ? "Não foi possível carregar as cotações." : "Nenhuma cotação encontrada."}</td></tr> : items.map((item) => <tr className={cn(item.operation_id && "cursor-pointer hover:bg-muted/80")} key={item.id} onClick={() => item.operation_id && onOpen(item.operation_id)}>{columns.map(([key]) => <td className="border-b border-border px-2.5 py-2 align-top text-[11px]" key={key}><FunnelCell column={key} generating={generatingOperationId === item.operation_id} item={item} onGenerate={onGenerate} /></td>)}</tr>)}</tbody></table>;
+}
+function ManualTable({ items, loading, error, onOpen }: { items: ManualAnalysis[]; loading: boolean; error: boolean; onOpen: (id: string) => void }) {
+  const headers = ["CNPJ", "Razão social", "Rating", "Score", "Taxa", "Status", "Valor", "Data"];
+  return <table className="w-full border-collapse text-xs"><thead className="bg-muted"><tr>{headers.map((header) => <th className="whitespace-nowrap border-b border-border px-2.5 py-2 text-left text-[11px] font-medium text-muted-foreground" key={header}>{header}</th>)}</tr></thead><tbody>{loading || error || items.length === 0 ? <tr><td className={cn("h-28 text-center text-sm", error ? "text-red-700" : "text-muted-foreground")} colSpan={headers.length}>{loading ? "Carregando análises manuais..." : error ? "Não foi possível carregar as análises manuais." : "Nenhuma análise manual encontrada."}</td></tr> : items.map((item) => <tr className="cursor-pointer hover:bg-muted/80" key={item.id} onClick={() => onOpen(item.id)}><td className="border-b border-border px-2.5 py-2 font-mono text-[11px]">{formatCnpj(item.cnpj)}</td><td className="whitespace-normal border-b border-border px-2.5 py-2 text-[11px]" title={item.razao_social ?? item.cnpj}>{item.razao_social || formatCnpj(item.cnpj)}</td><td className="border-b border-border px-2.5 py-2"><RatingBadge rating={item.rating} /></td><td className="border-b border-border px-2.5 py-2 font-mono">{formatScore(item.score)}</td><td className="border-b border-border px-2.5 py-2">{formatTaxaAm(item.taxa_sugerida)}</td><td className="border-b border-border px-2.5 py-2">{item.status}</td><td className="border-b border-border px-2.5 py-2">{formatBrl(item.valor_solicitado)}</td><td className="border-b border-border px-2.5 py-2">{formatDate(item.created_at)}</td></tr>)}</tbody></table>;
 }

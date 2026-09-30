@@ -27,6 +27,8 @@ import type {
   UploadResult,
   UploadTask,
   OperationStatus,
+  PaginatedFunnel,
+  PaginatedManualAnalyses,
   FunilEstagio,
   UserRole,
 } from "@/lib/types";
@@ -133,6 +135,34 @@ export function getAdminOperations(
     params.set("estagio", estagio);
   }
   return request<PaginatedOperations>(`/api/v1/admin/operations?${params}`);
+}
+
+export function getFunnelOperations(
+  stage: FunilEstagio,
+  limit = 20,
+  offset = 0,
+) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    estagio: stage,
+  });
+  return request<PaginatedFunnel>(`/api/v1/admin/operations?${params}`);
+}
+
+export function getManualAnalyses(
+  incluirTestes = false,
+  limit = 20,
+  offset = 0,
+) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    incluir_testes: String(incluirTestes),
+  });
+  return request<PaginatedManualAnalyses>(
+    `/api/v1/admin/operations/manual?${params}`,
+  );
 }
 
 export function createOperation(payload: PropostaInput) {

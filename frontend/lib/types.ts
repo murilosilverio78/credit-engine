@@ -134,6 +134,71 @@ export interface PaginatedOperations {
   estagios?: Partial<Record<FunilEstagio, number>>;
 }
 
+export type MotivoFunilTipo = "criterio" | "indisponibilidade";
+
+export interface MotivoFunil {
+  codigo: string;
+  rotulo: string;
+  detalhe: string;
+  tipo: MotivoFunilTipo;
+}
+
+export interface RelatorioFunil {
+  gerado: true;
+  rating: Rating | null;
+  score: number | null;
+  taxa_sugerida: number | null;
+  operation_id: string;
+}
+
+export interface FunnelItem {
+  id: string;
+  operation_id: string | null;
+  cotacao_id: string;
+  cnpj: string;
+  razao_social: string | null;
+  source: string;
+  created_at: string;
+  valor_solicitado: number | null;
+  margem_disponivel: number | null;
+  saldo_vincendo: number | null;
+  valor_enquadrado: number | null;
+  tipo: string | null;
+  data_expiracao: string | null;
+  estagio: FunilEstagio;
+  estagio_max: FunilEstagio | null;
+  estagio_atualizado_em: string | null;
+  estagio_motivo: string | null;
+  motivos: MotivoFunil[];
+  n_documentos: number | null;
+  tipos_documento: string[] | null;
+  relatorio: RelatorioFunil | null;
+}
+
+export interface FunnelSummary {
+  total_fila: number;
+  estagios: Partial<Record<FunilEstagio, number>>;
+  relatorios_gerados: number;
+}
+
+export interface PaginatedFunnel extends FunnelSummary {
+  items: FunnelItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ManualAnalysis extends Operation {
+  ambiente: "PRODUCAO" | "TESTE" | string;
+}
+
+export interface PaginatedManualAnalyses {
+  items: ManualAnalysis[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface OperationCreated {
   operation_id: string;
   cnpj: string;
