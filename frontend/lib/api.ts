@@ -196,13 +196,17 @@ export function reprocessOperationScore(operationId: string) {
   );
 }
 
-export function generateOperationReport(operationId: string) {
+export function generateOperationReport(
+  operationId: string,
+  valorOperacao?: number,
+) {
   return request<{
     message: string;
     operation_id: string;
     status: "accepted";
   }>(`/api/v1/operations/${encodeURIComponent(operationId)}/relatorio`, {
     method: "POST",
+    body: valorOperacao === undefined ? undefined : JSON.stringify({ valor_operacao: valorOperacao }),
   });
 }
 

@@ -151,6 +151,11 @@ export interface RelatorioFunil {
   operation_id: string;
 }
 
+export interface PendenciaFunil {
+  codigo: string;
+  rotulo: string;
+}
+
 export interface FunnelItem {
   id: string;
   operation_id: string | null;
@@ -172,6 +177,8 @@ export interface FunnelItem {
   motivos: MotivoFunil[];
   n_documentos: number | null;
   tipos_documento: string[] | null;
+  pendencias: PendenciaFunil[];
+  score_flags: string[];
   relatorio: RelatorioFunil | null;
 }
 
