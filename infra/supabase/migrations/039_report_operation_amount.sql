@@ -9,7 +9,7 @@ INSERT INTO pricing_parameters (key, value, label, unit, grupo) VALUES
     0.54,
     'Custo estimado de geração do relatório',
     'USD',
-    'operacional'
+    'custos_operacionais'
   )
 ON CONFLICT (key) DO NOTHING;
 

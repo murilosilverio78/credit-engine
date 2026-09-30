@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import subprocess
 
 
 MIGRATION = (
@@ -9,6 +10,33 @@ MIGRATION = (
     / "migrations"
     / "038_funil_listagem_agregada.sql"
 )
+PENDING_MIGRATION = MIGRATION.with_name("040_funil_pendencias.sql")
+
+
+def test_applied_migration_038_matches_origin_main_exactly():
+    original = subprocess.run(
+        ["git", "show", "origin/main:infra/supabase/migrations/038_funil_listagem_agregada.sql"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout
+
+    assert MIGRATION.read_text(encoding="utf-8") == original
+
+
+def test_pending_funil_migration_recreates_and_secures_new_signature():
+    sql = " ".join(PENDING_MIGRATION.read_text(encoding="utf-8").split())
+    signature = "listar_funil_operacoes(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER, INTEGER)"
+
+    drop = f"DROP FUNCTION IF EXISTS {signature};"
+    create = "CREATE FUNCTION listar_funil_operacoes("
+    revoke = f"REVOKE ALL ON FUNCTION {signature} FROM PUBLIC, anon, authenticated;"
+    grant = f"GRANT EXECUTE ON FUNCTION {signature} TO service_role;"
+
+    assert drop in sql
+    assert create in sql
+    assert sql.index(drop) < sql.index(create) < sql.index(revoke) < sql.index(grant)
 
 
 def test_funil_rpcs_are_not_executable_by_public_roles():
