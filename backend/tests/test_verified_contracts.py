@@ -69,6 +69,12 @@ def comprasnet(**overrides):
     return {"status_consulta": "ENCONTRADO", "contrato_comprasnet": contract, **overrides}
 
 
+def comprasnet_legado(**overrides):
+    result = comprasnet(**overrides)
+    result["contrato_comprasnet"].pop("fornecedor_cnpj", None)
+    return result
+
+
 def test_verified_contract_is_added_to_portal_floor_and_pdf_uses_same_totals():
     verified = contratos_verificados(portal(), comprasnet(), CNPJ, today=TODAY)
 
@@ -76,6 +82,7 @@ def test_verified_contract_is_added_to_portal_floor_and_pdf_uses_same_totals():
     assert verified["total_contratos_verificados"] == 13
     assert verified["valor_total_ativo_verificado"] == pytest.approx(4_005_994.04)
     assert verified["nota"] == "inclui 1 contrato verificado no Comprasnet, não listado no Portal"
+    assert verified["adicionais"][0]["cnpj_reconferido"] is True
 
     snapshots = {
         "contratos": {"parsed_result": portal()},
@@ -128,6 +135,37 @@ def test_portal_duplicate_by_value_and_start_date_is_not_added():
     verified = contratos_verificados(portal_result, comprasnet(), CNPJ, today=TODAY)
 
     assert verified["adicionais"] == []
+
+
+def test_legacy_comprasnet_snapshot_uses_its_confirmed_cnpj_match():
+    verified = contratos_verificados(portal(), comprasnet_legado(), CNPJ, today=TODAY)
+
+    assert verified["contratos_ativos_verificados"] == 5
+    assert verified["adicionais"][0]["cnpj_reconferido"] is False
+
+
+def test_legacy_snapshot_without_confirmed_cnpj_match_is_not_added():
+    verified = contratos_verificados(
+        portal(),
+        comprasnet_legado(contract={"match_confianca": "NUMERO_APROXIMADO"}),
+        CNPJ,
+        today=TODAY,
+    )
+
+    assert verified["adicionais"] == []
+
+
+def test_present_supplier_cnpj_must_still_match_operation():
+    divergent = contratos_verificados(
+        portal(),
+        comprasnet(contract={"fornecedor_cnpj": "00000000000000"}),
+        CNPJ,
+        today=TODAY,
+    )
+    matching = contratos_verificados(portal(), comprasnet(), CNPJ, today=TODAY)
+
+    assert divergent["adicionais"] == []
+    assert matching["adicionais"][0]["cnpj_reconferido"] is True
 
 
 class Query:
@@ -245,7 +283,7 @@ def test_score_relationship_counts_verified_contract_in_volume_history_and_facto
         "op-1",
         CNPJ,
         snapshots,
-        ScoreDatabase([{"parsed_result": comprasnet()}]),
+        ScoreDatabase([{"parsed_result": comprasnet_legado()}]),
     )
     after = score_engine.score_relacionamento(snapshots)
 
@@ -257,6 +295,7 @@ def test_score_relationship_counts_verified_contract_in_volume_history_and_facto
     assert snapshots["contratos"]["total_contratos"] == 13
     assert snapshots["contratos"]["contratos_detalhe"][-1]["data_inicio"] == "2026-04-02"
     assert snapshots["contratos"]["contratos_detalhe"][-1]["data_fim"] == "2027-04-02"
+    assert snapshots["contratos"]["contratos_detalhe"][-1]["cnpj_reconferido"] is False
 
 
 def test_score_without_eligible_addition_is_unchanged_and_does_not_mutate_portal_snapshot():

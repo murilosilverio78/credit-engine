@@ -97,11 +97,18 @@ def contratos_verificados(
     contract = comprasnet_result.get("contrato_comprasnet")
     contract = contract if isinstance(contract, dict) else {}
     additional: list[dict[str, Any]] = []
+    supplier_cnpj = _supplier_cnpj(contract)
+    cnpj_reconferido = bool(supplier_cnpj)
+    supplier_matches = (
+        supplier_cnpj == cnpj
+        if cnpj_reconferido
+        else contract.get("match_confianca") == "CNPJ_CONFERIDO"
+    )
 
     eligible = (
         comprasnet_result.get("status_consulta") == "ENCONTRADO"
         and contract.get("match_confianca") == "CNPJ_CONFERIDO"
-        and _supplier_cnpj(contract) == cnpj
+        and supplier_matches
         and str(contract.get("situacao") or "").strip().casefold() == "ativo"
         and (_date(contract.get("vigencia_fim")) or date.min) >= today
     )
@@ -115,6 +122,7 @@ def contratos_verificados(
                 "vigencia_fim": contract.get("vigencia_fim"),
                 "orgao": contract.get("orgao"),
                 "origem": "Comprasnet",
+                "cnpj_reconferido": cnpj_reconferido,
             }
         )
 

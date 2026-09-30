@@ -32,6 +32,7 @@ export interface ContratoVerificado {
   vigencia_fim?: string | null;
   orgao?: string | null;
   origem?: "Comprasnet";
+  cnpj_reconferido?: boolean;
 }
 
 export interface ContratosVerificados {

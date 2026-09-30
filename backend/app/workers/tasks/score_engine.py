@@ -1855,6 +1855,7 @@ def _add_verified_comprasnet_contract_for_score(
                     "ativo": True,
                     "data_inicio": item.get("vigencia_inicio"),
                     "data_fim": item.get("vigencia_fim"),
+                    "cnpj_reconferido": item.get("cnpj_reconferido"),
                 }
             )
         snapshots["contratos"] = {
