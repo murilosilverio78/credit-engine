@@ -4,7 +4,7 @@ OperationService: CRUD de operações de crédito.
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime, timezone
 from httpx import ConnectError, RemoteProtocolError
 
@@ -12,6 +12,99 @@ from app.core.database import supabase
 import structlog
 
 logger = structlog.get_logger()
+
+
+def _format_brl(value: Any) -> str:
+    """Formato compacto para os motivos que expõem limites configuráveis."""
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    if amount >= 1_000_000 and amount % 1_000_000 == 0:
+        return f"R$ {amount / 1_000_000:g} mi"
+    if amount >= 1_000 and amount % 1_000 == 0:
+        return f"R$ {amount / 1_000:g} mil"
+    return f"R$ {amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def mapear_motivos_funil(
+    estagio_motivo: str | None,
+    parametros: dict[str, float] | None = None,
+) -> list[dict[str, str]]:
+    """Converte os códigos persistidos do funil em motivos próprios para a UI.
+
+    A ingestão e a qualificação continuam gravando códigos estáveis. Esta é a
+    única fronteira que os transforma em texto, inclusive para não quebrar a
+    listagem quando surgir um código mais novo que a aplicação.
+    """
+    if not estagio_motivo:
+        return []
+
+    params = parametros or {}
+    ticket_minimo = _format_brl(params.get("ticket_minimo"))
+    ticket_maximo = _format_brl(params.get("ticket_maximo"))
+    dias_expiracao = int(params.get("dias_minimos_expiracao") or 0)
+    cobertura_min = float(params.get("funil_cobertura_min") or 0)
+    historico_min = int(params.get("funil_hist_min_meses") or 0)
+    orgaos_min = int(params.get("funil_orgaos_min") or 0)
+
+    motivos: list[dict[str, str]] = []
+    for raw_code in estagio_motivo.split(";"):
+        codigo = raw_code.strip()
+        if not codigo:
+            continue
+        tipo = "indisponibilidade" if codigo.startswith("indisponibilidade_fonte:") else "criterio"
+        detalhe = ""
+        rotulo = ""
+
+        if codigo == "abaixo_ticket_minimo":
+            rotulo = f"Abaixo do ticket mínimo ({ticket_minimo})"
+            detalhe = f"Valor enquadrado abaixo do mínimo configurado de {ticket_minimo}."
+        elif codigo == "acima_ticket_maximo":
+            rotulo = f"Acima do ticket máximo ({ticket_maximo})"
+            detalhe = f"Valor enquadrado acima do máximo configurado de {ticket_maximo}."
+        elif codigo.startswith("tipo_nao_elegivel:"):
+            tipo_cotacao = codigo.split(":", 1)[1]
+            rotulo = "Cotação de empenho" if tipo_cotacao.upper() == "EMPENHO" else f"Tipo não elegível: {tipo_cotacao}"
+            detalhe = "O tipo da cotação não pode seguir para análise."
+        elif codigo == "janela_expiracao_insuficiente":
+            rotulo = f"Janela de expiração insuficiente (mínimo {dias_expiracao} dias)"
+            detalhe = "A cotação expira antes da janela mínima configurada."
+        elif codigo.startswith("prazo_vincendo_insuficiente:"):
+            prazo = codigo.split(":", 1)[1]
+            rotulo = f"Prazo vincendo insuficiente ({prazo})"
+            detalhe = "O prazo de vencimento não atende ao mínimo do funil."
+        elif codigo.startswith("cobertura_insuficiente:"):
+            cobertura = codigo.split(":", 1)[1].replace(".", ",")
+            minimo = f"{cobertura_min:g}".replace(".", ",")
+            rotulo = f"Cobertura {cobertura}x (mínimo {minimo}x)"
+            detalhe = "Recebimentos acumulados insuficientes para o valor enquadrado."
+        elif codigo.startswith("historico_recebimentos_insuficiente:"):
+            meses = codigo.split(":", 1)[1]
+            rotulo = f"Histórico de recebimentos: {meses} (mínimo {historico_min}m)"
+            detalhe = "O histórico de recebimentos é menor que o mínimo configurado."
+        elif codigo.startswith("orgaos_pagadores_insuficientes:"):
+            quantidade = codigo.split(":", 1)[1]
+            rotulo = f"Órgãos pagadores: {quantidade} (mínimo {orgaos_min})"
+            detalhe = "Há menos órgãos pagadores que o mínimo configurado."
+        elif codigo == "contrato_comprasnet_nao_encontrado":
+            rotulo = "Contrato no Comprasnet não encontrado"
+            detalhe = "Não foi localizado um contrato elegível no Comprasnet."
+        elif codigo.startswith("indisponibilidade_fonte:"):
+            fonte = codigo.split(":", 1)[1].replace("_", " ")
+            rotulo = f"Sanções não verificadas (fonte indisponível: {fonte.upper()})"
+            detalhe = "A fonte necessária para a verificação ficou indisponível."
+        else:
+            rotulo = f"Critério não atendido: {codigo.replace('_', ' ')}"
+            detalhe = "Motivo recebido do funil sem rótulo específico."
+
+        motivos.append({
+            "codigo": codigo,
+            "rotulo": rotulo,
+            "detalhe": detalhe,
+            "tipo": tipo,
+        })
+    return motivos
 
 
 async def _safe_execute(query, retries=2):
@@ -205,6 +298,47 @@ class OperationService:
                 counts[stage] = counts.get(stage, 0) + 1
         return counts
 
+    def _funnel_summary(self) -> dict[str, Any]:
+        """Resumo global do funil, sem depender da aba paginada."""
+        estagios = self._stage_counts()
+        try:
+            quotes_result = (
+                supabase.table("cotacoes_broadfactor")
+                .select("operation_id")
+                .eq("ambiente", "PRODUCAO")
+                .execute()
+            )
+            operation_ids = [
+                row["operation_id"]
+                for row in quotes_result.data or []
+                if row.get("operation_id")
+            ]
+            if not operation_ids:
+                raise ValueError("no funnel operations")
+            result = (
+                supabase.table("component_snapshots")
+                .select("operation_id")
+                .in_("operation_id", operation_ids)
+                .eq("component", "score_engine")
+                .eq("status", "completed")
+                .execute()
+            )
+            operation_ids = {
+                str(row.get("operation_id"))
+                for row in result.data or []
+                if row.get("operation_id")
+            }
+        except ValueError:
+            operation_ids = set()
+        except Exception as exc:
+            logger.warning("operation.funnel_report_count_unavailable", error=str(exc))
+            operation_ids = set()
+        return {
+            "total_fila": sum(estagios.values()),
+            "estagios": estagios,
+            "relatorios_gerados": len(operation_ids),
+        }
+
     def _attach_quote_stage(self, items: list[dict]) -> None:
         operation_ids = [item["id"] for item in items if item.get("id")]
         if not operation_ids:
@@ -244,9 +378,10 @@ class OperationService:
     ) -> dict:
         query = supabase.table("cotacoes_broadfactor")\
             .select(
-                "cotacao_id,cnpj,nome_fornecedor,valor_solicitado,valor_enquadrado,"
+                "cotacao_id,cnpj,nome_fornecedor,valor_solicitado,margem_disponivel,"
+                "saldo_vincendo,valor_enquadrado,tipo,data_expiracao,"
                 "operation_id,estagio,estagio_motivo,n_documentos,tipos_documento,"
-                "estagio_atualizado_em,created_at",
+                "estagio_max,estagio_atualizado_em,created_at",
                 count="exact",
             )\
             .eq("ambiente", "PRODUCAO")\
@@ -259,34 +394,67 @@ class OperationService:
         quotes = result.data or []
         operation_ids = [row["operation_id"] for row in quotes if row.get("operation_id")]
         operations: dict[str, dict] = {}
+        score_completed_ids: set[str] = set()
         if operation_ids:
             op_result = supabase.table("operations")\
                 .select("id,status,rating,score,taxa_sugerida,source,created_at,razao_social")\
                 .in_("id", operation_ids)\
                 .execute()
             operations = {str(row["id"]): row for row in op_result.data or []}
+            snapshot_result = supabase.table("component_snapshots")\
+                .select("operation_id")\
+                .in_("operation_id", operation_ids)\
+                .eq("component", "score_engine")\
+                .eq("status", "completed")\
+                .execute()
+            score_completed_ids = {
+                str(row.get("operation_id"))
+                for row in snapshot_result.data or []
+                if row.get("operation_id")
+            }
+
+        from app.services.eligibility_params_service import get_eligibility_config
+        try:
+            parametros = get_eligibility_config()
+        except Exception as exc:
+            logger.warning("operation.funnel_reason_parameters_unavailable", error=str(exc))
+            parametros = {}
 
         items = []
         for quote in quotes:
             op = operations.get(str(quote.get("operation_id"))) or {}
+            operation_id = op.get("id")
+            relatorio = None
+            if operation_id and str(operation_id) in score_completed_ids:
+                relatorio = {
+                    "gerado": True,
+                    "rating": op.get("rating"),
+                    "score": op.get("score"),
+                    "taxa_sugerida": op.get("taxa_sugerida"),
+                    "operation_id": operation_id,
+                }
             items.append({
-                "id": op.get("id") or quote["cotacao_id"],
-                "operation_id": op.get("id"),
+                "id": operation_id or quote["cotacao_id"],
+                "operation_id": operation_id,
                 "cotacao_id": quote["cotacao_id"],
                 "cnpj": quote.get("cnpj"),
                 "razao_social": op.get("razao_social") or quote.get("nome_fornecedor"),
-                "status": op.get("status") or "pending",
-                "rating": op.get("rating"),
-                "score": op.get("score"),
-                "taxa_sugerida": op.get("taxa_sugerida"),
                 "source": op.get("source") or "broadfactor_ingestao",
                 "created_at": op.get("created_at") or quote.get("created_at"),
                 "valor_solicitado": quote.get("valor_solicitado"),
+                "margem_disponivel": quote.get("margem_disponivel"),
+                "saldo_vincendo": quote.get("saldo_vincendo"),
                 "valor_enquadrado": quote.get("valor_enquadrado"),
+                "tipo": quote.get("tipo"),
+                "data_expiracao": quote.get("data_expiracao"),
                 "estagio": quote.get("estagio"),
+                "estagio_max": quote.get("estagio_max"),
+                "estagio_atualizado_em": quote.get("estagio_atualizado_em"),
                 "estagio_motivo": quote.get("estagio_motivo"),
+                "motivos": mapear_motivos_funil(quote.get("estagio_motivo"), parametros),
                 "n_documentos": quote.get("n_documentos"),
                 "tipos_documento": quote.get("tipos_documento"),
+                "relatorio": relatorio,
             })
 
         total = result.count if result.count is not None else len(items)
@@ -295,8 +463,37 @@ class OperationService:
             "total": total,
             "limit": limit,
             "offset": offset,
-            "estagios": self._stage_counts(),
+            **self._funnel_summary(),
         }
+
+    async def list_manual(
+        self,
+        *,
+        incluir_testes: bool = False,
+        cnpj: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict:
+        """Lista análises iniciadas pela tela administrativa, fora do funil."""
+        query = (
+            supabase.table("operations")
+            .select(
+                "id,cnpj,razao_social,status,rating,score,taxa_sugerida,"
+                "valor_solicitado,created_at,source,ambiente",
+                count="exact",
+            )
+            .eq("source", "admin_ui")
+            .order("created_at", desc=True)
+            .range(offset, offset + limit - 1)
+        )
+        if not incluir_testes:
+            query = query.eq("ambiente", "PRODUCAO")
+        if cnpj:
+            query = query.eq("cnpj", cnpj)
+        result = query.execute()
+        items = result.data or []
+        total = result.count if result.count is not None else len(items)
+        return {"items": items, "total": total, "limit": limit, "offset": offset}
 
     async def update_status(self, operation_id: str, status: str, **kwargs):
         """Atualiza status e campos opcionais da operação."""

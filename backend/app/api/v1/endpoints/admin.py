@@ -33,6 +33,24 @@ async def list_operations(
     )
 
 
+@router.get("/operations/manual")
+async def list_manual_operations(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    incluir_testes: bool = False,
+    cnpj: str | None = None,
+):
+    """Lista análises manuais sem cotação Broadfactor e sem estágios do funil."""
+    from app.services.operation_service import OperationService
+
+    return await OperationService().list_manual(
+        incluir_testes=incluir_testes,
+        cnpj=cnpj,
+        limit=limit,
+        offset=offset,
+    )
+
+
 @router.get("/upload-tasks")
 async def list_upload_tasks():
     """Lista tarefas de upload pendentes."""
