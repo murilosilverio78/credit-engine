@@ -253,12 +253,25 @@ class OperationService:
         status: Optional[str] = None,
         cnpj: Optional[str] = None,
         estagio: Optional[str] = None,
+        busca: Optional[str] = None,
+        rating: Optional[str] = None,
+        relatorio: Optional[str] = None,
+        tipo_motivo: Optional[str] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> dict:
         """Lista operações com filtros opcionais."""
         if estagio:
-            return await self._list_funil(estagio=estagio, cnpj=cnpj, limit=limit, offset=offset)
+            return await self._list_funil(
+                estagio=estagio,
+                cnpj=cnpj,
+                busca=busca,
+                rating=rating,
+                relatorio=relatorio,
+                tipo_motivo=tipo_motivo,
+                limit=limit,
+                offset=offset,
+            )
 
         query = supabase.table("operations")            .select(
                 "id, cnpj, razao_social, status, rating, score, taxa_sugerida, source, created_at, cotacao_id",
@@ -282,61 +295,32 @@ class OperationService:
             "estagios": self._stage_counts(),
         }
 
-    def _stage_counts(self) -> dict[str, int]:
+    def _stage_counts(self) -> dict[str, int] | None:
+        """Contagens do funil calculadas pelo banco, sem limite do PostgREST."""
         try:
-            result = supabase.table("cotacoes_broadfactor")\
-                .select("estagio")\
-                .eq("ambiente", "PRODUCAO")\
-                .execute()
+            result = supabase.rpc("resumo_funil_operacoes").execute()
         except Exception as exc:
             logger.warning("operation.stage_counts_unavailable", error=str(exc))
-            return {}
-        counts: dict[str, int] = {}
-        for row in result.data or []:
-            stage = row.get("estagio")
-            if stage:
-                counts[stage] = counts.get(stage, 0) + 1
-        return counts
+            return None
+        row = (result.data or [{}])[0]
+        return row.get("estagios") or {}
 
     def _funnel_summary(self) -> dict[str, Any]:
         """Resumo global do funil, sem depender da aba paginada."""
-        estagios = self._stage_counts()
         try:
-            quotes_result = (
-                supabase.table("cotacoes_broadfactor")
-                .select("operation_id")
-                .eq("ambiente", "PRODUCAO")
-                .execute()
-            )
-            operation_ids = [
-                row["operation_id"]
-                for row in quotes_result.data or []
-                if row.get("operation_id")
-            ]
-            if not operation_ids:
-                raise ValueError("no funnel operations")
-            result = (
-                supabase.table("component_snapshots")
-                .select("operation_id")
-                .in_("operation_id", operation_ids)
-                .eq("component", "score_engine")
-                .eq("status", "completed")
-                .execute()
-            )
-            operation_ids = {
-                str(row.get("operation_id"))
-                for row in result.data or []
-                if row.get("operation_id")
+            result = supabase.rpc("resumo_funil_operacoes").execute()
+            row = (result.data or [{}])[0]
+            return {
+                "total_fila": row.get("total_fila"),
+                "estagios": row.get("estagios") or {},
+                "relatorios_gerados": row.get("relatorios_gerados"),
             }
-        except ValueError:
-            operation_ids = set()
         except Exception as exc:
-            logger.warning("operation.funnel_report_count_unavailable", error=str(exc))
-            operation_ids = set()
+            logger.warning("operation.funnel_summary_unavailable", error=str(exc))
         return {
-            "total_fila": sum(estagios.values()),
-            "estagios": estagios,
-            "relatorios_gerados": len(operation_ids),
+            "total_fila": None,
+            "estagios": None,
+            "relatorios_gerados": None,
         }
 
     def _attach_quote_stage(self, items: list[dict]) -> None:
@@ -373,45 +357,24 @@ class OperationService:
         *,
         estagio: str,
         cnpj: Optional[str],
+        busca: Optional[str],
+        rating: Optional[str],
+        relatorio: Optional[str],
+        tipo_motivo: Optional[str],
         limit: int,
         offset: int,
     ) -> dict:
-        query = supabase.table("cotacoes_broadfactor")\
-            .select(
-                "cotacao_id,cnpj,nome_fornecedor,valor_solicitado,margem_disponivel,"
-                "saldo_vincendo,valor_enquadrado,tipo,data_expiracao,"
-                "operation_id,estagio,estagio_motivo,n_documentos,tipos_documento,"
-                "estagio_max,estagio_atualizado_em,created_at",
-                count="exact",
-            )\
-            .eq("ambiente", "PRODUCAO")\
-            .eq("estagio", estagio)\
-            .order("estagio_atualizado_em", desc=True)\
-            .range(offset, offset + limit - 1)
-        if cnpj:
-            query = query.eq("cnpj", cnpj)
-        result = query.execute()
+        result = supabase.rpc("listar_funil_operacoes", {
+            "p_estagio": estagio,
+            "p_cnpj": cnpj,
+            "p_busca": busca,
+            "p_rating": rating,
+            "p_relatorio": relatorio,
+            "p_tipo_motivo": tipo_motivo,
+            "p_limit": limit,
+            "p_offset": offset,
+        }).execute()
         quotes = result.data or []
-        operation_ids = [row["operation_id"] for row in quotes if row.get("operation_id")]
-        operations: dict[str, dict] = {}
-        score_completed_ids: set[str] = set()
-        if operation_ids:
-            op_result = supabase.table("operations")\
-                .select("id,status,rating,score,taxa_sugerida,source,created_at,razao_social")\
-                .in_("id", operation_ids)\
-                .execute()
-            operations = {str(row["id"]): row for row in op_result.data or []}
-            snapshot_result = supabase.table("component_snapshots")\
-                .select("operation_id")\
-                .in_("operation_id", operation_ids)\
-                .eq("component", "score_engine")\
-                .eq("status", "completed")\
-                .execute()
-            score_completed_ids = {
-                str(row.get("operation_id"))
-                for row in snapshot_result.data or []
-                if row.get("operation_id")
-            }
 
         from app.services.eligibility_params_service import get_eligibility_config
         try:
@@ -422,15 +385,14 @@ class OperationService:
 
         items = []
         for quote in quotes:
-            op = operations.get(str(quote.get("operation_id"))) or {}
-            operation_id = op.get("id")
+            operation_id = quote.get("operation_id")
             relatorio = None
-            if operation_id and str(operation_id) in score_completed_ids:
+            if quote.get("relatorio_gerado"):
                 relatorio = {
                     "gerado": True,
-                    "rating": op.get("rating"),
-                    "score": op.get("score"),
-                    "taxa_sugerida": op.get("taxa_sugerida"),
+                    "rating": quote.get("rating"),
+                    "score": quote.get("score"),
+                    "taxa_sugerida": quote.get("taxa_sugerida"),
                     "operation_id": operation_id,
                 }
             items.append({
@@ -438,9 +400,9 @@ class OperationService:
                 "operation_id": operation_id,
                 "cotacao_id": quote["cotacao_id"],
                 "cnpj": quote.get("cnpj"),
-                "razao_social": op.get("razao_social") or quote.get("nome_fornecedor"),
-                "source": op.get("source") or "broadfactor_ingestao",
-                "created_at": op.get("created_at") or quote.get("created_at"),
+                "razao_social": quote.get("razao_social") or quote.get("nome_fornecedor"),
+                "source": quote.get("source") or "broadfactor_ingestao",
+                "created_at": quote.get("operation_created_at") or quote.get("created_at"),
                 "valor_solicitado": quote.get("valor_solicitado"),
                 "margem_disponivel": quote.get("margem_disponivel"),
                 "saldo_vincendo": quote.get("saldo_vincendo"),
@@ -457,7 +419,7 @@ class OperationService:
                 "relatorio": relatorio,
             })
 
-        total = result.count if result.count is not None else len(items)
+        total = int(quotes[0].get("total_count") or 0) if quotes else 0
         return {
             "items": items,
             "total": total,
@@ -471,6 +433,7 @@ class OperationService:
         *,
         incluir_testes: bool = False,
         cnpj: Optional[str] = None,
+        busca: Optional[str] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> dict:
@@ -490,6 +453,13 @@ class OperationService:
             query = query.eq("ambiente", "PRODUCAO")
         if cnpj:
             query = query.eq("cnpj", cnpj)
+        if busca:
+            normalized_cnpj = "".join(character for character in busca if character.isdigit())
+            term = normalized_cnpj if normalized_cnpj else busca.strip()
+            if term:
+                query = query.or_(
+                    f"cnpj.ilike.*{term}*,razao_social.ilike.*{term}*"
+                )
         result = query.execute()
         items = result.data or []
         total = result.count if result.count is not None else len(items)

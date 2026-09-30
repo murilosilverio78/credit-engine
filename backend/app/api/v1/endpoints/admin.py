@@ -20,6 +20,10 @@ async def list_operations(
     status: str | None = None,
     cnpj: str | None = None,
     estagio: str | None = None,
+    busca: str | None = None,
+    rating: str | None = None,
+    relatorio: str | None = None,
+    tipo_motivo: str | None = None,
 ):
     """Lista operações para o admin."""
     from app.services.operation_service import OperationService
@@ -28,6 +32,10 @@ async def list_operations(
         status=status,
         cnpj=cnpj,
         estagio=estagio,
+        busca=busca,
+        rating=rating,
+        relatorio=relatorio,
+        tipo_motivo=tipo_motivo,
         limit=limit,
         offset=offset,
     )
@@ -39,6 +47,7 @@ async def list_manual_operations(
     offset: int = Query(0, ge=0),
     incluir_testes: bool = False,
     cnpj: str | None = None,
+    busca: str | None = None,
 ):
     """Lista análises manuais sem cotação Broadfactor e sem estágios do funil."""
     from app.services.operation_service import OperationService
@@ -46,6 +55,7 @@ async def list_manual_operations(
     return await OperationService().list_manual(
         incluir_testes=incluir_testes,
         cnpj=cnpj,
+        busca=busca,
         limit=limit,
         offset=offset,
     )

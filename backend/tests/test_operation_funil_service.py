@@ -23,6 +23,7 @@ class Query:
         self.filters = []
         self.start = 0
         self.end = None
+        self.or_expression = None
 
     def select(self, *_args, **_kwargs):
         return self
@@ -42,6 +43,10 @@ class Query:
         self.start, self.end = start, end
         return self
 
+    def or_(self, expression):
+        self.or_expression = expression
+        return self
+
     def execute(self):
         rows = [row.copy() for row in self.rows]
         for field, value, kind in self.filters:
@@ -49,17 +54,39 @@ class Query:
                 rows = [row for row in rows if row.get(field) == value]
             else:
                 rows = [row for row in rows if row.get(field) in value]
+        if self.or_expression:
+            term = self.or_expression.split("*", 2)[1].lower()
+            rows = [
+                row for row in rows
+                if term in str(row.get("cnpj") or "").lower()
+                or term in str(row.get("razao_social") or "").lower()
+            ]
         total = len(rows)
         end = None if self.end is None else self.end + 1
         return SimpleNamespace(data=rows[self.start:end], count=total)
 
 
+class Rpc:
+    def __init__(self, response):
+        self.response = response
+
+    def execute(self):
+        return SimpleNamespace(data=self.response)
+
+
 class Supabase:
-    def __init__(self, tables):
+    def __init__(self, tables, rpc_responses=None):
         self.tables = tables
+        self.rpc_responses = rpc_responses or {}
+        self.rpc_calls = []
 
     def table(self, name):
         return Query(self.tables.get(name, []))
+
+    def rpc(self, name, params=None):
+        self.rpc_calls.append((name, params))
+        response = self.rpc_responses[name]
+        return Rpc(response(params) if callable(response) else response)
 
 
 PARAMS = {
@@ -92,8 +119,8 @@ def test_mapear_motivos_funil_uses_parameters_and_keeps_unknown_code():
 
 
 def test_list_funil_exposes_quote_fields_and_only_completed_score_report(monkeypatch):
-    database = Supabase({
-        "cotacoes_broadfactor": [{
+    database = Supabase({}, {
+        "listar_funil_operacoes": [{
             "cotacao_id": "C-1", "cnpj": "12345678000190", "nome_fornecedor": "Fornecedor",
             "valor_solicitado": 200_000, "margem_disponivel": 80_000,
             "saldo_vincendo": 150_000, "valor_enquadrado": 100_000,
@@ -101,23 +128,25 @@ def test_list_funil_exposes_quote_fields_and_only_completed_score_report(monkeyp
             "estagio": "QUALIFICADA", "estagio_max": "QUALIFICADA",
             "estagio_motivo": "cobertura_insuficiente:1.61", "n_documentos": 3,
             "tipos_documento": ["contrato"], "estagio_atualizado_em": "2026-09-29T00:00:00Z",
-            "created_at": "2026-09-01T00:00:00Z", "ambiente": "PRODUCAO",
+            "created_at": "2026-09-01T00:00:00Z", "operation_created_at": "2026-09-01",
+            "razao_social": "Fornecedor SA", "source": "x", "rating": "A", "score": 95,
+            "taxa_sugerida": 0.02, "relatorio_gerado": True, "total_count": 2,
         }, {
             "cotacao_id": "C-2", "cnpj": "12345678000191", "nome_fornecedor": "Sem score",
             "operation_id": "op-sem-score", "estagio": "QUALIFICADA", "estagio_max": "QUALIFICADA",
-            "created_at": "2026-09-02T00:00:00Z", "ambiente": "PRODUCAO",
+            "created_at": "2026-09-02T00:00:00Z", "operation_created_at": "2026-09-02",
+            "razao_social": "Sem score SA", "source": "x", "rating": "B", "score": 80,
+            "taxa_sugerida": 0.03, "relatorio_gerado": False, "total_count": 2,
         }],
-        "operations": [
-            {"id": "op-score", "rating": "A", "score": 95, "taxa_sugerida": 0.02, "source": "x", "created_at": "2026-09-01", "razao_social": "Fornecedor SA"},
-            {"id": "op-sem-score", "rating": "B", "score": 80, "taxa_sugerida": 0.03, "source": "x", "created_at": "2026-09-02", "razao_social": "Sem score SA"},
-        ],
-        "component_snapshots": [{"operation_id": "op-score", "component": "score_engine", "status": "completed"}],
     })
     monkeypatch.setattr(service, "supabase", database)
     monkeypatch.setattr("app.services.eligibility_params_service.get_eligibility_config", lambda: PARAMS)
     monkeypatch.setattr(service.OperationService, "_funnel_summary", lambda _self: {"total_fila": 2, "estagios": {"QUALIFICADA": 2}, "relatorios_gerados": 1})
 
-    result = asyncio.run(service.OperationService()._list_funil(estagio="QUALIFICADA", cnpj=None, limit=20, offset=0))
+    result = asyncio.run(service.OperationService()._list_funil(
+        estagio="QUALIFICADA", cnpj=None, busca=None, rating=None,
+        relatorio=None, tipo_motivo=None, limit=20, offset=0,
+    ))
 
     scored, unscored = result["items"]
     assert scored["margem_disponivel"] == 80_000
@@ -135,6 +164,31 @@ def test_list_funil_exposes_quote_fields_and_only_completed_score_report(monkeyp
     assert "score" not in scored
 
 
+def test_list_funil_forwards_server_filters_and_total_from_filtered_page(monkeypatch):
+    filtered_row = {
+        "cotacao_id": "C-41", "cnpj": "12345678000190", "nome_fornecedor": "Fora da primeira página",
+        "operation_id": None, "estagio": "LISTA_ESPERA", "estagio_max": "LISTA_ESPERA",
+        "created_at": "2026-09-01", "total_count": 1, "relatorio_gerado": False,
+    }
+    database = Supabase({}, {"listar_funil_operacoes": [filtered_row]})
+    monkeypatch.setattr(service, "supabase", database)
+    monkeypatch.setattr("app.services.eligibility_params_service.get_eligibility_config", lambda: PARAMS)
+    monkeypatch.setattr(service.OperationService, "_funnel_summary", lambda _self: {})
+
+    result = asyncio.run(service.OperationService()._list_funil(
+        estagio="LISTA_ESPERA", cnpj=None, busca="Fora", rating=None,
+        relatorio="pendente", tipo_motivo="criterio", limit=20, offset=0,
+    ))
+
+    assert result["total"] == 1
+    assert result["items"][0]["cotacao_id"] == "C-41"
+    assert database.rpc_calls == [("listar_funil_operacoes", {
+        "p_estagio": "LISTA_ESPERA", "p_cnpj": None, "p_busca": "Fora",
+        "p_rating": None, "p_relatorio": "pendente", "p_tipo_motivo": "criterio",
+        "p_limit": 20, "p_offset": 0,
+    })]
+
+
 def test_list_manual_isolated_from_funnel_and_can_include_tests(monkeypatch):
     database = Supabase({
         "operations": [
@@ -150,3 +204,48 @@ def test_list_manual_isolated_from_funnel_and_can_include_tests(monkeypatch):
 
     assert [item["id"] for item in production["items"]] == ["manual-prod"]
     assert [item["id"] for item in all_environments["items"]] == ["manual-prod", "manual-test"]
+
+
+def test_list_manual_searches_before_pagination_and_counts_filtered_rows(monkeypatch):
+    database = Supabase({"operations": [
+        {"id": "first", "source": "admin_ui", "ambiente": "PRODUCAO", "cnpj": "1", "razao_social": "Primeira"},
+        {"id": "later", "source": "admin_ui", "ambiente": "PRODUCAO", "cnpj": "2", "razao_social": "Alvo fora da primeira página"},
+    ]})
+    monkeypatch.setattr(service, "supabase", database)
+
+    result = asyncio.run(service.OperationService().list_manual(busca="Alvo", limit=1, offset=0))
+
+    assert result["total"] == 1
+    assert [item["id"] for item in result["items"]] == ["later"]
+
+
+def test_funnel_summary_uses_database_aggregation_for_large_funnel(monkeypatch):
+    database = Supabase({}, {"resumo_funil_operacoes": [{
+        "total_fila": 1_501,
+        "estagios": {"LISTA_ESPERA": 1_001, "QUALIFICADA": 500},
+        "relatorios_gerados": 1_200,
+    }]})
+    monkeypatch.setattr(service, "supabase", database)
+
+    summary = service.OperationService()._funnel_summary()
+
+    assert summary == {
+        "total_fila": 1_501,
+        "estagios": {"LISTA_ESPERA": 1_001, "QUALIFICADA": 500},
+        "relatorios_gerados": 1_200,
+    }
+    assert database.rpc_calls == [("resumo_funil_operacoes", None)]
+
+
+def test_funnel_summary_returns_null_fields_when_database_fails(monkeypatch):
+    class FailingSupabase:
+        def rpc(self, _name):
+            raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(service, "supabase", FailingSupabase())
+
+    assert service.OperationService()._funnel_summary() == {
+        "total_fila": None,
+        "estagios": None,
+        "relatorios_gerados": None,
+    }

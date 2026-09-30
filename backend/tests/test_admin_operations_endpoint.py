@@ -80,9 +80,43 @@ def test_admin_operations_respects_limit_and_offset(monkeypatch):
         "op-9",
     ]
     assert calls == [
-        {"status": "completed", "cnpj": None, "estagio": None, "limit": 5, "offset": 0},
-        {"status": "completed", "cnpj": None, "estagio": None, "limit": 5, "offset": 5},
+        {
+            "status": "completed", "cnpj": None, "estagio": None,
+            "busca": None, "rating": None, "relatorio": None,
+            "tipo_motivo": None, "limit": 5, "offset": 0,
+        },
+        {
+            "status": "completed", "cnpj": None, "estagio": None,
+            "busca": None, "rating": None, "relatorio": None,
+            "tipo_motivo": None, "limit": 5, "offset": 5,
+        },
     ]
+
+
+def test_admin_operations_forwards_funnel_filters(monkeypatch):
+    calls = []
+
+    class FakeOperationService:
+        async def list(self, **kwargs):
+            calls.append(kwargs)
+            return {"items": [], "total": 0, "limit": kwargs["limit"], "offset": kwargs["offset"]}
+
+    monkeypatch.setitem(
+        sys.modules,
+        "app.services.operation_service",
+        types.SimpleNamespace(OperationService=FakeOperationService),
+    )
+
+    response = make_client().get(
+        "/api/v1/admin/operations?estagio=QUALIFICADA&busca=Fornecedor&"
+        "rating=A&relatorio=gerado&tipo_motivo=criterio"
+    )
+
+    assert response.status_code == 200
+    assert calls[0]["busca"] == "Fornecedor"
+    assert calls[0]["rating"] == "A"
+    assert calls[0]["relatorio"] == "gerado"
+    assert calls[0]["tipo_motivo"] == "criterio"
 
 
 def test_admin_operations_validates_pagination_query():
