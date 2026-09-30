@@ -229,6 +229,19 @@ def normalized_contracts(contracts_result: dict[str, Any]) -> list[dict[str, Any
     return normalized
 
 
+def verified_contracts_for_report(
+    operation: dict[str, Any], snapshots: dict[str, dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Usa a mesma visao derivada do detalhe e do score, sem mutar snapshots."""
+    portal = record(snapshots.get("contratos", {}).get("parsed_result"))
+    comprasnet = record(snapshots.get("contratos_comprasnet", {}).get("parsed_result"))
+    if not portal or not comprasnet:
+        return None
+    from app.services.verified_contracts_service import contratos_verificados
+
+    return contratos_verificados(portal, comprasnet, text(operation.get("cnpj"), ""))
+
+
 def metric_card(label: str, value: str, hint: str = "") -> str:
     return f"""
     <div class="metric">
@@ -300,6 +313,7 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
     comprasnet = record(
         snapshots.get("contratos_comprasnet", {}).get("parsed_result")
     )
+    verified = verified_contracts_for_report(operation, snapshots)
     concentration = record(resources.get("concentracao"))
     tax_regimes = array(company.get("regime_tributario"))
     partners = array(company.get("qsa"))
@@ -325,8 +339,18 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
             metric_card("Limite %", pct_from_fraction(engine.get("limite_sugerido_pct_contrato"), 0)),
             metric_card(
                 "Contratos ativos",
-                text(contracts.get("contratos_ativos"), "0"),
-                money(contracts.get("valor_total_ativo")),
+                text(
+                    (verified or {}).get("contratos_ativos_verificados")
+                    if verified
+                    else contracts.get("contratos_ativos"),
+                    "0",
+                ),
+                (
+                    money((verified or {}).get("valor_total_ativo_verificado"))
+                    if verified
+                    else money(contracts.get("valor_total_ativo"))
+                )
+                + (f" · {verified.get('nota')}" if verified and verified.get("nota") else ""),
             ),
         ]
     )
@@ -548,9 +572,25 @@ def pricing_section(operation: dict[str, Any]) -> str:
     """
 
 
-def contracts_annex(snapshots: dict[str, dict[str, Any]]) -> str:
+def contracts_annex(
+    operation: dict[str, Any], snapshots: dict[str, dict[str, Any]]
+) -> str:
     result = record(snapshots.get("contratos", {}).get("parsed_result"))
     contracts = normalized_contracts(result)
+    verified = verified_contracts_for_report(operation, snapshots)
+    additions = array((verified or {}).get("adicionais"))
+    for item in map(record, additions):
+        contracts.append(
+            {
+                "numero": item.get("numero"),
+                "orgao": item.get("orgao"),
+                "_pdf_valor": item.get("valor_global"),
+                "_pdf_status": "ativo",
+                "data_inicio": item.get("vigencia_inicio"),
+                "data_fim": item.get("vigencia_fim"),
+                "origem": "Comprasnet",
+            }
+        )
     rows = [
         [
             item.get("numero"),
@@ -558,15 +598,16 @@ def contracts_annex(snapshots: dict[str, dict[str, Any]]) -> str:
             money(item.get("_pdf_valor")),
             item.get("_pdf_status"),
             f"{format_date(item.get('data_inicio'))} a {format_date(item.get('data_fim'))}",
+            item.get("origem") or "Portal",
         ]
         for item in contracts
     ]
     totals = detail_grid(
         [
-            ("Total contratos", result.get("total_contratos")),
-            ("Ativos", result.get("contratos_ativos")),
+            ("Total contratos", (verified or {}).get("total_contratos_verificados", result.get("total_contratos"))),
+            ("Ativos", (verified or {}).get("contratos_ativos_verificados", result.get("contratos_ativos"))),
             ("Encerrados", result.get("contratos_encerrados")),
-            ("Valor total ativo", money(result.get("valor_total_ativo"))),
+            ("Valor total ativo", money((verified or {}).get("valor_total_ativo_verificado", result.get("valor_total_ativo")))),
             ("Valor histórico", money(result.get("valor_total_historico"))),
         ],
         5,
@@ -575,7 +616,7 @@ def contracts_annex(snapshots: dict[str, dict[str, Any]]) -> str:
     <section class="page-section">
       <h1>6. Anexo - contratos</h1>
       {totals}
-      {table(["Número", "Órgão", "Valor", "Status", "Vigência"], rows, "compact")}
+      {table(["Número", "Órgão", "Valor", "Status", "Vigência", "Origem"], rows, "compact")}
     </section>
     """
 
@@ -759,7 +800,7 @@ def document_html(operation: dict[str, Any]) -> tuple[str, str, str]:
             parecer_section(engine),
             regularity_section(engine),
             pricing_section(operation),
-            contracts_annex(snapshots),
+            contracts_annex(operation, snapshots),
             resources_annex(snapshots),
             sanctions_and_docs_annex(snapshots),
         ]

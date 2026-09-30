@@ -24,6 +24,27 @@ export type OverrideType = "taxa";
 export type UserRole = "analista" | "gerente" | "diretor";
 export type Alcada = UserRole;
 
+export interface ContratoVerificado {
+  numero?: string | null;
+  uasg?: string | null;
+  valor_global?: number | null;
+  vigencia_inicio?: string | null;
+  vigencia_fim?: string | null;
+  orgao?: string | null;
+  origem?: "Comprasnet";
+}
+
+export interface ContratosVerificados {
+  adicionais: ContratoVerificado[];
+  contratos: Record<string, unknown>[];
+  contratos_ativos_verificados: number;
+  valor_total_ativo_verificado: number;
+  total_contratos_verificados: number;
+  contratos_encerrados_verificados: number;
+  orgaos_contratantes_verificados: string[];
+  nota: string | null;
+}
+
 export interface Operation {
   id: string;
   operation_id?: string | null;
@@ -54,6 +75,7 @@ export interface Operation {
   tipos_documento?: string[] | null;
   pricing_skipped_reason?: string | null;
   dado_cadastral_degradado?: boolean | null;
+  contratos_verificados?: ContratosVerificados | null;
   source: string;
   created_at: string;
   limite_aprovado?: number | null;

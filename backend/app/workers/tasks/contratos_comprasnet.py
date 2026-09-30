@@ -562,6 +562,7 @@ def _normalize_contract(
             True if renewable == "sim" else False if renewable == "nao" else None
         ),
         "objeto": contract.get("objeto"),
+        "fornecedor_cnpj": _supplier_cnpj(contract),
         "match_confianca": "CNPJ_CONFERIDO",
     }
 
@@ -571,7 +572,7 @@ def _empty_contract() -> dict[str, Any]:
         "contrato_id", "numero", "uasg", "uasg_nome", "orgao",
         "vigencia_inicio", "vigencia_fim", "prazo_vincendo_meses",
         "valor_inicial", "valor_global", "valor_parcela", "num_parcelas",
-        "situacao", "prorrogavel", "objeto",
+        "situacao", "prorrogavel", "objeto", "fornecedor_cnpj",
     )
     return {**{field: None for field in fields}, "match_confianca": "SEM_MATCH"}
 

@@ -1002,26 +1002,23 @@ function BrasilApiDetails({ result }: { result: JsonRecord }) {
 }
 
 function ContractsDetails({ result }: { result: JsonRecord }) {
-  const contracts = asArray(result.contratos_detalhe).map((item) =>
+  const contracts = asArray(result.contratos).map((item) =>
     asRecord(item),
   );
-  const agencies = asArray(result.orgaos_contratantes).map((item) =>
+  const agencies = asArray(result.orgaos_contratantes_verificados).map((item) =>
     stringValue(item),
   );
 
   return (
     <>
       <div className="grid gap-x-8 sm:grid-cols-2">
-        <DetailRow label="Total de contratos" value={stringValue(result.total_contratos)} />
-        <DetailRow label="Contratos ativos" value={stringValue(result.contratos_ativos)} />
-        <DetailRow label="Contratos encerrados" value={stringValue(result.contratos_encerrados)} />
-        <DetailRow label="Valor total ativo" value={formatCurrency(result.valor_total_ativo)} />
-        <DetailRow
-          label="Valor histórico total"
-          value={formatCurrency(result.valor_total_historico)}
-        />
+        <DetailRow label="Total de contratos" value={stringValue(result.total_contratos_verificados)} />
+        <DetailRow label="Contratos ativos" value={stringValue(result.contratos_ativos_verificados)} />
+        <DetailRow label="Contratos encerrados" value={stringValue(result.contratos_encerrados_verificados)} />
+        <DetailRow label="Valor total ativo" value={formatCurrency(result.valor_total_ativo_verificado)} />
         <DetailRow label="Órgãos contratantes" value={agencies.join(", ") || "—"} />
       </div>
+      {result.nota ? <p className="mt-2 text-[11px] text-muted-foreground">{stringValue(result.nota)}</p> : null}
       {contracts.length ? (
         <div className="mt-4 overflow-x-auto rounded-md border border-border">
           <table className="min-w-[760px] table-fixed border-collapse text-[11px]">
@@ -1033,6 +1030,7 @@ function ContractsDetails({ result }: { result: JsonRecord }) {
                 <th className="w-[105px] px-2.5 py-2 font-medium">Valor</th>
                 <th className="w-[75px] px-2.5 py-2 font-medium">Status</th>
                 <th className="w-[130px] px-2.5 py-2 font-medium">Datas</th>
+                <th className="w-[90px] px-2.5 py-2 font-medium">Origem</th>
               </tr>
             </thead>
             <tbody>
@@ -1067,6 +1065,7 @@ function ContractsDetails({ result }: { result: JsonRecord }) {
                   <td className="px-2.5 py-2 font-mono text-muted-foreground">
                     {formatDate(contract.data_inicio)} – {formatDate(contract.data_fim)}
                   </td>
+                  <td className="px-2.5 py-2">{stringValue(contract.origem)}</td>
                 </tr>
               ))}
             </tbody>
@@ -1476,14 +1475,14 @@ function DocumentDetails({
   );
 }
 
-function ComponentDetails({ snapshot }: { snapshot: ComponentSnapshot }) {
+function ComponentDetails({ snapshot, verifiedContracts }: { snapshot: ComponentSnapshot; verifiedContracts: JsonRecord }) {
   const result = asRecord(snapshot.parsed_result);
 
   if (snapshot.component === "brasil_api") {
     return <BrasilApiDetails result={result} />;
   }
   if (snapshot.component === "contratos") {
-    return <ContractsDetails result={result} />;
+    return <ContractsDetails result={verifiedContracts} />;
   }
   if (snapshot.component === "contratos_comprasnet") {
     return <ComprasnetDetails result={result} />;
@@ -1610,17 +1609,17 @@ function BrasilApiAnnex({ result }: { result: JsonRecord }) {
 }
 
 function ContractsAnnex({ result }: { result: JsonRecord }) {
-  const contracts = asArray(result.contratos_detalhe).map((item) => asRecord(item));
+  const contracts = asArray(result.contratos).map((item) => asRecord(item));
 
   return (
     <AnnexSection title="contratos">
       <div className="grid grid-cols-2 gap-x-5">
-        <AnnexRow label="Total / ativos / encerrados" value={`${stringValue(result.total_contratos)} / ${stringValue(result.contratos_ativos)} / ${stringValue(result.contratos_encerrados)}`} />
-        <AnnexRow label="Valor total ativo" value={formatCurrency(result.valor_total_ativo)} />
-        <AnnexRow label="Valor histórico" value={formatCurrency(result.valor_total_historico)} />
+        <AnnexRow label="Total / ativos / encerrados" value={`${stringValue(result.total_contratos_verificados)} / ${stringValue(result.contratos_ativos_verificados)} / ${stringValue(result.contratos_encerrados_verificados)}`} />
+        <AnnexRow label="Valor total ativo" value={formatCurrency(result.valor_total_ativo_verificado)} />
       </div>
+      {result.nota ? <AnnexRow label="Nota" value={stringValue(result.nota)} /> : null}
       {contracts.length ? (
-        <AnnexTable headers={["Número", "Órgão", "Valor", "Status", "Vigência"]}>
+        <AnnexTable headers={["Número", "Órgão", "Valor", "Status", "Vigência", "Origem"]}>
           {contracts.map((contract, index) => (
             <tr key={`${String(contract.numero)}-${index}`} style={{ breakInside: "avoid" }}>
               <td className="border border-slate-300 px-1.5 py-1">{stringValue(contract.numero)}</td>
@@ -1628,6 +1627,7 @@ function ContractsAnnex({ result }: { result: JsonRecord }) {
               <td className="border border-slate-300 px-1.5 py-1">{formatCurrency(contract.valor_final ?? contract.valor_inicial)}</td>
               <td className="border border-slate-300 px-1.5 py-1">{contract.ativo ? "ativo" : "encerrado"}</td>
               <td className="border border-slate-300 px-1.5 py-1">{formatDate(contract.data_inicio)} - {formatDate(contract.data_fim)}</td>
+              <td className="border border-slate-300 px-1.5 py-1">{stringValue(contract.origem)}</td>
             </tr>
           ))}
         </AnnexTable>
@@ -1749,9 +1749,8 @@ function WebResearchAnnex({ result }: { result: JsonRecord }) {
   );
 }
 
-function PrintableAnnex({ snapshots }: { snapshots: Map<string, ComponentSnapshot> }) {
+function PrintableAnnex({ snapshots, verifiedContracts }: { snapshots: Map<string, ComponentSnapshot>; verifiedContracts: JsonRecord }) {
   const brasilApi = asRecord(snapshots.get("brasil_api")?.parsed_result);
-  const contracts = asRecord(snapshots.get("contratos")?.parsed_result);
   const resources = asRecord(snapshots.get("recursos_recebidos")?.parsed_result);
   const legalEntity = asRecord(snapshots.get("pessoa_juridica")?.parsed_result);
 
@@ -1763,7 +1762,7 @@ function PrintableAnnex({ snapshots }: { snapshots: Map<string, ComponentSnapsho
         </h2>
       </div>
       <BrasilApiAnnex result={brasilApi} />
-      <ContractsAnnex result={contracts} />
+      <ContractsAnnex result={verifiedContracts} />
       <ResourcesAnnex result={resources} />
       <LegalEntityAnnex result={legalEntity} />
       {["ceis", "cnep", "cepim", "acordos_leniencia"].map((component) => (
@@ -1802,7 +1801,7 @@ function Report({ operation }: { operation: OperationDetails }) {
     [operation.components],
   );
   const company = asRecord(snapshots.get("brasil_api")?.parsed_result);
-  const contracts = asRecord(snapshots.get("contratos")?.parsed_result);
+  const verifiedContracts = asRecord(operation.contratos_verificados);
   const resources = asRecord(snapshots.get("recursos_recebidos")?.parsed_result);
   const engine = asRecord(snapshots.get("score_engine")?.parsed_result);
   const rawDimensions = asRecord(engine.dimensoes);
@@ -1942,10 +1941,11 @@ function Report({ operation }: { operation: OperationDetails }) {
               </span>
             </Metric>
             <Metric label="Contratos ativos">
-              {stringValue(contracts.contratos_ativos)}
+              {stringValue(verifiedContracts.contratos_ativos_verificados)}
               <span className="ml-1 text-[11px] font-normal text-muted-foreground">
-                / {formatCurrency(contracts.valor_total_ativo)}
+                / {formatCurrency(verifiedContracts.valor_total_ativo_verificado)}
               </span>
+              {verifiedContracts.nota ? <span className="mt-1 block text-[10px] font-normal text-muted-foreground">{stringValue(verifiedContracts.nota)}</span> : null}
             </Metric>
           </div>
         </section>
@@ -2079,7 +2079,7 @@ function Report({ operation }: { operation: OperationDetails }) {
           })}
         </section>
 
-        <PrintableAnnex snapshots={snapshots} />
+        <PrintableAnnex snapshots={snapshots} verifiedContracts={verifiedContracts} />
 
         {selected ? (
           <section
@@ -2092,7 +2092,7 @@ function Report({ operation }: { operation: OperationDetails }) {
             <h2 className="mb-3 text-xs font-medium text-blue-700">
               {selected.component} — detalhes
             </h2>
-            <ComponentDetails snapshot={selected} />
+            <ComponentDetails snapshot={selected} verifiedContracts={verifiedContracts} />
           </section>
         ) : null}
         <PdfFooter generatedAt={generatedAt} />

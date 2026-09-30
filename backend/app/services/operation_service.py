@@ -228,6 +228,30 @@ class OperationService:
         snapshots = await _safe_execute(snapshots_query)
 
         operation["components"] = snapshots.data
+        operation["contratos_verificados"] = None
+        try:
+            parsed_by_component = {
+                item.get("component"): item.get("parsed_result")
+                for item in (snapshots.data or [])
+                if isinstance(item, dict)
+            }
+            portal = parsed_by_component.get("contratos")
+            comprasnet = parsed_by_component.get("contratos_comprasnet")
+            if not isinstance(portal, dict) or not isinstance(comprasnet, dict):
+                raise ValueError("snapshot_contratos_ou_comprasnet_ausente")
+            from app.services.verified_contracts_service import contratos_verificados
+
+            operation["contratos_verificados"] = contratos_verificados(
+                portal,
+                comprasnet,
+                operation.get("cnpj") or "",
+            )
+        except Exception as exc:
+            logger.warning(
+                "operation.verified_contracts_unavailable",
+                operation_id=operation_id,
+                error=str(exc),
+            )
         try:
             audit_query = supabase.table("audit_trail")\
                 .select("previous_value,new_value,payload,created_at")\
