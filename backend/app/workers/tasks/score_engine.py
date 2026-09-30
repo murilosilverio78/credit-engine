@@ -909,6 +909,9 @@ def score_relacionamento(snapshots: dict[str, Any]) -> dict[str, Any]:
     contratos = _first_snapshot(snapshots, "contratos")
     recursos = _first_snapshot(snapshots, "recursos_recebidos")
     flags: list[str] = []
+    comprasnet_included = int(contratos.get("contratos_comprasnet_incluidos") or 0)
+    if comprasnet_included:
+        flags.append("contrato_comprasnet_incluido_no_relacionamento")
 
     active = _active_contracts(contratos)
     ativos_count = int(contratos.get("contratos_ativos") or len(active) or 0)
@@ -1014,6 +1017,10 @@ def score_relacionamento(snapshots: dict[str, Any]) -> dict[str, Any]:
         f"{total_count} contratos no historico",
         f"Maturidade maxima: {max_duration:.1f} anos" if max_duration is not None else "Maturidade nao validada",
     ]
+    if comprasnet_included:
+        fatores.append(
+            f"{comprasnet_included} contrato(s) verificado(s) no Comprasnet incluido(s)"
+        )
     return _dimension(
         score,
         PESOS_MERITO["relacionamento_governamental"],
@@ -1785,6 +1792,87 @@ def _add_quote_catalog_documents(
         )
 
 
+def _load_comprasnet_contract_for_score(operation_id: str, database) -> dict[str, Any] | None:
+    """Carrega o complemento opcional sem deixar uma falha bloquear o score."""
+    try:
+        result = _execute_db(
+            operation_id,
+            "load_comprasnet_contract_for_score",
+            lambda: database.table("component_snapshots")
+            .select("parsed_result")
+            .eq("operation_id", operation_id)
+            .eq("component", "contratos_comprasnet")
+            .eq("status", "completed")
+            .limit(1)
+            .execute(),
+        )
+        rows = result.data or []
+        if not rows or not isinstance(rows[0], dict):
+            return None
+        parsed = rows[0].get("parsed_result")
+        return parsed if isinstance(parsed, dict) else None
+    except Exception as exc:
+        logger.warning(
+            "score_engine.comprasnet_contract_unavailable",
+            operation_id=operation_id,
+            error=str(exc),
+        )
+        return None
+
+
+def _add_verified_comprasnet_contract_for_score(
+    operation_id: str,
+    cnpj: str,
+    snapshots: dict[str, Any],
+    database,
+) -> None:
+    """Aplica o adicional Comprasnet somente à cópia de snapshots do score."""
+    portal = snapshots.get("contratos")
+    if not isinstance(portal, dict):
+        return
+    comprasnet = _load_comprasnet_contract_for_score(operation_id, database)
+    if not comprasnet:
+        return
+    try:
+        from app.services.verified_contracts_service import contratos_verificados
+
+        verified = contratos_verificados(portal, comprasnet, cnpj)
+        additions = verified.get("adicionais") or []
+        if not additions:
+            return
+        detalhes = [
+            item.copy()
+            for item in (portal.get("contratos_detalhe") or [])
+            if isinstance(item, dict)
+        ]
+        for item in additions:
+            detalhes.append(
+                {
+                    "numero": item.get("numero"),
+                    "unidade_codigo": item.get("uasg"),
+                    "orgao": item.get("orgao"),
+                    "valor_final": item.get("valor_global"),
+                    "ativo": True,
+                    "data_inicio": item.get("vigencia_inicio"),
+                    "data_fim": item.get("vigencia_fim"),
+                }
+            )
+        snapshots["contratos"] = {
+            **portal,
+            "contratos_ativos": verified["contratos_ativos_verificados"],
+            "total_contratos": verified["total_contratos_verificados"],
+            "orgaos_contratantes": verified["orgaos_contratantes_verificados"],
+            "contratos_detalhe": detalhes,
+            "contratos_comprasnet_incluidos": len(additions),
+        }
+    except Exception as exc:
+        logger.warning(
+            "score_engine.verified_comprasnet_contract_unavailable",
+            operation_id=operation_id,
+            error=str(exc),
+        )
+
+
 def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
     from app.core.database import supabase
 
@@ -1831,6 +1919,13 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
             for snap in result.data or []:
                 if snap.get("parsed_result"):
                     snapshots[snap["component"]] = snap["parsed_result"]
+
+            _add_verified_comprasnet_contract_for_score(
+                operation_id,
+                cnpj,
+                snapshots,
+                supabase,
+            )
 
             # O funil não executa contrato_extracao, mas a cotação já traz o
             # catálogo Broadfactor. O complemento é somente em memória: não

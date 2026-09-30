@@ -12,6 +12,7 @@ for key in ("SECRET_KEY", "TWOCAPTCHA_API_KEY", "RESEND_API_KEY"):
 from app.services import operation_service  # noqa: E402
 from app.services.report_pdf_service import contracts_annex, cover_section  # noqa: E402
 from app.services.verified_contracts_service import contratos_verificados  # noqa: E402
+from app.workers.tasks import score_engine  # noqa: E402
 
 
 CNPJ = "14757507000107"
@@ -191,3 +192,110 @@ def test_operation_detail_and_pdf_share_verified_totals(monkeypatch):
 
     assert result["contratos_verificados"]["contratos_ativos_verificados"] == 5
     assert result["contratos_verificados"]["valor_total_ativo_verificado"] == pytest.approx(4_005_994.04)
+
+
+class ScoreQuery:
+    def __init__(self, result):
+        self.result = result
+
+    def select(self, *_args):
+        return self
+
+    def eq(self, *_args):
+        return self
+
+    def limit(self, *_args):
+        return self
+
+    def execute(self):
+        if isinstance(self.result, Exception):
+            raise self.result
+        return SimpleNamespace(data=self.result)
+
+
+class ScoreDatabase:
+    def __init__(self, result):
+        self.result = result
+
+    def table(self, _name):
+        return ScoreQuery(self.result)
+
+
+def relationship_portal() -> dict:
+    result = portal()
+    result["orgaos_contratantes"] = ["IFBA", "MEC", "FNDE"]
+    result["contratos_detalhe"] = [
+        {
+            "numero": "00001/2025",
+            "unidade_codigo": "200344",
+            "ativo": True,
+            "data_inicio": "2025-01-01",
+            "data_fim": "2027-01-01",
+            "orgao": "IFBA",
+        }
+    ]
+    return result
+
+
+def test_score_relationship_counts_verified_contract_in_volume_history_and_factor():
+    snapshots = {"contratos": relationship_portal()}
+    before = score_engine.score_relacionamento(snapshots)
+
+    score_engine._add_verified_comprasnet_contract_for_score(
+        "op-1",
+        CNPJ,
+        snapshots,
+        ScoreDatabase([{"parsed_result": comprasnet()}]),
+    )
+    after = score_engine.score_relacionamento(snapshots)
+
+    assert before["score"] == 75.1
+    assert after["score"] == 81.8
+    assert "contrato_comprasnet_incluido_no_relacionamento" in after["flags"]
+    assert "1 contrato(s) verificado(s) no Comprasnet incluido(s)" in after["fatores"]
+    assert snapshots["contratos"]["contratos_ativos"] == 5
+    assert snapshots["contratos"]["total_contratos"] == 13
+    assert snapshots["contratos"]["contratos_detalhe"][-1]["data_inicio"] == "2026-04-02"
+    assert snapshots["contratos"]["contratos_detalhe"][-1]["data_fim"] == "2027-04-02"
+
+
+def test_score_without_eligible_addition_is_unchanged_and_does_not_mutate_portal_snapshot():
+    portal_snapshot = relationship_portal()
+    snapshots = {"contratos": portal_snapshot}
+    expected = score_engine.score_relacionamento(snapshots)
+
+    score_engine._add_verified_comprasnet_contract_for_score(
+        "op-1",
+        CNPJ,
+        snapshots,
+        ScoreDatabase([{"parsed_result": comprasnet(status_consulta="NAO_VERIFICADO")}]),
+    )
+
+    assert score_engine.score_relacionamento(snapshots) == expected
+    assert snapshots["contratos"] is portal_snapshot
+
+
+def test_score_ignores_duplicate_or_unavailable_comprasnet_contract():
+    snapshots = {"contratos": portal(include_same=True)}
+    expected = score_engine.score_relacionamento(snapshots)
+
+    score_engine._add_verified_comprasnet_contract_for_score(
+        "op-1", CNPJ, snapshots, ScoreDatabase([{"parsed_result": comprasnet()}])
+    )
+    assert score_engine.score_relacionamento(snapshots) == expected
+
+    score_engine._add_verified_comprasnet_contract_for_score(
+        "op-1", CNPJ, snapshots, ScoreDatabase(RuntimeError("database offline"))
+    )
+    assert score_engine.score_relacionamento(snapshots) == expected
+
+
+def test_recalculation_uses_the_same_in_memory_verified_contract_rule():
+    initial = {"contratos": relationship_portal()}
+    recalculated = {"contratos": relationship_portal()}
+    database = ScoreDatabase([{"parsed_result": comprasnet()}])
+
+    score_engine._add_verified_comprasnet_contract_for_score("op-1", CNPJ, initial, database)
+    score_engine._add_verified_comprasnet_contract_for_score("op-1", CNPJ, recalculated, database)
+
+    assert score_engine.score_relacionamento(recalculated) == score_engine.score_relacionamento(initial)
