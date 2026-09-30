@@ -69,7 +69,8 @@ AS $$
           LOWER(p_busca) IN LOWER(COALESCE(o.razao_social, q.nome_fornecedor, ''))
         ) > 0
         OR (
-          REGEXP_REPLACE(p_busca, '\D', '', 'g') <> ''
+          p_busca !~ '[[:alpha:]]'
+          AND LENGTH(REGEXP_REPLACE(p_busca, '\D', '', 'g')) >= 3
           AND POSITION(
             LOWER(REGEXP_REPLACE(p_busca, '\D', '', 'g')) IN LOWER(q.cnpj)
           ) > 0
@@ -187,7 +188,8 @@ AS $$
       OR BTRIM(p_busca) = ''
       OR POSITION(LOWER(p_busca) IN LOWER(COALESCE(o.razao_social, ''))) > 0
       OR (
-        REGEXP_REPLACE(p_busca, '\D', '', 'g') <> ''
+        p_busca !~ '[[:alpha:]]'
+        AND LENGTH(REGEXP_REPLACE(p_busca, '\D', '', 'g')) >= 3
         AND POSITION(
           LOWER(REGEXP_REPLACE(p_busca, '\D', '', 'g')) IN LOWER(o.cnpj)
         ) > 0
