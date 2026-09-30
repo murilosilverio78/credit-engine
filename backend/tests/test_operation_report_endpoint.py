@@ -125,6 +125,19 @@ def test_qualified_quote_without_score_schedules_report_and_audits(monkeypatch):
     assert audit_entries[0]["payload"] == {"cotacao_id": "C-1", "valor_operacao": None, "valor_origem": None}
 
 
+def test_operation_detail_returns_report_operation_value(monkeypatch):
+    from app.services.operation_service import OperationService
+
+    async def get_with_snapshots(_self, _operation_id):
+        return {"id": "op-1", "valor_operacao_relatorio": 300_000}
+
+    monkeypatch.setattr(OperationService, "get_with_snapshots", get_with_snapshots)
+
+    result = asyncio.run(operations.get_operation("op-1"))
+
+    assert result["valor_operacao_relatorio"] == 300_000
+
+
 @pytest.mark.parametrize("valor", [99_999, 200_001])
 def test_report_operation_amount_outside_allowed_range_returns_422(monkeypatch, valor):
     monkeypatch.setattr(operations, "supabase", Supabase())

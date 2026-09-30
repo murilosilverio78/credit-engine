@@ -79,6 +79,7 @@ def test_compute_taxa_solves_monthly_cash_flow():
     assert len(result["fluxo_caixa"]) == 7
     assert abs(result["detalhes"]["residual_fluxo_rs"]) < 1
     assert result["detalhes"]["metodologia"] == "fluxo_caixa_bissecao"
+    assert result["detalhes"]["valor_operacao_rs"] == 1_000_000
 
 
 def test_compute_taxa_increases_with_riskier_rating():

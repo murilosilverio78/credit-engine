@@ -90,6 +90,17 @@ class PricingSupabase:
             500_000,
             6,
         ),
+        (
+            {
+                "valor_solicitado": 500_000,
+                "valor_enquadrado": 400_000,
+                "valor_operacao_relatorio": 300_000,
+                "prazo_dias": None,
+                "prazo_final_meses": 12,
+            },
+            300_000,
+            12,
+        ),
     ],
 )
 def test_completion_prices_effective_fields_with_legacy_fallback(
@@ -103,7 +114,13 @@ def test_completion_prices_effective_fields_with_legacy_fallback(
 
     def fake_compute_taxa(rating, valor, prazo_meses, pd_multiplier=1.0):
         calls.append((rating, valor, prazo_meses, pd_multiplier))
-        return {"taxa_sugerida_am": 0.025}
+        return {
+            "taxa_sugerida_am": 0.025,
+            "detalhes": {
+                "valor_operacao_rs": valor,
+                "total_receita_rs": valor * 0.1,
+            },
+        }
 
     monkeypatch.setattr(orchestrator, "supabase", database)
     monkeypatch.setattr(
@@ -115,6 +132,8 @@ def test_completion_prices_effective_fields_with_legacy_fallback(
 
     assert calls == [("C", expected_value, expected_term, 1.08)]
     assert database.completed_payload["taxa_sugerida"] == 0.025
+    assert database.completed_payload["taxa_breakdown"]["detalhes"]["valor_operacao_rs"] == expected_value
+    assert database.completed_payload["taxa_breakdown"]["detalhes"]["total_receita_rs"] == expected_value * 0.1
 
 
 def test_completion_without_score_snapshot_is_recoverable(monkeypatch):

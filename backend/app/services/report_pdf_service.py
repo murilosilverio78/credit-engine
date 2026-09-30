@@ -62,6 +62,17 @@ def optional_money(value: Any) -> str:
     return "-" if value is None or value == "" else money(value)
 
 
+def pricing_value(operation: dict[str, Any]) -> Any:
+    """Mesma precedência usada pelo orquestrador ao calcular a taxa."""
+    return (
+        operation.get("valor_operacao_relatorio")
+        if operation.get("valor_operacao_relatorio") not in (None, "")
+        else operation.get("valor_enquadrado")
+        if operation.get("valor_enquadrado") not in (None, "")
+        else operation.get("valor_solicitado")
+    )
+
+
 def number(value: Any, digits: int = 1) -> str:
     try:
         number_value = float(value or 0)
@@ -343,16 +354,22 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
         else pct_from_fraction(operation.get("taxa_sugerida"), 2)
     )
 
-    conference = detail_grid(
-        [
+    conference_rows = [
             ("Valor solicitado", optional_money(operation.get("valor_solicitado"))),
             ("Valor enquadrado", optional_money(operation.get("valor_enquadrado"))),
             ("Saldo vincendo", optional_money(balance)),
             ("Prazo final", term),
             ("Taxa sugerida", suggested_rate),
-        ],
-        5,
-    )
+    ]
+    if operation.get("valor_operacao_relatorio") not in (None, ""):
+        conference_rows.insert(
+            0,
+            (
+                "Valor da operação (precificação)",
+                f"{money(operation.get('valor_operacao_relatorio'))} · cotação: {optional_money(operation.get('valor_solicitado'))}",
+            ),
+        )
+    conference = detail_grid(conference_rows, 3 if len(conference_rows) > 5 else 5)
     concentration_block = ""
     if concentration:
         top_share = as_float(concentration.get("top_participacao"))
@@ -515,6 +532,7 @@ def pricing_section(operation: dict[str, Any]) -> str:
     return f"""
     <section class="page-section avoid-break">
       <h1>5. Detalhamento da taxa</h1>
+      <p class="note">Calculado sobre o valor da operação: {money(pricing_value(operation))}</p>
       <div class="split">
         <div>{table(["Componente mensal", "Taxa"], monthly_rows)}</div>
         <div>{table(["Valor estimado", "R$"], value_rows)}</div>

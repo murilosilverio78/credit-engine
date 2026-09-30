@@ -291,6 +291,7 @@ def compute_taxa(
         "fluxo_caixa": flows,
         "detalhes": {
             "metodologia": "fluxo_caixa_bissecao",
+            "valor_operacao_rs": valor,
             "prazo_meses": prazo_meses,
             "carteira_inicial_rs": derived["carteira_inicial"],
             "seguro_rs": derived["seguro_rs"],

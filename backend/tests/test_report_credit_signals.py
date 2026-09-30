@@ -1,4 +1,4 @@
-from app.services.report_pdf_service import cover_section
+from app.services.report_pdf_service import cover_section, pricing_section
 
 
 def test_pdf_cover_shows_operation_conference_and_concentration():
@@ -54,6 +54,38 @@ def test_pdf_cover_falls_back_to_legacy_contract_balance_and_term():
 
     assert "R$ 300.000,00" in result
     assert "2,0 meses" in result
+
+
+def test_pdf_uses_report_operation_value_and_preserves_quote_value():
+    operation = {
+        "cnpj": "31822605000191",
+        "valor_solicitado": 500_000,
+        "valor_enquadrado": 450_000,
+        "valor_operacao_relatorio": 300_000,
+        "taxa_breakdown": {
+            "detalhes": {
+                "valor_operacao_rs": 300_000,
+                "total_receita_rs": 42_000,
+            }
+        },
+    }
+
+    cover = cover_section(operation, {}, {})
+    pricing = pricing_section(operation)
+
+    assert "Valor da operação (precificação)" in cover
+    assert "R$ 300.000,00 · cotação: R$ 500.000,00" in cover
+    assert "Calculado sobre o valor da operação: R$ 300.000,00" in pricing
+    assert "R$ 42.000,00" in pricing
+
+
+def test_pdf_without_report_operation_value_keeps_existing_conference():
+    operation = {"valor_solicitado": 500_000, "valor_enquadrado": 450_000}
+
+    result = cover_section(operation, {}, {})
+
+    assert "Valor da operação (precificação)" not in result
+    assert "Valor solicitado" in result
 
 
 def test_pdf_labels_default_term_when_contract_was_not_verified():
