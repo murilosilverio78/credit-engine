@@ -36,10 +36,14 @@ def emit_cadastro_regularidade(snapshots: dict[str, Any], *, fingerprint: str, o
         result.append(finding("cadastro_inativo", Escopo.CEDENTE, not active, component="brasil_api" if brasil else "pessoa_juridica", path="situacao_cadastral", fingerprint=fingerprint, state=Estado.NEGATIVO_CONFIRMADO if active else Estado.CONFIRMADO))
     sanction_components = ("ceis", "cnep", "cepim", "ceaf")
     sanction_sources = ("pessoa_juridica", "ceis", "cnep", "cepim", "acordos_leniencia")
+    from app.workers.tasks.score_engine import _component_list, _has_records, _is_active_record
     sanction_details = []
     for component in sanction_components:
         item = snapshots.get(component)
-        if isinstance(item, dict) and (item.get("possui_sancao") or item.get("total_registros")):
+        if isinstance(item, dict) and _has_records(item, "possui_sancao", "total_registros"):
+            records = _component_list(item)
+            if records and not any(isinstance(record, dict) and _is_active_record(record) for record in records):
+                continue
             sanction_details.append({"componente": component, "registros": item.get("registros") or []})
     if pessoa.get("possui_sancao") or any(pessoa.get(f"sancionado_{name}") for name in ("ceis", "cnep", "cepim", "ceaf")):
         sanction_details.append({"componente": "pessoa_juridica", "flags": True})
@@ -51,7 +55,8 @@ def emit_cadastro_regularidade(snapshots: dict[str, Any], *, fingerprint: str, o
     elif statuses.get("acordos_leniencia", "completed") != "completed":
         result.append(unverified("acordo_leniencia_ativo", Escopo.CEDENTE, component="acordos_leniencia", path="acordos", fingerprint=fingerprint))
     else:
-        active = bool(acordos.get("possui_acordo") or acordos.get("total_acordos"))
+        records = _component_list(acordos)
+        active = _has_records(acordos, "possui_acordo", "total_registros", "total_acordos") and (not records or any(isinstance(record, dict) and _is_active_record(record) for record in records))
         result.append(finding("acordo_leniencia_ativo", Escopo.CEDENTE, active, component="acordos_leniencia", path="possui_acordo", fingerprint=fingerprint, state=Estado.CONFIRMADO if active else Estado.NEGATIVO_CONFIRMADO))
     for component, code in (("cnd_federal", "certidao_cnd_federal_pendente"), ("cndt_tst", "certidao_cndt_pendente"), ("fgts", "certidao_fgts_pendente")):
         cert = snapshots.get(component)
