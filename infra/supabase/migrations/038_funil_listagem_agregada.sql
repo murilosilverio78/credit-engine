@@ -65,10 +65,14 @@ AS $$
       AND (
         p_busca IS NULL
         OR BTRIM(p_busca) = ''
-        OR COALESCE(o.razao_social, q.nome_fornecedor, '') ILIKE '%' || p_busca || '%'
+        OR POSITION(
+          LOWER(p_busca) IN LOWER(COALESCE(o.razao_social, q.nome_fornecedor, ''))
+        ) > 0
         OR (
           REGEXP_REPLACE(p_busca, '\D', '', 'g') <> ''
-          AND q.cnpj ILIKE '%' || REGEXP_REPLACE(p_busca, '\D', '', 'g') || '%'
+          AND POSITION(
+            LOWER(REGEXP_REPLACE(p_busca, '\D', '', 'g')) IN LOWER(q.cnpj)
+          ) > 0
         )
       )
   ), com_filtros AS (
@@ -140,11 +144,70 @@ AS $$
     WHERE cs.component = 'score_engine'
       AND cs.status = 'completed'
   )
-  SELECT COUNT(*)::BIGINT, e.valores, r.quantidade
-  FROM cotacoes c
+  SELECT total.quantidade, e.valores, r.quantidade
+  FROM (SELECT COUNT(*)::BIGINT AS quantidade FROM cotacoes) total
   CROSS JOIN estagios_contados e
-  CROSS JOIN relatorios r
-  GROUP BY e.valores, r.quantidade;
+  CROSS JOIN relatorios r;
 $$;
+
+CREATE OR REPLACE FUNCTION listar_analises_manuais(
+  p_incluir_testes BOOLEAN DEFAULT FALSE,
+  p_cnpj TEXT DEFAULT NULL,
+  p_busca TEXT DEFAULT NULL,
+  p_limit INTEGER DEFAULT 20,
+  p_offset INTEGER DEFAULT 0
+)
+RETURNS TABLE (
+  id UUID,
+  cnpj VARCHAR,
+  razao_social VARCHAR,
+  status TEXT,
+  rating TEXT,
+  score NUMERIC,
+  taxa_sugerida NUMERIC,
+  valor_solicitado NUMERIC,
+  created_at TIMESTAMPTZ,
+  source VARCHAR,
+  ambiente VARCHAR,
+  total_count BIGINT
+)
+LANGUAGE SQL
+STABLE
+AS $$
+  SELECT
+    o.id, o.cnpj, o.razao_social, o.status::TEXT, o.rating::TEXT, o.score,
+    o.taxa_sugerida, o.valor_solicitado, o.created_at, o.source, o.ambiente,
+    COUNT(*) OVER ()
+  FROM operations o
+  WHERE o.source = 'admin_ui'
+    AND (p_incluir_testes OR o.ambiente = 'PRODUCAO')
+    AND (p_cnpj IS NULL OR o.cnpj = p_cnpj)
+    AND (
+      p_busca IS NULL
+      OR BTRIM(p_busca) = ''
+      OR POSITION(LOWER(p_busca) IN LOWER(COALESCE(o.razao_social, ''))) > 0
+      OR (
+        REGEXP_REPLACE(p_busca, '\D', '', 'g') <> ''
+        AND POSITION(
+          LOWER(REGEXP_REPLACE(p_busca, '\D', '', 'g')) IN LOWER(o.cnpj)
+        ) > 0
+      )
+    )
+  ORDER BY o.created_at DESC
+  LIMIT GREATEST(p_limit, 1)
+  OFFSET GREATEST(p_offset, 0);
+$$;
+
+REVOKE ALL ON FUNCTION listar_funil_operacoes(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER, INTEGER)
+  FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION resumo_funil_operacoes()
+  FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION listar_analises_manuais(BOOLEAN, TEXT, TEXT, INTEGER, INTEGER)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION listar_funil_operacoes(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER, INTEGER)
+  TO service_role;
+GRANT EXECUTE ON FUNCTION resumo_funil_operacoes() TO service_role;
+GRANT EXECUTE ON FUNCTION listar_analises_manuais(BOOLEAN, TEXT, TEXT, INTEGER, INTEGER)
+  TO service_role;
 
 NOTIFY pgrst, 'reload schema';

@@ -438,31 +438,15 @@ class OperationService:
         offset: int = 0,
     ) -> dict:
         """Lista análises iniciadas pela tela administrativa, fora do funil."""
-        query = (
-            supabase.table("operations")
-            .select(
-                "id,cnpj,razao_social,status,rating,score,taxa_sugerida,"
-                "valor_solicitado,created_at,source,ambiente",
-                count="exact",
-            )
-            .eq("source", "admin_ui")
-            .order("created_at", desc=True)
-            .range(offset, offset + limit - 1)
-        )
-        if not incluir_testes:
-            query = query.eq("ambiente", "PRODUCAO")
-        if cnpj:
-            query = query.eq("cnpj", cnpj)
-        if busca:
-            normalized_cnpj = "".join(character for character in busca if character.isdigit())
-            term = normalized_cnpj if normalized_cnpj else busca.strip()
-            if term:
-                query = query.or_(
-                    f"cnpj.ilike.*{term}*,razao_social.ilike.*{term}*"
-                )
-        result = query.execute()
+        result = supabase.rpc("listar_analises_manuais", {
+            "p_incluir_testes": incluir_testes,
+            "p_cnpj": cnpj,
+            "p_busca": busca,
+            "p_limit": limit,
+            "p_offset": offset,
+        }).execute()
         items = result.data or []
-        total = result.count if result.count is not None else len(items)
+        total = int(items[0].get("total_count") or 0) if items else 0
         return {"items": items, "total": total, "limit": limit, "offset": offset}
 
     async def update_status(self, operation_id: str, status: str, **kwargs):

@@ -190,13 +190,13 @@ def test_list_funil_forwards_server_filters_and_total_from_filtered_page(monkeyp
 
 
 def test_list_manual_isolated_from_funnel_and_can_include_tests(monkeypatch):
-    database = Supabase({
-        "operations": [
-            {"id": "manual-prod", "source": "admin_ui", "ambiente": "PRODUCAO", "cnpj": "1"},
-            {"id": "manual-test", "source": "admin_ui", "ambiente": "TESTE", "cnpj": "2"},
-            {"id": "funil", "source": "broadfactor_ingestao", "ambiente": "PRODUCAO", "cnpj": "3"},
-        ],
-    })
+    def manual_response(params):
+        rows = [{"id": "manual-prod", "source": "admin_ui", "ambiente": "PRODUCAO", "cnpj": "1"}]
+        if params["p_incluir_testes"]:
+            rows.append({"id": "manual-test", "source": "admin_ui", "ambiente": "TESTE", "cnpj": "2"})
+        return [{**row, "total_count": len(rows)} for row in rows]
+
+    database = Supabase({}, {"listar_analises_manuais": manual_response})
     monkeypatch.setattr(service, "supabase", database)
 
     production = asyncio.run(service.OperationService().list_manual())
@@ -207,16 +207,20 @@ def test_list_manual_isolated_from_funnel_and_can_include_tests(monkeypatch):
 
 
 def test_list_manual_searches_before_pagination_and_counts_filtered_rows(monkeypatch):
-    database = Supabase({"operations": [
-        {"id": "first", "source": "admin_ui", "ambiente": "PRODUCAO", "cnpj": "1", "razao_social": "Primeira"},
-        {"id": "later", "source": "admin_ui", "ambiente": "PRODUCAO", "cnpj": "2", "razao_social": "Alvo fora da primeira página"},
-    ]})
+    database = Supabase({}, {"listar_analises_manuais": [{
+        "id": "later", "source": "admin_ui", "ambiente": "PRODUCAO",
+        "cnpj": "2", "razao_social": "Alvo fora da primeira página", "total_count": 1,
+    }]})
     monkeypatch.setattr(service, "supabase", database)
 
     result = asyncio.run(service.OperationService().list_manual(busca="Alvo", limit=1, offset=0))
 
     assert result["total"] == 1
     assert [item["id"] for item in result["items"]] == ["later"]
+    assert database.rpc_calls[0] == ("listar_analises_manuais", {
+        "p_incluir_testes": False, "p_cnpj": None, "p_busca": "Alvo",
+        "p_limit": 1, "p_offset": 0,
+    })
 
 
 def test_funnel_summary_uses_database_aggregation_for_large_funnel(monkeypatch):
@@ -235,6 +239,21 @@ def test_funnel_summary_uses_database_aggregation_for_large_funnel(monkeypatch):
         "relatorios_gerados": 1_200,
     }
     assert database.rpc_calls == [("resumo_funil_operacoes", None)]
+
+
+def test_funnel_summary_returns_zeroes_when_there_are_no_quotes(monkeypatch):
+    database = Supabase({}, {"resumo_funil_operacoes": [{
+        "total_fila": 0,
+        "estagios": {},
+        "relatorios_gerados": 0,
+    }]})
+    monkeypatch.setattr(service, "supabase", database)
+
+    assert service.OperationService()._funnel_summary() == {
+        "total_fila": 0,
+        "estagios": {},
+        "relatorios_gerados": 0,
+    }
 
 
 def test_funnel_summary_returns_null_fields_when_database_fails(monkeypatch):
