@@ -34,13 +34,19 @@ def emit_sacado_orgao(snapshots: dict[str, Any], *, fingerprint: str, operation:
         ])
         orgaos = {str(org) for org in (contracts.get("orgaos_contratantes") or []) if org}
         result.append(finding("orgaos_distintos_qtd", Escopo.SACADO, len(orgaos), component="contratos", path="orgaos_contratantes", fingerprint=fingerprint))
+        from app.workers.tasks.score_engine import _active_contracts, _contract_duration_years
+        active_contracts = _active_contracts(contracts)
+        ativos = int(contracts.get("contratos_ativos") or len(active_contracts) or 0)
+        total = int(contracts.get("total_contratos") or len(contracts.get("contratos_detalhe") or []) or ativos)
+        result[0] = finding("contratos_ativos_qtd", Escopo.CEDENTE, ativos, component="contratos", path="contratos_ativos", fingerprint=fingerprint)
+        result[1] = finding("contratos_total_qtd", Escopo.CEDENTE, total, component="contratos", path="total_contratos", fingerprint=fingerprint)
         durations = []
-        for contract in contracts.get("contratos_detalhe") or []:
+        for contract in active_contracts:
             if not isinstance(contract, dict):
                 continue
-            start, end = _date(contract.get("data_inicio") or contract.get("inicio_vigencia")), _date(contract.get("data_fim") or contract.get("fim_vigencia"))
-            if start and end:
-                durations.append(round((end - start).days / 365.25, 3))
+            duration = _contract_duration_years(contract)
+            if duration is not None:
+                durations.append(duration)
         if durations:
             result.append(finding("maturidade_max_anos", Escopo.CONTRATO, max(durations), component="contratos", path="contratos_detalhe", fingerprint=fingerprint))
         else:

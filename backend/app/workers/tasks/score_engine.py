@@ -1972,7 +1972,7 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
             from app.core.config import settings
             if settings.FINDINGS_EMIT_ENABLED:
                 from app.services.findings.emitter import emit_findings
-                emit_findings(operation_id, "porte", {**snapshots, "score_engine": result})
+                emit_findings(operation_id, "porte", overrides={"score_engine": result})
         except Exception as exc:
             logger.warning("findings.score_dual_write_failed", operation_id=operation_id, error=str(exc))
 

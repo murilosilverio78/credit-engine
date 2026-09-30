@@ -25,21 +25,21 @@ def test_reputation_and_porte_adapter_confidence_rules():
 
 
 def test_emitter_calls_rpc_once_and_swallows_rpc_failure(monkeypatch):
-    db = Postgrest({"operations": [{"id": "op", "ambiente": "TESTE", "valor_enquadrado": 100}]})
+    db = Postgrest({"operations": [{"id": "op", "ambiente": "TESTE", "valor_enquadrado": 100}], "component_snapshots": [{"operation_id": "op", "component": "contrato_extracao", "status": "completed", "parsed_result": {"regime_conta_vinculada": "CONTA_DEPOSITO_VINCULADA", "flags": []}}], "cotacoes_broadfactor": []})
     catalog = {"conta_vinculada_regime:1": {"codigo": "conta_vinculada_regime", "versao": 1, "escopo": "CONTRATO", "tipo_valor": "ENUM", "ativo": True}}
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: catalog)
-    emitter.emit_findings("op", "documentos", {"contrato_extracao": {"regime_conta_vinculada": "CONTA_DEPOSITO_VINCULADA", "flags": []}}, database=db)
+    emitter.emit_findings("op", "documentos", database=db)
     assert len(db.rpc_calls) == 1
     db.rpc = lambda *_args: (_ for _ in ()).throw(RuntimeError("offline"))
-    assert emitter.emit_findings("op", "documentos", {"contrato_extracao": {}}, database=db) is None
+    assert emitter.emit_findings("op", "documentos", database=db) is None
 
 
 def test_emitter_skips_unknown_code_and_unavailable_catalog(monkeypatch):
-    db = Postgrest({"operations": [{"id": "op", "ambiente": "TESTE", "valor_enquadrado": 100}]})
+    db = Postgrest({"operations": [{"id": "op", "ambiente": "TESTE", "valor_enquadrado": 100}], "component_snapshots": [{"operation_id": "op", "component": "contrato_extracao", "status": "completed", "parsed_result": {"regime_conta_vinculada": "CONTA_DEPOSITO_VINCULADA", "flags": []}}], "cotacoes_broadfactor": []})
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: {})
-    emitter.emit_findings("op", "documentos", {"contrato_extracao": {"regime_conta_vinculada": "CONTA_DEPOSITO_VINCULADA", "flags": []}}, database=db)
+    emitter.emit_findings("op", "documentos", database=db)
     assert db.rpc_calls[0][1]["p_achados"] == []
     db.rpc_calls.clear()
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: None)
-    emitter.emit_findings("op", "documentos", {}, database=db)
+    emitter.emit_findings("op", "documentos", database=db)
     assert db.rpc_calls == []

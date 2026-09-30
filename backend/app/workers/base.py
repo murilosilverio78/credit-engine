@@ -171,7 +171,7 @@ def _dual_write_findings(operation_id: str, component: str, result: object) -> N
         }
         especialista = specialists.get(component)
         if especialista:
-            emit_findings(operation_id, especialista, {component: result})
+            emit_findings(operation_id, especialista)
     except Exception as exc:
         logger.warning("findings.component_dual_write_failed", operation_id=operation_id, component=component, error=str(exc))
 

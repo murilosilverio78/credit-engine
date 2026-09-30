@@ -25,6 +25,7 @@ def _types(value: Any) -> set[str]:
 
 def emit_cadastro_regularidade(snapshots: dict[str, Any], *, fingerprint: str, operation: dict[str, Any] | None = None):
     result = []
+    statuses = snapshots.get("__statuses__") or {}
     brasil = snapshots.get("brasil_api") or {}
     pessoa = snapshots.get("pessoa_juridica") or {}
     situacao = brasil.get("situacao_cadastral") or pessoa.get("situacao_cadastral") or pessoa.get("situacao")
@@ -34,6 +35,7 @@ def emit_cadastro_regularidade(snapshots: dict[str, Any], *, fingerprint: str, o
         active = str(situacao).strip().upper() == "ATIVA"
         result.append(finding("cadastro_inativo", Escopo.CEDENTE, not active, component="brasil_api" if brasil else "pessoa_juridica", path="situacao_cadastral", fingerprint=fingerprint, state=Estado.NEGATIVO_CONFIRMADO if active else Estado.CONFIRMADO))
     sanction_components = ("ceis", "cnep", "cepim", "ceaf")
+    sanction_sources = ("pessoa_juridica", "ceis", "cnep", "cepim", "acordos_leniencia")
     sanction_details = []
     for component in sanction_components:
         item = snapshots.get(component)
@@ -41,9 +43,12 @@ def emit_cadastro_regularidade(snapshots: dict[str, Any], *, fingerprint: str, o
             sanction_details.append({"componente": component, "registros": item.get("registros") or []})
     if pessoa.get("possui_sancao") or any(pessoa.get(f"sancionado_{name}") for name in ("ceis", "cnep", "cepim", "ceaf")):
         sanction_details.append({"componente": "pessoa_juridica", "flags": True})
-    result.append(finding("sancao_ativa", Escopo.CEDENTE, sanction_details, component="pessoa_juridica", path="flags_sancao", fingerprint=fingerprint, state=Estado.CONFIRMADO if sanction_details else Estado.NEGATIVO_CONFIRMADO))
+    sources_ready = all(statuses.get(source, "completed") == "completed" for source in sanction_sources) and not pessoa.get("erro")
+    result.append(unverified("sancao_ativa", Escopo.CEDENTE, component="pessoa_juridica", path="flags_sancao", fingerprint=fingerprint) if not sources_ready else finding("sancao_ativa", Escopo.CEDENTE, sanction_details, component="pessoa_juridica", path="flags_sancao", fingerprint=fingerprint, state=Estado.CONFIRMADO if sanction_details else Estado.NEGATIVO_CONFIRMADO))
     acordos = snapshots.get("acordos_leniencia")
     if not isinstance(acordos, dict):
+        result.append(unverified("acordo_leniencia_ativo", Escopo.CEDENTE, component="acordos_leniencia", path="acordos", fingerprint=fingerprint))
+    elif statuses.get("acordos_leniencia", "completed") != "completed":
         result.append(unverified("acordo_leniencia_ativo", Escopo.CEDENTE, component="acordos_leniencia", path="acordos", fingerprint=fingerprint))
     else:
         active = bool(acordos.get("possui_acordo") or acordos.get("total_acordos"))
@@ -53,13 +58,14 @@ def emit_cadastro_regularidade(snapshots: dict[str, Any], *, fingerprint: str, o
         if not isinstance(cert, dict):
             result.append(unverified(code, Escopo.CEDENTE, component=component, path="parsed_result", fingerprint=fingerprint))
             continue
-        valid_until = cert.get("data_validade") or cert.get("validade")
-        valid = cert.get("valida") is True
-        pending = not valid
-        result.append(finding(code, Escopo.CEDENTE, {"pendente": pending, "validade": valid_until}, component=component, path="valida", fingerprint=fingerprint, state=Estado.CONFIRMADO if pending else Estado.NEGATIVO_CONFIRMADO))
+        from app.workers.tasks.score_engine import _certidao_estado
+        estado, fator, _flags = _certidao_estado(cert)
+        pending = estado != "negativa"
+        result.append(finding(code, Escopo.CEDENTE, {"estado": estado, "validade": cert.get("data_validade") or cert.get("validade"), "fator": fator}, component=component, path="valida", fingerprint=fingerprint, state=Estado.CONFIRMADO if pending else Estado.NEGATIVO_CONFIRMADO))
     document_types = _types(snapshots)
     has_balance = bool(document_types & BALANCO_DOCUMENT_TYPES)
-    result.append(finding("balanco_ausente", Escopo.CEDENTE, not has_balance, component="catalogo_broadfactor", path="documentos_broadfactor", fingerprint=fingerprint, state=Estado.NEGATIVO_CONFIRMADO if has_balance else Estado.NAO_VERIFICADO, confidence=Confianca.ALTA if has_balance else Confianca.BAIXA))
+    complete_sources = all(statuses.get(source, "completed") == "completed" for source in sanction_sources)
+    result.append(finding("balanco_ausente", Escopo.CEDENTE, not has_balance, component="catalogo_broadfactor", path="documentos_broadfactor", fingerprint=fingerprint, state=Estado.NEGATIVO_CONFIRMADO if has_balance else Estado.CONFIRMADO, confidence=Confianca.ALTA) if complete_sources else unverified("balanco_ausente", Escopo.CEDENTE, component="catalogo_broadfactor", path="documentos_broadfactor", fingerprint=fingerprint))
     if has_balance:
         result.append(finding("balanco_catalogado_broadfactor", Escopo.CEDENTE, {"tipos": sorted(document_types & BALANCO_DOCUMENT_TYPES)}, component="catalogo_broadfactor", path="documentos_broadfactor", fingerprint=fingerprint))
     for code, field in (("capital_social_rs", "capital_social"), ("porte_cadastral", "porte")):
@@ -70,7 +76,9 @@ def emit_cadastro_regularidade(snapshots: dict[str, Any], *, fingerprint: str, o
         try:
             opened = datetime.fromisoformat(str(brasil["data_abertura"]).replace("Z", "+00:00")).date()
             age = round((datetime.now(timezone.utc).date() - opened).days / 365.25, 2)
-            result.append(finding("idade_empresa_anos", Escopo.CEDENTE, age, component="brasil_api", path="data_abertura", fingerprint=fingerprint))
+            item = finding("idade_empresa_anos", Escopo.CEDENTE, age, component="brasil_api", path="data_abertura", fingerprint=fingerprint)
+            item.evidencia[0]["data_referencia"] = datetime.now(timezone.utc).date().isoformat()
+            result.append(item)
         except ValueError:
             pass
     if "qsa" in brasil:
