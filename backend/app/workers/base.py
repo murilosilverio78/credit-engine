@@ -153,6 +153,29 @@ def _dual_write_cliente(
         )
 
 
+def _dual_write_findings(operation_id: str, component: str, result: object) -> None:
+    """Shadow-write findings without ever changing the component outcome."""
+    try:
+        from app.core.config import settings
+        if not settings.FINDINGS_EMIT_ENABLED:
+            return
+        from app.services.findings.emitter import emit_findings
+        specialists = {
+            "brasil_api": "cadastro_regularidade", "pessoa_juridica": "cadastro_regularidade",
+            "ceis": "cadastro_regularidade", "cnep": "cadastro_regularidade",
+            "cepim": "cadastro_regularidade", "acordos_leniencia": "cadastro_regularidade",
+            "cnd_federal": "cadastro_regularidade", "cndt_tst": "cadastro_regularidade",
+            "fgts": "cadastro_regularidade", "contratos": "sacado_orgao",
+            "recursos_recebidos": "sacado_orgao", "contratos_comprasnet": "sacado_orgao",
+            "contrato_extracao": "documentos", "web_research": "reputacional",
+        }
+        especialista = specialists.get(component)
+        if especialista:
+            emit_findings(operation_id, especialista, {component: result})
+    except Exception as exc:
+        logger.warning("findings.component_dual_write_failed", operation_id=operation_id, component=component, error=str(exc))
+
+
 class BaseComponentTask:
     """
     Herdar desta classe garante que todo componente:
@@ -293,6 +316,7 @@ class BaseComponentTask:
                 result=result,
                 duration_ms=duration_ms,
             )
+            _dual_write_findings(operation_id, component, result)
 
             audit_svc.log(
                 operation_id,

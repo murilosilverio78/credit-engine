@@ -1966,6 +1966,16 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
 
     result = consolidar_score(cnpj, snapshots, operacao, operation_id=operation_id)
 
+    # Shadow-only: finding emission is feature-flagged and cannot affect score output.
+    if operation_id:
+        try:
+            from app.core.config import settings
+            if settings.FINDINGS_EMIT_ENABLED:
+                from app.services.findings.emitter import emit_findings
+                emit_findings(operation_id, "porte", {**snapshots, "score_engine": result})
+        except Exception as exc:
+            logger.warning("findings.score_dual_write_failed", operation_id=operation_id, error=str(exc))
+
     if operation_id:
         for component, dim in COMPONENT_DIMENSION_MAP.items():
             try:

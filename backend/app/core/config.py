@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     INGESTAO_MAX_PARALELO: int = 2
     SHUTDOWN_GRACE_SECONDS: int = 90
     WATCHDOG_MAX_RETOMADAS: int = 1
+    FINDINGS_EMIT_ENABLED: bool = False
 
     # TLS verification — False apenas em .env local Windows
     HTTPX_VERIFY_SSL: bool = True

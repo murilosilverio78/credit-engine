@@ -1,11 +1,10 @@
-from types import SimpleNamespace
-
 from app.services.findings import emitter
 from app.services.findings.adapters.documentos import emit_documentos
 from app.services.findings.adapters.porte import emit_porte
 from app.services.findings.adapters.reputacional import emit_reputacional
 from app.services.findings.hashing import entrada_hash
 from app.services.findings.schemas import Escopo, Estado
+from tests.fakes.postgrest import Postgrest
 
 
 def test_hash_is_stable_regardless_of_key_order():
@@ -25,41 +24,22 @@ def test_reputation_and_porte_adapter_confidence_rules():
     assert porte[0].confianca == "MEDIA"
 
 
-class Query:
-    def __init__(self, rows): self.rows = rows
-    def select(self, *_args): return self
-    def eq(self, *_args): return self
-    def limit(self, *_args): return self
-    def execute(self): return SimpleNamespace(data=self.rows)
-
-
-class Db:
-    def __init__(self): self.calls = []
-    def table(self, name):
-        if name == "operations": return Query([{"ambiente": "TESTE", "valor_enquadrado": 100}])
-        if name == "component_snapshots": return Query([])
-        return Query([])
-    def rpc(self, name, params):
-        self.calls.append((name, params))
-        return SimpleNamespace(execute=lambda: SimpleNamespace(data=[{"inserido": True}]))
-
-
 def test_emitter_calls_rpc_once_and_swallows_rpc_failure(monkeypatch):
-    db = Db()
+    db = Postgrest({"operations": [{"id": "op", "ambiente": "TESTE", "valor_enquadrado": 100}]})
     catalog = {"conta_vinculada_regime:1": {"codigo": "conta_vinculada_regime", "versao": 1, "escopo": "CONTRATO", "tipo_valor": "ENUM", "ativo": True}}
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: catalog)
     emitter.emit_findings("op", "documentos", {"contrato_extracao": {"regime_conta_vinculada": "CONTA_DEPOSITO_VINCULADA", "flags": []}}, database=db)
-    assert len(db.calls) == 1
+    assert len(db.rpc_calls) == 1
     db.rpc = lambda *_args: (_ for _ in ()).throw(RuntimeError("offline"))
     assert emitter.emit_findings("op", "documentos", {"contrato_extracao": {}}, database=db) is None
 
 
 def test_emitter_skips_unknown_code_and_unavailable_catalog(monkeypatch):
-    db = Db()
+    db = Postgrest({"operations": [{"id": "op", "ambiente": "TESTE", "valor_enquadrado": 100}]})
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: {})
     emitter.emit_findings("op", "documentos", {"contrato_extracao": {"regime_conta_vinculada": "CONTA_DEPOSITO_VINCULADA", "flags": []}}, database=db)
-    assert db.calls[0][1]["p_achados"] == []
-    db.calls.clear()
+    assert db.rpc_calls[0][1]["p_achados"] == []
+    db.rpc_calls.clear()
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: None)
     emitter.emit_findings("op", "documentos", {}, database=db)
-    assert db.calls == []
+    assert db.rpc_calls == []
