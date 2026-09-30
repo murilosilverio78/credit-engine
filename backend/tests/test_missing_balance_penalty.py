@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 
 
 for key in ("SECRET_KEY", "TWOCAPTCHA_API_KEY", "RESEND_API_KEY"):
@@ -13,6 +14,37 @@ PARAMS = {
     "penalidade_fgts_ausente": 6,
     "penalidade_balanco_ausente": 10,
 }
+
+
+class CatalogQuery:
+    def __init__(self, rows=None, error=None):
+        self.rows = rows
+        self.error = error
+        self.used_limit = None
+
+    def select(self, *_args):
+        return self
+
+    def eq(self, *_args):
+        return self
+
+    def limit(self, value):
+        self.used_limit = value
+        return self
+
+    def execute(self):
+        if self.error:
+            raise self.error
+        return SimpleNamespace(data=self.rows)
+
+
+class CatalogDatabase:
+    def __init__(self, rows=None, error=None):
+        self.query = CatalogQuery(rows, error)
+
+    def table(self, name):
+        assert name == "cotacoes_broadfactor"
+        return self.query
 
 
 def _dimension(name: str, score: float = 88):
@@ -115,6 +147,45 @@ def test_quote_catalog_balance_or_dre_avoids_penalty_and_is_audited(monkeypatch)
         assert result["penalizacao_balanco"] == 0
         assert "balanco_ausente" not in result["flags"]
         assert "balanco_via_catalogo_broadfactor" in result["flags"]
+
+
+def test_quote_catalog_without_quote_or_with_null_types_is_optional():
+    for rows in ([], [{"tipos_documento": None}]):
+        snapshots = {}
+        database = CatalogDatabase(rows)
+
+        score_engine._add_quote_catalog_documents("op-1", snapshots, database)
+
+        assert snapshots == {}
+        assert database.query.used_limit == 1
+
+
+def test_quote_catalog_dre_avoids_penalty_and_sets_audit_flag(monkeypatch):
+    snapshots = _valid_certificates()
+    score_engine._add_quote_catalog_documents(
+        "op-1", snapshots, CatalogDatabase([{"tipos_documento": ["DRE"]}])
+    )
+
+    result = _consolidate(monkeypatch, snapshots)
+
+    assert result["penalizacao_balanco"] == 0
+    assert "balanco_ausente" not in result["flags"]
+    assert "balanco_via_catalogo_broadfactor" in result["flags"]
+
+
+def test_quote_catalog_database_error_does_not_abort_score(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(score_engine.logger, "warning", lambda *args, **kwargs: warnings.append((args, kwargs)))
+    snapshots = _valid_certificates()
+
+    score_engine._add_quote_catalog_documents(
+        "op-1", snapshots, CatalogDatabase(error=RuntimeError("database unavailable"))
+    )
+    result = _consolidate(monkeypatch, snapshots)
+
+    assert result["penalizacao_balanco"] == 10
+    assert "catalogo_broadfactor" not in snapshots
+    assert warnings[0][0] == ("score_engine.quote_document_catalog_unavailable",)
 
 
 def test_uploaded_balance_document_avoids_penalty(monkeypatch):

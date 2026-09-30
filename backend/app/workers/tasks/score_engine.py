@@ -1745,6 +1745,46 @@ def consolidar_score(
     }
 
 
+def _add_quote_catalog_documents(
+    operation_id: str,
+    snapshots: dict[str, Any],
+    database: Any,
+) -> None:
+    """Inclui o catálogo da cotação no score como insumo opcional em memória."""
+    extracted_types = _document_types(snapshots.get("contrato_extracao"))
+    try:
+        quote_result = _execute_db(
+            operation_id,
+            "load_quote_document_catalog_for_score",
+            lambda: database.table("cotacoes_broadfactor")
+            .select("tipos_documento")
+            .eq("operation_id", operation_id)
+            .limit(1)
+            .execute(),
+        )
+        quote_rows = quote_result.data or []
+        quote = quote_rows[0] if quote_rows else {}
+        quote_types = {
+            str(document_type).strip().upper()
+            for document_type in (quote.get("tipos_documento") or [])
+            if str(document_type).strip()
+        }
+        catalog_only_types = sorted(quote_types - extracted_types)
+        if catalog_only_types:
+            snapshots["catalogo_broadfactor"] = {
+                "documentos_broadfactor": [
+                    {"tipo": document_type} for document_type in catalog_only_types
+                ],
+                "fonte": "catalogo_cotacao",
+            }
+    except Exception as exc:
+        logger.warning(
+            "score_engine.quote_document_catalog_unavailable",
+            operation_id=operation_id,
+            error=str(exc),
+        )
+
+
 def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
     from app.core.database import supabase
 
@@ -1790,30 +1830,7 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
             # O funil não executa contrato_extracao, mas a cotação já traz o
             # catálogo Broadfactor. O complemento é somente em memória: não
             # aciona componente pago nem cria snapshot persistente.
-            extracted_types = _document_types(snapshots.get("contrato_extracao"))
-            quote_result = _execute_db(
-                operation_id,
-                "load_quote_document_catalog_for_score",
-                lambda: supabase.table("cotacoes_broadfactor")
-                .select("tipos_documento")
-                .eq("operation_id", operation_id)
-                .maybe_single()
-                .execute(),
-            )
-            quote_types = {
-                str(document_type).strip().upper()
-                for document_type in (quote_result.data or {}).get("tipos_documento", [])
-                if str(document_type).strip()
-            }
-            catalog_only_types = sorted(quote_types - extracted_types)
-            if catalog_only_types:
-                snapshots["catalogo_broadfactor"] = {
-                    "documentos_broadfactor": [
-                        {"tipo": document_type}
-                        for document_type in catalog_only_types
-                    ],
-                    "fonte": "catalogo_cotacao",
-                }
+            _add_quote_catalog_documents(operation_id, snapshots, supabase)
 
             try:
                 document_result = _execute_db(
