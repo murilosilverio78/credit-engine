@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowUp,
@@ -14,6 +14,7 @@ import { useState } from "react";
 import {
   approveOperation,
   escalateOperation,
+  getEligibilityParameters,
   reprocessOperationScore,
   rejectOperation,
 } from "@/lib/api";
@@ -34,6 +35,16 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function formatBrl(value: number | null | undefined) {
+  return value == null
+    ? "—"
+    : new Intl.NumberFormat("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+        maximumFractionDigits: 0,
+      }).format(value);
+}
+
 export function ApprovalActions({ operation }: { operation: OperationDetails }) {
   const queryClient = useQueryClient();
   const alcada = useAlcada();
@@ -42,6 +53,7 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
     null,
   );
   const [confirmReprocessing, setConfirmReprocessing] = useState(false);
+  const [reprocessAmount, setReprocessAmount] = useState("");
   const [justificativa, setJustificativa] = useState("");
   const [message, setMessage] = useState("");
   const value = operationValue(operation);
@@ -63,6 +75,22 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
   const canReprocess =
     session?.user.role === "diretor" &&
     (operation.status === "completed" || operation.status === "failed");
+  const eligibility = useQuery({
+    queryKey: ["eligibility-parameters"],
+    queryFn: getEligibilityParameters,
+    staleTime: 60_000,
+  });
+  const ticketMinimo = eligibility.data?.find(
+    (parameter) => parameter.key === "ticket_minimo",
+  )?.value;
+  const maxReprocessAmount = operation.valor_enquadrado ?? null;
+  const parsedReprocessAmount = Number(reprocessAmount);
+  const validReprocessAmount =
+    ticketMinimo != null &&
+    maxReprocessAmount != null &&
+    Number.isFinite(parsedReprocessAmount) &&
+    parsedReprocessAmount >= ticketMinimo &&
+    parsedReprocessAmount <= maxReprocessAmount;
 
   const approveMutation = useMutation({
     mutationFn: () => approveOperation(operation.id, { justificativa }),
@@ -92,7 +120,7 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
     },
   });
   const reprocessMutation = useMutation({
-    mutationFn: () => reprocessOperationScore(operation.id),
+    mutationFn: (amount: number) => reprocessOperationScore(operation.id, amount),
     onSuccess: async () => {
       setConfirmReprocessing(false);
       await queryClient.invalidateQueries({ queryKey: ["operation", operation.id] });
@@ -187,7 +215,16 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
             className="ml-auto flex h-10 items-center justify-center gap-1.5 rounded-md border border-dashed border-border bg-muted/40 px-3 text-[13px] font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
             data-testid="action-reprocess-score"
             disabled={pending}
-            onClick={() => setConfirmReprocessing(true)}
+            onClick={() => {
+              setReprocessAmount(
+                String(
+                  operation.valor_operacao_relatorio ??
+                    operation.valor_enquadrado ??
+                    "",
+                ),
+              );
+              setConfirmReprocessing(true);
+            }}
             type="button"
           >
             {scoreReprocessing || reprocessMutation.isPending ? (
@@ -208,30 +245,59 @@ export function ApprovalActions({ operation }: { operation: OperationDetails }) 
         ) : null}
       </div>
       {confirmReprocessing ? (
-        <div className="mt-3 border-l-2 border-l-muted-foreground/40 pl-3">
-          <p className="text-xs text-foreground">
-            Reprocessar o score atual {operation.score ?? "—"} ({operation.rating ?? "—"})
-            e recalcular a taxa sugerida?
-          </p>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            Os demais componentes e consultas externas serão reutilizados.
-          </p>
-          <div className="mt-2 flex gap-2">
-            <button
-              className="h-8 rounded-md border border-border px-3 text-xs hover:bg-muted"
-              onClick={() => setConfirmReprocessing(false)}
-              type="button"
-            >
-              Cancelar
-            </button>
-            <button
-              className="h-8 rounded-md border border-foreground px-3 text-xs font-medium hover:bg-muted disabled:opacity-50"
-              disabled={reprocessMutation.isPending}
-              onClick={() => reprocessMutation.mutate()}
-              type="button"
-            >
-              Confirmar reprocessamento
-            </button>
+        <div
+          aria-labelledby="reprocess-dialog-title"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4"
+          role="dialog"
+        >
+          <div className="w-full max-w-lg rounded-lg border border-border bg-background p-5 shadow-lg">
+            <h2 className="text-base font-semibold" id="reprocess-dialog-title">
+              Recalcular score
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              O score e a precificação serão recalculados com o valor escolhido.
+              Os demais componentes e consultas externas serão reutilizados.
+            </p>
+            <label className="mt-4 block text-xs font-medium" htmlFor="reprocess-amount">
+              Valor da operação
+            </label>
+            <input
+              className="mt-1 h-9 w-full rounded-md border border-input px-2.5 text-sm"
+              id="reprocess-amount"
+              max={maxReprocessAmount ?? undefined}
+              min={ticketMinimo ?? undefined}
+              onChange={(event) => setReprocessAmount(event.target.value)}
+              step="0.01"
+              type="number"
+              value={reprocessAmount}
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Entre {formatBrl(ticketMinimo)} e {formatBrl(maxReprocessAmount)}.
+            </p>
+            {reprocessMutation.isError ? (
+              <p className="mt-3 rounded bg-red-50 px-3 py-2 text-xs text-red-700" role="alert">
+                Não foi possível iniciar o reprocessamento do score.
+              </p>
+            ) : null}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                className="h-9 rounded-md border border-border px-3 text-xs hover:bg-muted"
+                disabled={reprocessMutation.isPending}
+                onClick={() => setConfirmReprocessing(false)}
+                type="button"
+              >
+                Cancelar
+              </button>
+              <button
+                className="h-9 rounded-md bg-foreground px-3 text-xs font-medium text-background hover:bg-foreground/90 disabled:opacity-50"
+                disabled={reprocessMutation.isPending || !validReprocessAmount}
+                onClick={() => reprocessMutation.mutate(parsedReprocessAmount)}
+                type="button"
+              >
+                {reprocessMutation.isPending ? "Recalculando…" : "Recalcular score"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

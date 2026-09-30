@@ -189,10 +189,10 @@ export function getOperation(operationId: string) {
   return request<OperationDetails>(`/api/v1/operations/${operationId}`);
 }
 
-export function reprocessOperationScore(operationId: string) {
+export function reprocessOperationScore(operationId: string, valorOperacao?: number) {
   return request<ScoreReprocessingAccepted>(
     `/api/v1/operations/${encodeURIComponent(operationId)}/reprocessar-score`,
-    { method: "POST" },
+    { method: "POST", body: valorOperacao === undefined ? undefined : JSON.stringify({ valor_operacao: valorOperacao }) },
   );
 }
 
