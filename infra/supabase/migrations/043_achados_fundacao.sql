@@ -107,6 +107,12 @@ DECLARE
   v_status TEXT;
   v_policy_version_id UUID;
 BEGIN
+  IF TG_OP = 'UPDATE' AND OLD.policy_version_id IS DISTINCT FROM NEW.policy_version_id THEN
+    SELECT status INTO v_status FROM policy_versions WHERE id = OLD.policy_version_id;
+    IF v_status IS DISTINCT FROM 'RASCUNHO' THEN
+      RAISE EXCEPTION 'Regras nao podem sair de politica nao rascunho';
+    END IF;
+  END IF;
   IF TG_OP = 'DELETE' THEN
     v_policy_version_id := OLD.policy_version_id;
   ELSE
@@ -126,6 +132,52 @@ $$;
 CREATE TRIGGER trg_policy_rules_only_draft
   BEFORE INSERT OR UPDATE OR DELETE ON policy_rules
   FOR EACH ROW EXECUTE FUNCTION policy_rules_only_draft();
+
+CREATE OR REPLACE FUNCTION policy_versions_only_valid_transitions()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.id IS DISTINCT FROM OLD.id OR NEW.versao IS DISTINCT FROM OLD.versao THEN
+    RAISE EXCEPTION 'id e versao da politica sao imutaveis';
+  END IF;
+  IF OLD.status = 'RASCUNHO' AND NEW.status = 'RASCUNHO' THEN
+    RETURN NEW;
+  END IF;
+  IF OLD.status = 'RASCUNHO' AND NEW.status = 'ATIVA' THEN
+    IF NEW.ativada_em IS NULL
+       OR NEW.descricao IS DISTINCT FROM OLD.descricao
+       OR NEW.criada_por IS DISTINCT FROM OLD.criada_por
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+      RAISE EXCEPTION 'RASCUNHO para ATIVA so permite preencher ativada_em';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF OLD.status = 'RASCUNHO' AND NEW.status = 'ARQUIVADA' THEN
+    IF NEW.ativada_em IS DISTINCT FROM OLD.ativada_em
+       OR NEW.descricao IS DISTINCT FROM OLD.descricao
+       OR NEW.criada_por IS DISTINCT FROM OLD.criada_por
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+      RAISE EXCEPTION 'RASCUNHO para ARQUIVADA so permite mudar status';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF OLD.status = 'ATIVA' AND NEW.status = 'ARQUIVADA' THEN
+    IF NEW.ativada_em IS DISTINCT FROM OLD.ativada_em
+       OR NEW.descricao IS DISTINCT FROM OLD.descricao
+       OR NEW.criada_por IS DISTINCT FROM OLD.criada_por
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+      RAISE EXCEPTION 'ATIVA para ARQUIVADA so permite mudar status';
+    END IF;
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'Transicao de politica invalida: % para %', OLD.status, NEW.status;
+END;
+$$;
+
+CREATE TRIGGER trg_policy_versions_only_valid_transitions
+  BEFORE UPDATE ON policy_versions
+  FOR EACH ROW EXECUTE FUNCTION policy_versions_only_valid_transitions();
 
 CREATE OR REPLACE FUNCTION policy_versions_no_delete()
 RETURNS TRIGGER
@@ -175,7 +227,7 @@ BEGIN
     SELECT id INTO v_run_id FROM finding_runs
     WHERE operation_id = (p_run->>'operation_id')::UUID
       AND especialista = p_run->>'especialista'
-      AND entrada_hash = p_run->>'entrada_hash;
+      AND entrada_hash = p_run->>'entrada_hash';
     RETURN QUERY SELECT v_run_id, FALSE;
     RETURN;
   END IF;
