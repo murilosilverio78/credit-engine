@@ -357,6 +357,7 @@ async def reprocess_operation_score(
     background_tasks: BackgroundTasks,
     request: Request,
     current_user: dict = Depends(get_current_user),
+    payload: Optional[ReportRequest] = None,
 ):
     if current_user.get("role") != "diretor":
         raise HTTPException(
@@ -375,23 +376,42 @@ async def reprocess_operation_score(
             },
         )
 
+    valor_operacao = payload.valor_operacao if payload else None
+    if valor_operacao is not None:
+        from app.services.eligibility_params_service import get_eligibility_config
+
+        try:
+            ticket_minimo = float(get_eligibility_config()["ticket_minimo"])
+            limite = float(operation.get("valor_enquadrado"))
+            valor_operacao = float(valor_operacao)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail={"code": "INVALID_REPORT_OPERATION_AMOUNT"}) from exc
+        if not ticket_minimo <= valor_operacao <= limite:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "REPORT_OPERATION_AMOUNT_OUT_OF_RANGE", "ticket_minimo": ticket_minimo, "valor_enquadrado": limite},
+            )
     _claim_score_reprocessing(operation_id)
+    if valor_operacao is not None:
+        supabase.table("operations").update(
+            {"valor_operacao_relatorio": valor_operacao}
+        ).eq("id", operation_id).execute()
     previous_value = {
         "score": operation.get("score"),
         "rating": operation.get("rating"),
         "taxa_sugerida": operation.get("taxa_sugerida"),
     }
-
     from app.workers.tasks.orchestrator import reprocess_score
 
-    background_tasks.add_task(
-        reprocess_score,
-        operation_id,
-        actor_id=current_user.get("id"),
-        actor_type=current_user.get("role", "diretor"),
-        ip_address=request.client.host if request.client else None,
-        previous_value=previous_value,
-    )
+    task_kwargs = {
+        "actor_id": current_user.get("id"),
+        "actor_type": current_user.get("role", "diretor"),
+        "ip_address": request.client.host if request.client else None,
+        "previous_value": previous_value,
+    }
+    if valor_operacao is not None:
+        task_kwargs["valor_operacao"] = valor_operacao
+    background_tasks.add_task(reprocess_score, operation_id, **task_kwargs)
     return {
         "operation_id": operation_id,
         "status": "accepted",

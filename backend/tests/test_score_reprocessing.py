@@ -49,6 +49,10 @@ class FakeQuery:
         self.filters.append((field, None))
         return self
 
+    def in_(self, field, values):
+        self.filters.append((f"{field}__in", set(values)))
+        return self
+
     def single(self):
         self.as_single = True
         return self
@@ -73,6 +77,9 @@ class FakeQuery:
         for field, value in self.filters:
             if field.endswith("__gte"):
                 if row.get(field[:-5], "") < value:
+                    return False
+            elif field.endswith("__in"):
+                if row.get(field[:-4]) not in value:
                     return False
             elif row.get(field) != value:
                 return False
@@ -203,6 +210,101 @@ def test_director_can_schedule_only_score_reprocessing(monkeypatch, status):
         "rating": "C",
         "taxa_sugerida": 0.0624,
     }
+
+
+def test_reprocessing_accepts_pricing_value_and_records_its_origin(monkeypatch):
+    database = FakeSupabase()
+    database.tables["operations"][0]["valor_enquadrado"] = 200_000
+    audit_entries = []
+    monkeypatch.setattr(operations, "supabase", database)
+    monkeypatch.setattr(
+        "app.services.eligibility_params_service.get_eligibility_config",
+        lambda: {"ticket_minimo": 100_000},
+    )
+
+    background = BackgroundTasks()
+    asyncio.run(
+        operations.reprocess_operation_score(
+            "op-1",
+            background,
+            _request(),
+            {"id": "director-1", "role": "diretor"},
+            operations.ReportRequest(valor_operacao=150_000),
+        )
+    )
+
+    assert database.tables["operations"][0]["valor_operacao_relatorio"] == 150_000
+    assert background.tasks[0].kwargs["valor_operacao"] == 150_000
+
+    class FakeAudit:
+        def log(self, **kwargs):
+            audit_entries.append(kwargs)
+
+    async def fake_run_component(*_args):
+        return {"status": "completed"}
+
+    async def fake_complete(*_args):
+        return {"score": 50, "rating": "D", "taxa_sugerida": 0.08}
+
+    monkeypatch.setattr(orchestrator, "_run_component", fake_run_component)
+    monkeypatch.setattr(orchestrator, "_complete_analysis", fake_complete)
+    monkeypatch.setattr(orchestrator, "_latest_archived_score_version_id", lambda *_args: None)
+    monkeypatch.setattr("app.services.audit_service.AuditService", FakeAudit)
+    asyncio.run(
+        orchestrator.reprocess_score(
+            "op-1",
+            actor_id="director-1",
+            actor_type="diretor",
+            ip_address=None,
+            previous_value={},
+            valor_operacao=150_000,
+        )
+    )
+    assert audit_entries[0]["payload"] == {
+        "status": "completed",
+        "valor_operacao": 150_000,
+        "valor_origem": "valor_operacao_relatorio",
+    }
+
+
+@pytest.mark.parametrize("valor", [99_999, 200_001])
+def test_reprocessing_rejects_pricing_value_outside_allowed_range(monkeypatch, valor):
+    database = FakeSupabase()
+    database.tables["operations"][0]["valor_enquadrado"] = 200_000
+    monkeypatch.setattr(operations, "supabase", database)
+    monkeypatch.setattr(
+        "app.services.eligibility_params_service.get_eligibility_config",
+        lambda: {"ticket_minimo": 100_000},
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            operations.reprocess_operation_score(
+                "op-1",
+                BackgroundTasks(),
+                _request(),
+                {"id": "director-1", "role": "diretor"},
+                operations.ReportRequest(valor_operacao=valor),
+            )
+        )
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "REPORT_OPERATION_AMOUNT_OUT_OF_RANGE"
+
+
+def test_refresh_degraded_registry_flag_is_cleared_after_phase1_recovery():
+    database = FakeSupabase()
+    database.tables["component_snapshots"] = [
+        {"operation_id": "op-1", "component": "brasil_api", "status": "failed"},
+        {"operation_id": "op-1", "component": "pessoa_juridica", "status": "completed"},
+    ]
+
+    assert orchestrator.refresh_degraded_registry_flag("op-1", database) is True
+    assert database.tables["operations"][0]["dado_cadastral_degradado"] is True
+
+    database.tables["component_snapshots"][0]["status"] = "completed"
+    assert orchestrator.refresh_degraded_registry_flag("op-1", database) is False
+    assert database.tables["operations"][0]["dado_cadastral_degradado"] is False
 
 
 def test_missing_score_snapshot_is_recreated(monkeypatch):

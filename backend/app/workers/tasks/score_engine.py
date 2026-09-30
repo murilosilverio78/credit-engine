@@ -1793,6 +1793,11 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
     if operation_id:
         try:
             validate_score_preconditions(operation_id, supabase)
+            from app.workers.tasks.orchestrator import refresh_degraded_registry_flag
+            try:
+                refresh_degraded_registry_flag(operation_id, supabase)
+            except Exception as exc:
+                logger.warning("score_engine.degraded_registry_flag_unavailable", operation_id=operation_id, error=str(exc))
 
             operation_result = _execute_db(
                 operation_id,

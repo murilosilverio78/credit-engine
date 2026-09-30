@@ -44,6 +44,31 @@ SANCTION_COMPONENTS = (
     "cnep",
     "cepim",
 )
+
+
+def refresh_degraded_registry_flag(operation_id: str, database=None) -> bool:
+    """Deriva a flag do estado atual, permitindo que recuperação a limpe."""
+    database = database or supabase
+    result = _execute_db(
+        operation_id,
+        "load_phase1_registry_status",
+        lambda: database.table("component_snapshots")
+        .select("component,status")
+        .eq("operation_id", operation_id)
+        .in_("component", list(PHASE1_COMPONENTS))
+        .execute(),
+    )
+    statuses = {row.get("component"): row.get("status") for row in (result.data or [])}
+    degraded = any(statuses.get(component) != "completed" for component in PHASE1_COMPONENTS)
+    _execute_db(
+        operation_id,
+        "refresh_degraded_registry_flag",
+        lambda: database.table("operations")
+        .update({"dado_cadastral_degradado": degraded})
+        .eq("id", operation_id)
+        .execute(),
+    )
+    return degraded
 RUNNING_STALE_MINUTES = 15
 _PIPELINE_STAGE: ContextVar[str] = ContextVar(
     "pipeline_stage",
@@ -560,6 +585,11 @@ async def _run_analysis(
         name for name, result in zip(PHASE1_COMPONENTS, phase1_results)
         if _component_result_failed(result)
     ]
+    try:
+        refresh_degraded_registry_flag(operation_id)
+    except Exception as exc:
+        logger.warning("pipeline.flag_degradado_refresh_failed", operation_id=operation_id, error=str(exc))
+
     if len(phase1_failed) == 2:
         # Ambas as fontes falharam — sem dados cadastrais mínimos para continuar
         message = "pipeline abortado: falha em todos os componentes da fase 1"
@@ -572,23 +602,6 @@ async def _run_analysis(
             operation_id=operation_id,
             failed_components=phase1_failed,
         )
-        # Marcar flag de dado degradado na operação para visibilidade no score
-        try:
-            _execute_db(
-                operation_id,
-                "mark_degraded_registry_data",
-                lambda: supabase.table("operations")
-                .update({"dado_cadastral_degradado": True})
-                .eq("id", operation_id)
-                .execute(),
-            )
-        except Exception as exc:
-            logger.warning(
-                "pipeline.flag_degradado_failed",
-                operation_id=operation_id,
-                error=str(exc),
-            )
-
     _update_operation_razao_social(operation_id)
     _update_heartbeat(operation_id)
 
@@ -1150,6 +1163,7 @@ async def reprocess_score(
     actor_type: str,
     ip_address: str | None,
     previous_value: dict,
+    valor_operacao: float | None = None,
 ):
     """Recalculate only score and pricing, preserving all upstream snapshots."""
     from app.services.audit_service import AuditService
@@ -1192,6 +1206,13 @@ async def reprocess_score(
         "taxa_sugerida": completion.get("taxa_sugerida"),
     }
     payload = {"status": "completed"}
+    if valor_operacao is not None:
+        payload.update(
+            {
+                "valor_operacao": valor_operacao,
+                "valor_origem": "valor_operacao_relatorio",
+            }
+        )
     if archived_version_id:
         payload["archived_version_id"] = archived_version_id
     audit.log(
