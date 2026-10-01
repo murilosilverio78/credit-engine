@@ -23,6 +23,23 @@ def _types(value: Any) -> set[str]:
     return found
 
 
+def _qsa_stability_indicators(qsa: Any) -> dict[str, Any]:
+    socios = [socio for socio in qsa if isinstance(socio, dict)] if isinstance(qsa, list) else []
+    dates = []
+    for socio in socios:
+        value = socio.get("data_entrada") or socio.get("data_inicio")
+        try:
+            dates.append(datetime.fromisoformat(str(value).replace("Z", "+00:00")).date().isoformat())
+        except (TypeError, ValueError):
+            continue
+    return {
+        "socios_qtd": len(socios),
+        "entrada_mais_recente": max(dates) if dates else None,
+        "entrada_mais_antiga": min(dates) if dates else None,
+        "tem_administrador": any("administr" in str(socio.get("qualificacao") or "").lower() for socio in socios),
+    }
+
+
 def emit_cadastro_regularidade(snapshots: dict[str, Any], *, fingerprint: str, operation: dict[str, Any] | None = None):
     result = []
     statuses = snapshots.get("__statuses__") or {}
@@ -90,5 +107,5 @@ def emit_cadastro_regularidade(snapshots: dict[str, Any], *, fingerprint: str, o
         except ValueError:
             pass
     if "qsa" in brasil:
-        result.append(finding("qsa_estabilidade", Escopo.CEDENTE, {"qsa": brasil.get("qsa") or []}, component="brasil_api", path="qsa", fingerprint=fingerprint))
+        result.append(finding("qsa_estabilidade", Escopo.CEDENTE, _qsa_stability_indicators(brasil.get("qsa")), component="brasil_api", path="qsa", fingerprint=fingerprint))
     return result

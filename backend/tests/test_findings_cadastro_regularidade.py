@@ -1,4 +1,5 @@
 from app.services.findings.adapters.cadastro_regularidade import emit_cadastro_regularidade
+import json
 
 
 def test_cadastro_adapter_emits_official_gate_and_balance_catalog():
@@ -11,3 +12,16 @@ def test_cadastro_adapter_emits_official_gate_and_balance_catalog():
     assert by_code["cadastro_inativo"].valor is True
     assert by_code["balanco_ausente"].valor is False
     assert by_code["balanco_catalogado_broadfactor"].valor["tipos"] == ["DRE"]
+
+
+def test_qsa_finding_exposes_only_stability_indicators():
+    findings = emit_cadastro_regularidade({
+        "brasil_api": {"qsa": [
+            {"nome": "SOCIA FICTICIA", "cpf_cnpj_socio": "12345678900", "qualificacao": "Sócio-Administrador", "data_entrada": "2020-02-01"},
+            {"nome": "OUTRO SOCIO", "qualificacao": "Sócio", "data_inicio": "2023-04-05"},
+        ]},
+    }, fingerprint="x")
+    qsa = next(item for item in findings if item.codigo == "qsa_estabilidade")
+
+    assert qsa.valor == {"socios_qtd": 2, "entrada_mais_recente": "2023-04-05", "entrada_mais_antiga": "2020-02-01", "tem_administrador": True}
+    assert "SOCIA FICTICIA" not in json.dumps([item.model_dump(mode="json") for item in findings], ensure_ascii=False)
