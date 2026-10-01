@@ -161,7 +161,7 @@ def _dual_write_findings(
         from app.core.config import settings
         if not settings.FINDINGS_EMIT_ENABLED:
             return
-        from app.services.findings.emitter import emit_findings
+        from app.services.findings.dispatch import dispatch_emission
         specialists = {
             "brasil_api": "cadastro_regularidade", "pessoa_juridica": "cadastro_regularidade",
             "ceis": "cadastro_regularidade", "cnep": "cadastro_regularidade",
@@ -173,7 +173,7 @@ def _dual_write_findings(
         }
         especialista = specialists.get(component)
         if especialista:
-            emit_findings(operation_id, especialista)
+            dispatch_emission(operation_id, especialista)
     except Exception as exc:
         logger.warning("findings.component_dual_write_failed", operation_id=operation_id, component=component, error=str(exc))
 

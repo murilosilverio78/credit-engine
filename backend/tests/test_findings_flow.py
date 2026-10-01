@@ -1,5 +1,8 @@
 """Real shadow-emission flow through the component hooks and PostgREST fake."""
+import pytest
+
 from app.services.findings import emitter
+from app.services.findings.dispatch import run_inline_for_tests
 from app.workers import base
 from tests.fakes.postgrest import Postgrest, Rpc
 
@@ -56,6 +59,12 @@ def _enable_real_hook(monkeypatch, db):
     monkeypatch.setattr(config.settings, "FINDINGS_EMIT_ENABLED", True)
     monkeypatch.setattr(database, "supabase", db)
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: _catalog())
+
+
+@pytest.fixture(autouse=True)
+def inline_dispatch():
+    with run_inline_for_tests():
+        yield
 
 
 def test_cadastro_hooks_wait_for_all_terminal_then_deduplicate(monkeypatch):
