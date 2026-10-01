@@ -46,9 +46,11 @@ def _quote_catalog(database, operation_id: str):
 
 def emit_findings(operation_id: str, especialista: str, *, database=None, overrides: dict[str, Any] | None = None) -> None:
     """Emit one idempotent run; no database or adapter failure escapes this boundary."""
-    from app.core.database import supabase
     try:
-        db = database or supabase
+        db = database
+        if db is None:
+            from app.core.database import supabase
+            db = supabase
         required, adapter = REQUIRED.get(especialista), ADAPTERS.get(especialista)
         if required is None or adapter is None:
             logger.warning("findings.unknown_specialist", operation_id=operation_id, especialista=especialista); return

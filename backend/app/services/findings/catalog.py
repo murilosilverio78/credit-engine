@@ -12,13 +12,14 @@ _cache: dict[str, Any] = {"items": None, "ts": 0.0}
 
 
 def get_catalog(*, database=None, force_reload: bool = False) -> dict[str, dict[str, Any]] | None:
-    from app.core.database import supabase
-
     now = time.time()
     if not force_reload and _cache["items"] is not None and now - _cache["ts"] <= _CACHE_TTL:
         return dict(_cache["items"])
-    db = database or supabase
     try:
+        db = database
+        if db is None:
+            from app.core.database import supabase
+            db = supabase
         result = db.table("finding_catalog").select("codigo,versao,escopo,tipo_valor,ativo").eq("ativo", True).execute()
         rows = result.data or []
     except Exception as exc:
