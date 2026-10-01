@@ -81,16 +81,42 @@ def test_cadastro_hooks_wait_for_all_terminal_then_deduplicate(monkeypatch):
 
 
 def test_failed_source_emits_partial_with_unverified_finding(monkeypatch):
-    rows = _cadastro_rows()
-    rows[2].update(status="failed", parsed_result=None)
+    rows = _cadastro_rows("pending")
     db = FlowDb(rows)
     _enable_real_hook(monkeypatch, db)
 
-    base._dual_write_findings("op", "ceis", None)
+    for row in rows:
+        if row["component"] == "ceis":
+            continue
+        row.update(status="completed", parsed_result={})
+        base._dual_write_findings("op", row["component"])
+    assert db.rpc_calls == []
+    ceis = next(row for row in rows if row["component"] == "ceis")
+    ceis.update(status="failed", parsed_result=None)
+    base._dual_write_findings("op", "ceis")
 
     assert db.rpc_calls[0][1]["p_run"]["status"] == "PARCIAL"
     sancao = next(item for item in db.persisted_findings if item["codigo"] == "sancao_ativa")
     assert sancao["estado"] == "NAO_VERIFICADO"
+
+
+def test_nonfinal_failed_source_waits_for_remaining_terminal_inputs(monkeypatch):
+    rows = _cadastro_rows("pending")
+    db = FlowDb(rows)
+    _enable_real_hook(monkeypatch, db)
+    ceis = next(row for row in rows if row["component"] == "ceis")
+    ceis.update(status="failed", parsed_result=None)
+
+    base._dual_write_findings("op", "ceis")
+    assert db.rpc_calls == []
+    for row in rows:
+        if row is ceis:
+            continue
+        row.update(status="completed", parsed_result={})
+        base._dual_write_findings("op", row["component"])
+
+    assert len(db.rpc_calls) == 1
+    assert db.rpc_calls[0][1]["p_run"]["status"] == "PARCIAL"
 
 
 def test_optional_certificate_change_creates_a_new_auditable_run(monkeypatch):

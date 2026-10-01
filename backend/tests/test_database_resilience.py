@@ -128,3 +128,29 @@ def test_execute_marks_snapshot_failed_when_get_cnpj_fails(monkeypatch):
             "error_message": "Server disconnected",
         }
     ]
+
+
+def test_execute_emits_findings_only_after_failed_snapshot_is_saved(monkeypatch):
+    events = []
+
+    monkeypatch.setattr(SnapshotService, "get_cnpj", lambda *_args: "12345678000190")
+    monkeypatch.setattr(SnapshotService, "mark_running", lambda *_args: None)
+    monkeypatch.setattr(
+        SnapshotService,
+        "save_result",
+        lambda *_args, **kwargs: events.append(("snapshot", kwargs["status"])),
+    )
+    monkeypatch.setattr(AuditService, "log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(base, "_dual_write_cliente", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        base,
+        "_dual_write_findings",
+        lambda *_args, **_kwargs: events.append(("findings", None)),
+    )
+
+    with pytest.raises(RuntimeError, match="fonte indisponivel"):
+        base.BaseComponentTask().execute(
+            "op-1", "ceis", lambda _cnpj: (_ for _ in ()).throw(RuntimeError("fonte indisponivel"))
+        )
+
+    assert events == [("snapshot", "failed"), ("findings", None)]

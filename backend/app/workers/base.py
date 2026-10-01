@@ -153,7 +153,9 @@ def _dual_write_cliente(
         )
 
 
-def _dual_write_findings(operation_id: str, component: str, result: object) -> None:
+def _dual_write_findings(
+    operation_id: str, component: str, result: object | None = None
+) -> None:
     """Shadow-write findings without ever changing the component outcome."""
     try:
         from app.core.config import settings
@@ -226,6 +228,15 @@ class BaseComponentTask:
                         error_message=error_message,
                     ),
                 )
+                try:
+                    _dual_write_findings(operation_id, component)
+                except Exception as findings_exc:
+                    logger.warning(
+                        "findings.failed_snapshot_dual_write_failed",
+                        operation_id=operation_id,
+                        component=component,
+                        error=str(findings_exc),
+                    )
             except Exception as persist_exc:
                 logger.error(
                     "component.preflight_failure_persist_failed",
@@ -369,6 +380,15 @@ class BaseComponentTask:
                     error_message=error_message,
                 ),
             )
+            try:
+                _dual_write_findings(operation_id, component)
+            except Exception as findings_exc:
+                logger.warning(
+                    "findings.failed_snapshot_dual_write_failed",
+                    operation_id=operation_id,
+                    component=component,
+                    error=str(findings_exc),
+                )
 
             audit_svc.log(
                 operation_id,
