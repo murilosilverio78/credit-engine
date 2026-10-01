@@ -6,6 +6,7 @@ from app.services.findings.adapters import ADAPTERS
 from app.services.findings.catalog import get_catalog, validate_value
 from app.services.findings.hashing import entrada_hash
 from app.services.findings.schemas import ExecucaoEnvelope
+from app.services.findings import version
 
 logger = structlog.get_logger()
 REQUIRED = {
@@ -45,7 +46,11 @@ def _quote_catalog(database, operation_id: str):
     return {"documentos_broadfactor": [{"tipo": item} for item in (row.get("tipos_documento") or []) if item]}
 
 def emit_findings(operation_id: str, especialista: str, *, database=None, overrides: dict[str, Any] | None = None) -> None:
-    """Emit one idempotent run; no database or adapter failure escapes this boundary."""
+    """Emit one idempotent run without changing a decision.
+
+    Any adapter-rule change must increment ``EMITTER_VERSION``; otherwise the
+    RPC deduplicates existing operation inputs and does not emit a new run.
+    """
     try:
         db = database
         if db is None:
@@ -74,7 +79,7 @@ def emit_findings(operation_id: str, especialista: str, *, database=None, overri
             (component, statuses.get(component, "missing"), snapshots.get(component))
             for component in sorted(input_components)
         ]
-        fingerprint = entrada_hash({"insumos": input_rows, "valor_enquadrado": operation.get("valor_enquadrado"), "tipos_documento": (quote_catalog or {}).get("documentos_broadfactor"), "overrides": overrides or {}})
+        fingerprint = entrada_hash({"versao_emissor": version.EMITTER_VERSION, "insumos": input_rows, "valor_enquadrado": operation.get("valor_enquadrado"), "tipos_documento": (quote_catalog or {}).get("documentos_broadfactor"), "overrides": overrides or {}})
         candidates = adapter(snapshots, fingerprint=fingerprint, operation=operation)
         achados = []
         for candidate in candidates:
@@ -85,7 +90,7 @@ def emit_findings(operation_id: str, especialista: str, *, database=None, overri
                 logger.warning("findings.invalid_candidate_discarded", operation_id=operation_id, codigo=candidate.codigo); continue
             achados.append(candidate.model_dump(mode="json"))
         run_status = "PARCIAL" if any(statuses.get(component) == "failed" for component in required) else "COMPLETO"
-        envelope = ExecucaoEnvelope(operation_id=operation_id, ambiente=str(operation.get("ambiente") or "PRODUCAO"), especialista=especialista, status=run_status, entrada_hash=fingerprint)
+        envelope = ExecucaoEnvelope(operation_id=operation_id, ambiente=str(operation.get("ambiente") or "PRODUCAO"), especialista=especialista, status=run_status, entrada_hash=fingerprint, versao_emissor=version.EMITTER_VERSION)
         db.rpc("registrar_achados", {"p_run": envelope.model_dump(mode="json"), "p_achados": achados}).execute()
     except Exception as exc:
         logger.warning("findings.emission_failed", operation_id=operation_id, especialista=especialista, error=str(exc))

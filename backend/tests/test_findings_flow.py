@@ -2,6 +2,7 @@
 import pytest
 
 from app.services.findings import emitter
+from app.services.findings import version
 from app.services.findings.dispatch import run_inline_for_tests
 from app.workers import base
 from tests.fakes.postgrest import Postgrest, Rpc
@@ -16,12 +17,14 @@ class FlowDb(Postgrest):
         })
         self.runs: set[tuple[str, str]] = set()
         self.persisted_findings = []
+        self.rpc_inserted = []
 
     def rpc(self, name, params=None):
         self.rpc_calls.append((name, params))
         key = (params["p_run"]["especialista"], params["p_run"]["entrada_hash"])
         inserted = key not in self.runs
         self.runs.add(key)
+        self.rpc_inserted.append(inserted)
         if inserted:
             self.persisted_findings.extend(params["p_achados"])
         return Rpc([{"run_id": "run", "inserido": inserted}])
@@ -141,6 +144,26 @@ def test_optional_certificate_change_creates_a_new_auditable_run(monkeypatch):
 
     assert len(db.rpc_calls) == 2
     assert db.rpc_calls[0][1]["p_run"]["entrada_hash"] != db.rpc_calls[1][1]["p_run"]["entrada_hash"]
+
+
+def test_emitter_version_participates_in_idempotency_hash(monkeypatch):
+    db = FlowDb([{
+        "operation_id": "op", "component": "contrato_extracao", "status": "completed",
+        "parsed_result": {"regime_conta_vinculada": "CONTA_DEPOSITO_VINCULADA", "flags": []},
+    }])
+    monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: {
+        "conta_vinculada_regime:1": {"codigo": "conta_vinculada_regime", "versao": 1, "escopo": "CONTRATO", "tipo_valor": "ENUM"}
+    })
+
+    emitter.emit_findings("op", "documentos", database=db)
+    emitter.emit_findings("op", "documentos", database=db)
+    monkeypatch.setattr(version, "EMITTER_VERSION", "3")
+    emitter.emit_findings("op", "documentos", database=db)
+
+    assert db.rpc_inserted == [True, False, True]
+    assert db.rpc_calls[0][1]["p_run"]["entrada_hash"] == db.rpc_calls[1][1]["p_run"]["entrada_hash"]
+    assert db.rpc_calls[0][1]["p_run"]["entrada_hash"] != db.rpc_calls[2][1]["p_run"]["entrada_hash"]
+    assert db.rpc_calls[2][1]["p_run"]["versao_emissor"] == "3"
 
 
 def test_porte_reprocessing_uses_new_override_not_old_snapshot(monkeypatch):
