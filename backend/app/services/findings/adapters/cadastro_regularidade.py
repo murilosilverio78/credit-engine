@@ -60,13 +60,16 @@ def emit_cadastro_regularidade(snapshots: dict[str, Any], *, fingerprint: str, o
         result.append(finding("acordo_leniencia_ativo", Escopo.CEDENTE, active, component="acordos_leniencia", path="possui_acordo", fingerprint=fingerprint, state=Estado.CONFIRMADO if active else Estado.NEGATIVO_CONFIRMADO))
     for component, code in (("cnd_federal", "certidao_cnd_federal_pendente"), ("cndt_tst", "certidao_cndt_pendente"), ("fgts", "certidao_fgts_pendente")):
         cert = snapshots.get(component)
-        if not isinstance(cert, dict):
-            result.append(unverified(code, Escopo.CEDENTE, component=component, path="parsed_result", fingerprint=fingerprint))
-            continue
-        from app.workers.tasks.score_engine import _certidao_estado
-        estado, fator, _flags = _certidao_estado(cert)
-        pending = estado != "negativa"
-        result.append(finding(code, Escopo.CEDENTE, {"estado": estado, "validade": cert.get("data_validade") or cert.get("validade"), "fator": fator}, component=component, path="valida", fingerprint=fingerprint, state=Estado.CONFIRMADO if pending else Estado.NEGATIVO_CONFIRMADO))
+        status = statuses.get(component, "completed" if isinstance(cert, dict) else "inexistente")
+        if not isinstance(cert, dict) or not cert:
+            value = {"estado": "ausente", "status_componente": status, "validade": None, "fator": 0.0}
+            item = finding(code, Escopo.CEDENTE, value, component=component, path="parsed_result", fingerprint=fingerprint, state=Estado.CONFIRMADO, confidence=Confianca.ALTA)
+        else:
+            from app.workers.tasks.score_engine import _certidao_estado
+            estado, fator, _flags = _certidao_estado(cert)
+            item = finding(code, Escopo.CEDENTE, {"estado": estado, "status_componente": status, "validade": cert.get("data_validade") or cert.get("validade"), "fator": fator}, component=component, path="valida", fingerprint=fingerprint, state=Estado.NEGATIVO_CONFIRMADO if estado == "negativa" else Estado.CONFIRMADO, confidence=Confianca.ALTA)
+        item.evidencia[0]["status_componente"] = status
+        result.append(item)
     document_types = _types(snapshots)
     has_balance = bool(document_types & BALANCO_DOCUMENT_TYPES)
     complete_sources = all(statuses.get(source, "completed") == "completed" for source in sanction_sources)

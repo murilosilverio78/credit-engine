@@ -20,3 +20,23 @@ def test_certificate_value_uses_score_engine_state_and_factor():
     finding = next(item for item in emit_cadastro_regularidade(snapshots, fingerprint="x") if item.codigo == "certidao_cnd_federal_pendente")
     assert finding.valor["estado"] == "negativa"
     assert finding.valor["fator"] == 0.0
+
+
+def test_pending_certificates_are_known_absences_with_high_confidence():
+    snapshots = {"__statuses__": {component: "pending" for component in ("cnd_federal", "cndt_tst", "fgts")}}
+    findings = {item.codigo: item for item in emit_cadastro_regularidade(snapshots, fingerprint="x")}
+
+    for code in ("certidao_cnd_federal_pendente", "certidao_cndt_pendente", "certidao_fgts_pendente"):
+        assert findings[code].estado == Estado.CONFIRMADO
+        assert findings[code].confianca == "ALTA"
+        assert findings[code].valor == {"estado": "ausente", "status_componente": "pending", "validade": None, "fator": 0.0}
+
+
+def test_valid_negative_certificate_is_negative_confirmed():
+    finding = next(
+        item for item in emit_cadastro_regularidade(
+            {"cnd_federal": {"resultado": "negativa", "valida": True}}, fingerprint="x"
+        ) if item.codigo == "certidao_cnd_federal_pendente"
+    )
+    assert finding.estado == Estado.NEGATIVO_CONFIRMADO
+    assert finding.confianca == "ALTA"
