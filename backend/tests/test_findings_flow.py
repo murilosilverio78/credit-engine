@@ -166,6 +166,37 @@ def test_emitter_version_participates_in_idempotency_hash(monkeypatch):
     assert db.rpc_calls[2][1]["p_run"]["versao_emissor"] == "3"
 
 
+def test_hash_extras_are_limited_to_each_specialist(monkeypatch):
+    rows = _cadastro_rows() + [
+        {"operation_id": "op", "component": "contratos", "status": "completed", "parsed_result": {}},
+        {"operation_id": "op", "component": "recursos_recebidos", "status": "completed", "parsed_result": {"faturamento_verificado_12m": 100}},
+        {"operation_id": "op", "component": "contratos_comprasnet", "status": "completed", "parsed_result": {}},
+        {"operation_id": "op", "component": "contrato_extracao", "status": "completed", "parsed_result": {"regime_conta_vinculada": "OK", "flags": []}},
+        {"operation_id": "op", "component": "web_research", "status": "completed", "parsed_result": {"nivel": "Adequado"}},
+    ]
+    db = FlowDb(rows)
+    catalog = _catalog() | {
+        "conta_vinculada_regime:1": {"codigo": "conta_vinculada_regime", "versao": 1, "escopo": "CONTRATO", "tipo_valor": "ENUM"},
+        "reputacao_mercado:1": {"codigo": "reputacao_mercado", "versao": 1, "escopo": "CEDENTE", "tipo_valor": "ENUM"},
+        "alertas_reputacionais:1": {"codigo": "alertas_reputacionais", "versao": 1, "escopo": "CEDENTE", "tipo_valor": "OBJETO"},
+    }
+    monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: catalog)
+    db.tables["cotacoes_broadfactor"] = [{"operation_id": "op", "tipos_documento": ["DRE"]}]
+
+    emitter.emit_findings("op", "sacado_orgao", database=db)
+    db.tables["cotacoes_broadfactor"][0]["tipos_documento"] = ["PENULTIMO_BALANCO"]
+    emitter.emit_findings("op", "sacado_orgao", database=db)
+    db.tables["operations"][0]["valor_enquadrado"] = 200
+    emitter.emit_findings("op", "sacado_orgao", database=db)
+    emitter.emit_findings("op", "cadastro_regularidade", database=db)
+    db.tables["operations"][0]["valor_enquadrado"] = 300
+    emitter.emit_findings("op", "cadastro_regularidade", database=db)
+
+    hashes = [call[1]["p_run"]["entrada_hash"] for call in db.rpc_calls]
+    assert hashes[0] == hashes[1] and hashes[1] != hashes[2]
+    assert hashes[3] == hashes[4]
+
+
 def test_porte_reprocessing_uses_new_override_not_old_snapshot(monkeypatch):
     db = FlowDb([{
         "operation_id": "op", "component": "score_engine", "status": "completed",

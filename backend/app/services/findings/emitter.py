@@ -48,8 +48,9 @@ def _quote_catalog(database, operation_id: str):
 def emit_findings(operation_id: str, especialista: str, *, database=None, overrides: dict[str, Any] | None = None) -> None:
     """Emit one idempotent run without changing a decision.
 
-    Any adapter-rule change must increment ``EMITTER_VERSION``; otherwise the
-    RPC deduplicates existing operation inputs and does not emit a new run.
+    Any adapter-rule or hash-composition change must increment
+    ``EMITTER_VERSION``; otherwise the RPC deduplicates existing operation
+    inputs and does not emit a new run.
     """
     try:
         db = database
@@ -68,18 +69,26 @@ def emit_findings(operation_id: str, especialista: str, *, database=None, overri
         catalog = get_catalog(database=db)
         if catalog is None:
             logger.warning("findings.emission_skipped_catalog_unavailable", operation_id=operation_id, especialista=especialista); return
-        quote_catalog = _quote_catalog(db, operation_id)
+        extras = version.HASH_EXTRAS[especialista]
+        quote_catalog = _quote_catalog(db, operation_id) if "tipos_documento" in extras else None
         if quote_catalog:
             snapshots["catalogo_broadfactor"] = quote_catalog
-        if overrides:
+        if overrides and "overrides" in extras:
             snapshots.update(overrides)
         snapshots["__statuses__"] = statuses
-        input_components = set(required) | set(OPTIONAL_INPUTS[especialista]) | set(overrides or {})
+        input_components = set(required) | set(OPTIONAL_INPUTS[especialista]) | (set(overrides or {}) if "overrides" in extras else set())
         input_rows = [
             (component, statuses.get(component, "missing"), snapshots.get(component))
             for component in sorted(input_components)
         ]
-        fingerprint = entrada_hash({"versao_emissor": version.EMITTER_VERSION, "insumos": input_rows, "valor_enquadrado": operation.get("valor_enquadrado"), "tipos_documento": (quote_catalog or {}).get("documentos_broadfactor"), "overrides": overrides or {}})
+        hash_extras = {}
+        if "valor_enquadrado" in extras:
+            hash_extras["valor_enquadrado"] = operation.get("valor_enquadrado")
+        if "tipos_documento" in extras:
+            hash_extras["tipos_documento"] = (quote_catalog or {}).get("documentos_broadfactor")
+        if "overrides" in extras:
+            hash_extras["overrides"] = overrides or {}
+        fingerprint = entrada_hash({"versao_emissor": version.EMITTER_VERSION, "insumos": input_rows, "extras": hash_extras})
         candidates = adapter(snapshots, fingerprint=fingerprint, operation=operation)
         achados = []
         for candidate in candidates:
