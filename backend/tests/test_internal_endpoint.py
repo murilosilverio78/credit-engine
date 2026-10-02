@@ -79,6 +79,18 @@ def test_empty_configured_token_returns_503(monkeypatch):
     assert "INTERNAL_JOB_TOKEN" in response.json()["detail"]
 
 
+def test_findings_reemit_requires_internal_token_and_validates_limit(monkeypatch):
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    assert make_client().post("/api/v1/internal/findings/reemitir").status_code == 401
+    assert make_client().post("/api/v1/internal/findings/reemitir", headers={"X-Internal-Token": "wrong"}).status_code == 401
+    for limit in (0, 101):
+        response = make_client().post(
+            "/api/v1/internal/findings/reemitir",
+            json={"limite": limit}, headers={"X-Internal-Token": "configured-token"},
+        )
+        assert response.status_code == 422
+
+
 def test_live_ingestion_returns_202_and_uses_background_task(monkeypatch):
     calls = []
 
