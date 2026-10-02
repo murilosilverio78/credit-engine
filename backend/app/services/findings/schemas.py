@@ -5,6 +5,7 @@ from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
+from dataclasses import dataclass, field
 
 
 class Escopo(StrEnum):
@@ -60,3 +61,10 @@ class ExecucaoEnvelope(BaseModel):
     custo_usd: float | None = None
     duracao_ms: int | None = None
     erro: str | None = None
+
+
+@dataclass(frozen=True)
+class EmissionResult:
+    desfecho: str
+    run_id: str | None = None
+    faltantes: list[str] = field(default_factory=list)

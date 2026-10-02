@@ -31,7 +31,7 @@ def test_emitter_calls_rpc_once_and_swallows_rpc_failure(monkeypatch):
     emitter.emit_findings("op", "documentos", database=db)
     assert len(db.rpc_calls) == 1
     db.rpc = lambda *_args: (_ for _ in ()).throw(RuntimeError("offline"))
-    assert emitter.emit_findings("op", "documentos", database=db) is None
+    assert emitter.emit_findings("op", "documentos", database=db).desfecho == "erro"
 
 
 def test_emitter_skips_unknown_code_and_unavailable_catalog(monkeypatch):

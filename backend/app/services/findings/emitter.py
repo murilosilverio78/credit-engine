@@ -5,7 +5,7 @@ import structlog
 from app.services.findings.adapters import ADAPTERS
 from app.services.findings.catalog import get_catalog, validate_value
 from app.services.findings.hashing import entrada_hash
-from app.services.findings.schemas import ExecucaoEnvelope
+from app.services.findings.schemas import EmissionResult, ExecucaoEnvelope
 from app.services.findings import version
 
 logger = structlog.get_logger()
@@ -19,6 +19,9 @@ OPTIONAL_INPUTS = {
     "sacado_orgao": (), "documentos": (), "reputacional": (), "porte": (),
 }
 TERMINAL = {"completed", "failed"}
+
+def missing_required(especialista: str, statuses: dict[str, str]) -> list[str]:
+    return [component for component in REQUIRED.get(especialista, ()) if statuses.get(component) not in TERMINAL]
 
 def _first_row(query):
     result = query.limit(1).execute()
@@ -45,7 +48,7 @@ def _quote_catalog(database, operation_id: str):
         return None
     return {"documentos_broadfactor": [{"tipo": item} for item in (row.get("tipos_documento") or []) if item]}
 
-def emit_findings(operation_id: str, especialista: str, *, database=None, overrides: dict[str, Any] | None = None) -> None:
+def emit_findings(operation_id: str, especialista: str, *, database=None, overrides: dict[str, Any] | None = None) -> EmissionResult:
     """Emit one idempotent run without changing a decision.
 
     Any adapter-rule or hash-composition change must increment
@@ -59,16 +62,17 @@ def emit_findings(operation_id: str, especialista: str, *, database=None, overri
             db = supabase
         required, adapter = REQUIRED.get(especialista), ADAPTERS.get(especialista)
         if required is None or adapter is None:
-            logger.warning("findings.unknown_specialist", operation_id=operation_id, especialista=especialista); return
+            logger.warning("findings.unknown_specialist", operation_id=operation_id, especialista=especialista); return EmissionResult("erro")
         operation = _load_operation(db, operation_id)
         if not operation:
-            logger.warning("findings.operation_not_found", operation_id=operation_id, especialista=especialista); return
+            logger.warning("findings.operation_not_found", operation_id=operation_id, especialista=especialista); return EmissionResult("erro")
         snapshots, statuses = _load_snapshots(db, operation_id)
-        if any(statuses.get(component) not in TERMINAL for component in required):
-            logger.debug("findings.inputs_not_terminal", operation_id=operation_id, especialista=especialista); return
+        faltantes = missing_required(especialista, statuses)
+        if faltantes:
+            logger.debug("findings.inputs_not_terminal", operation_id=operation_id, especialista=especialista); return EmissionResult("aguardando", faltantes=faltantes)
         catalog = get_catalog(database=db)
         if catalog is None:
-            logger.warning("findings.emission_skipped_catalog_unavailable", operation_id=operation_id, especialista=especialista); return
+            logger.warning("findings.emission_skipped_catalog_unavailable", operation_id=operation_id, especialista=especialista); return EmissionResult("sem_catalogo")
         extras = version.HASH_EXTRAS[especialista]
         quote_catalog = _quote_catalog(db, operation_id) if "tipos_documento" in extras else None
         if quote_catalog:
@@ -100,6 +104,9 @@ def emit_findings(operation_id: str, especialista: str, *, database=None, overri
             achados.append(candidate.model_dump(mode="json"))
         run_status = "PARCIAL" if any(statuses.get(component) == "failed" for component in required) else "COMPLETO"
         envelope = ExecucaoEnvelope(operation_id=operation_id, ambiente=str(operation.get("ambiente") or "PRODUCAO"), especialista=especialista, status=run_status, entrada_hash=fingerprint, versao_emissor=version.EMITTER_VERSION)
-        db.rpc("registrar_achados", {"p_run": envelope.model_dump(mode="json"), "p_achados": achados}).execute()
+        response = db.rpc("registrar_achados", {"p_run": envelope.model_dump(mode="json"), "p_achados": achados}).execute()
+        row = ((response.data or [None])[0] if response else None) or {}
+        return EmissionResult("emitido" if row.get("inserido", True) else "deduplicado", run_id=str(row.get("run_id")) if row.get("run_id") else None)
     except Exception as exc:
         logger.warning("findings.emission_failed", operation_id=operation_id, especialista=especialista, error=str(exc))
+        return EmissionResult("erro")

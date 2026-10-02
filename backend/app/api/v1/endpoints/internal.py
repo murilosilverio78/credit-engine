@@ -2,14 +2,17 @@ import asyncio
 import secrets
 import time
 from typing import Annotated
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
+from pydantic import BaseModel, Field
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.services.analysis_runtime import is_shutting_down
 from app.services.operation_watchdog_service import run_operation_watchdog
+from app.services.findings.backfill import reemitir_operacao, select_operations
 from app.workers.http_utils import (
     acquire_portal_call,
     portal_api_url,
@@ -23,6 +26,13 @@ router = APIRouter()
 IPIFY_URL = "https://api.ipify.org?format=json"
 PORTAL_DIAGNOSTIC_CNPJ = "00000000000191"
 DIAGNOSTIC_TIMEOUT_SECONDS = 15.0
+
+
+class FindingsReemitRequest(BaseModel):
+    operation_ids: list[UUID] | None = None
+    ambiente: str = "PRODUCAO"
+    limite: int = Field(default=20, ge=1, le=100)
+    aplicar: bool = False
 
 
 def verify_internal_token(
@@ -109,6 +119,31 @@ async def trigger_operation_watchdog(
     _: None = Depends(verify_internal_token),
 ):
     return await asyncio.to_thread(run_operation_watchdog)
+
+
+@router.post("/findings/reemitir")
+async def reemitir_findings(request: FindingsReemitRequest, _: None = Depends(verify_internal_token)):
+    from app.core.database import supabase
+
+    operation_ids = await asyncio.to_thread(
+        select_operations,
+        operation_ids=[str(item) for item in request.operation_ids] if request.operation_ids is not None else None,
+        ambiente=request.ambiente,
+        limite=request.limite,
+        database=supabase,
+    )
+    started = time.monotonic()
+    processed, remaining, operations, totals = 0, [], [], {}
+    for index, operation_id in enumerate(operation_ids):
+        if time.monotonic() - started >= 45:
+            remaining = operation_ids[index:]
+            break
+        result = await asyncio.to_thread(reemitir_operacao, operation_id, aplicar=request.aplicar, database=supabase)
+        processed += 1
+        operations.append(result)
+        for outcome in result["especialistas"].values():
+            totals[outcome] = totals.get(outcome, 0) + 1
+    return {"aplicar": request.aplicar, "processadas": processed, "restantes": remaining, "operacoes": operations, "totais": totals}
 
 
 @router.post("/ingestao/broadfactor")

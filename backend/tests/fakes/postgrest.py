@@ -32,6 +32,9 @@ class Query:
         self._limit = value
         return self
 
+    def order(self, *_args: Any, **_kwargs: Any) -> "Query":
+        return self
+
     def execute(self):
         rows = [
             row.copy()
