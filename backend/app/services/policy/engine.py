@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any
+import unicodedata
 
 from app.services.policy.types import EntradaPolitica, ResultadoPolitica
 
@@ -38,6 +39,35 @@ def _level(value: Any, params: dict[str, Any]) -> float:
     aliases = {"Atenção": "Atencao", "atenção": "Atencao", "atencao": "Atencao", "excepcional": "Excepcional", "forte": "Forte", "adequado": "Adequado", "fraco": "Fraco", "critico": "Critico", "crítico": "Critico"}
     value = aliases.get(str(value).strip().lower(), value)
     return _number(levels.get(value), _number(levels["Adequado"]))
+
+
+def _porte_cadastral_score(value: Any, capital: float | None, empresarial: bool, params: dict[str, Any]) -> float:
+    """Mirror the deterministic branches of ``_porte_score``."""
+    raw = str(value or "").upper()
+    normalized = "".join(
+        char for char in unicodedata.normalize("NFKD", str(value or "").upper())
+        if not unicodedata.combining(char)
+    )
+    if "MEI" in raw or "MICROEMPREENDEDOR" in raw:
+        return 35.0
+    if "EPP" in raw or "PEQUENO" in raw:
+        return 72.0
+    if "MEDIO" in normalized or "MÉDIO" in raw or "MÃ‰DIO" in raw:
+        return 85.0
+    if "GRANDE" in raw:
+        return 95.0
+    if "MICRO" in raw or raw == "ME":
+        return 58.0
+    bands = params["faixas_porte_cadastral"]
+    if not empresarial:
+        return _number(bands["natureza_nao_empresarial"])
+    if capital is not None:
+        if capital > 2_000_000:
+            return 95.0
+        if capital > 500_000:
+            return 85.0
+        return 58.0
+    return _number(bands["fallback"])
 
 
 def _age_at_reference(finding, reference: date) -> float:
@@ -140,18 +170,24 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
         found = _finding(entrada, str(rule.get("codigo")), trail, "vetos")
         if found and found.estado == "CONFIRMADO" and found.confianca == "ALTA" and bool(found.valor):
             vetos.append(str(found.codigo))
-    if vetos:
-        return ResultadoPolitica(_number(parametros["score_bloqueio"]), "E", "E", _number(parametros["score_bloqueio"]), _number(parametros["score_bloqueio"]), 1.0, 1.0, 0.0, 0.0, [], vetos, None, {}, [], trail)
-
     idade = _finding(entrada, "idade_empresa_anos", trail, "saude_cadastral")
     capital = _finding(entrada, "capital_social_rs", trail, "saude_cadastral")
     porte = _finding(entrada, "porte_cadastral", trail, "saude_cadastral")
     qsa = _finding(entrada, "qsa_estabilidade", trail, "saude_cadastral")
     idade_score = _band(_age_at_reference(idade, data_referencia), parametros["faixas_idade"]) if idade else 55.0
-    capital_score = _band(_number(capital.valor), parametros["faixas_capital"]) if capital else 55.0
-    porte_map = parametros["faixas_porte_cadastral"]
+    # The official engine uses ``brasil.get("capital_social") or ...``:
+    # zero is consequently indistinguishable from a missing capital and is a
+    # material-data absence, rather than the lowest capital band.
+    raw_capital = _number(capital.valor) if capital and capital.valor is not None else 0.0
+    capital_value = raw_capital if raw_capital > 0 else None
+    capital_score = _band(capital_value, parametros["faixas_capital"]) if capital_value is not None else 55.0
     empresarial = _finding(entrada, "natureza_juridica_empresarial", trail, "saude_cadastral")
-    porte_score = _number(porte_map.get(str(porte.valor).upper(), porte_map["natureza_nao_empresarial"] if empresarial and not empresarial.valor else porte_map["fallback"])) if porte else _number(porte_map["fallback"])
+    porte_score = _porte_cadastral_score(
+        porte.valor if porte else None,
+        capital_value,
+        not (empresarial and not empresarial.valor),
+        parametros,
+    )
     qsa_value = qsa.valor if qsa else {}
     recent = qsa_value.get("entrada_mais_recente") if isinstance(qsa_value, dict) else None
     qsa_score = _number(parametros["faixas_estabilidade_qsa"]["sem_dados"])
@@ -160,8 +196,12 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
         qsa_score = _number(parametros["faixas_estabilidade_qsa"]["maior_3" if years > 3 else "de_1_a_3" if years >= 1 else "menor_1"])
     sub = parametros["subpesos_cadastral"]
     health = round(idade_score * _number(sub["idade"]) + capital_score * _number(sub["capital"]) + porte_score * _number(sub["porte"]) + qsa_score * _number(sub["estabilidade"]), 1)
-    if not idade or not capital:
-        health = min(health, _number(parametros["score_cap_dado_material_ausente"]))
+    cadastro = _finding(entrada, "cadastro_inativo", trail, "saude_cadastral")
+    situacao_missing = cadastro is not None and cadastro.estado == "NAO_VERIFICADO"
+    if not idade or capital_value is None or situacao_missing:
+        # Older unit fixtures predate this versioned parameter.  The seed
+        # always provides it; 55 is the official historical/default cap.
+        health = min(health, _number(parametros.get("score_cap_dado_material_ausente", 55)))
 
     active = _finding(entrada, "contratos_ativos_qtd", trail, "relacionamento")
     total = _finding(entrada, "contratos_total_qtd", trail, "relacionamento")
@@ -169,12 +209,21 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
     hhi = _finding(entrada, "hhi_recebimentos", trail, "relacionamento")
     months = _finding(entrada, "meses_com_recebimento", trail, "relacionamento")
     maturity = _finding(entrada, "maturidade_max_anos", trail, "relacionamento")
-    active_n, total_n, org_n = _number(active.valor), _number(total.valor), _number(orgs.valor)
+    active_n = _number(active.valor) if active else 0.0
+    total_n = _number(total.valor) if total else 0.0
+    org_n = _number(orgs.valor) if orgs else 0.0
     volume = 30 if active_n == 0 else 50 if active_n == 1 else 68 if active_n <= 4 else 82 if active_n <= 9 else 92
     fallback = 45 if org_n <= 1 else 62 if org_n == 2 else 78 if org_n <= 4 else 90
     hhi_n = _number(hhi.valor, -1) if hhi else -1
     concentration = 90 if 0 < hhi_n < 2500 else 70 if hhi_n <= 6000 and hhi_n > 0 else 45 if hhi_n > 0 else fallback
-    if hhi_n > 0 and months and _number(months.valor) < _number(parametros["hhi_min_meses_recebimento"]):
+    # ``None`` receipt months do not activate the fallback in the official
+    # engine.  An unverified finding is therefore distinct from a known zero.
+    if (
+        hhi_n > 0
+        and months
+        and months.estado == "CONFIRMADO"
+        and _number(months.valor) < _number(parametros["hhi_min_meses_recebimento"])
+    ):
         concentration = min(concentration, fallback)
     history = 50 if total_n <= 2 else 68 if total_n <= 5 else 82 if total_n <= 12 else 92
     maturity_score = 55 if not maturity or _number(maturity.valor) < 1 else 72 if _number(maturity.valor) < 3 else 88
@@ -186,7 +235,15 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
     capability_score = _level(capability.valor if capability else "Adequado", parametros)
     reputation_score = _level(reputation.valor if reputation else "Adequado", parametros)
     weights = parametros["pesos_merito"]
-    merit_potential = round(relationship * _number(weights["relacionamento_governamental"]) + capability_score * _number(weights["porte_operacionalidade"]) + health * _number(weights["saude_cadastral"]) + reputation_score * _number(weights["reputacao_mercado"]), 1)
+    merit_potential = round(sum(
+        score * _number(weights[name])
+        for name, score in (
+            ("relacionamento_governamental", relationship),
+            ("porte_operacionalidade", capability_score),
+            ("saude_cadastral", health),
+            ("reputacao_mercado", reputation_score),
+        )
+    ), 1)
 
     haircuts = 0.0
     penalties = 0.0
@@ -209,15 +266,26 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
         # the Porte/Operacionalidade contribution; keep the potential score
         # untouched and lower only the effective dimension.
         balance_penalty = min(configured_balance_penalty, capability_score * porte_weight)
-        effective_capability_score = max(0.0, capability_score - (balance_penalty / porte_weight)) if porte_weight > 0 else capability_score
-    merit = round(
-        relationship * _number(weights["relacionamento_governamental"])
-        + effective_capability_score * porte_weight
-        + health * _number(weights["saude_cadastral"])
-        + reputation_score * _number(weights["reputacao_mercado"]),
-        1,
-    )
+        effective_capability_score = round(max(0.0, capability_score - (balance_penalty / porte_weight)), 1) if porte_weight > 0 else capability_score
+    merit = round(sum(
+        score * _number(weights[name])
+        for name, score in (
+            ("relacionamento_governamental", relationship),
+            ("porte_operacionalidade", effective_capability_score),
+            ("saude_cadastral", health),
+            ("reputacao_mercado", reputation_score),
+        )
+    ), 1)
     score = round(max(0.0, round(merit_potential * factor, 1) - balance_penalty), 1)
+    if vetos:
+        gate_score = _number(parametros["score_bloqueio"])
+        dimensions = {
+            name: gate_score for name in (
+                "relacionamento_governamental", "porte_operacionalidade",
+                "saude_cadastral", "reputacao_mercado",
+            )
+        }
+        return ResultadoPolitica(gate_score, "E", "E", gate_score, gate_score, factor, factor_potential, 0.0, 0.0, [], vetos, None, dimensions, [], trail)
     rating = _rating(score, parametros["faixas_rating"])
     potential_rating = _rating(round(merit_potential * factor_potential, 1), parametros["faixas_rating"])
     limit, limit_flags = _limit(entrada, parametros, trail)
