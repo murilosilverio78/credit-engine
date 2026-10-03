@@ -10,6 +10,8 @@ VALUES
   ('contratos_comprasnet_incluidos_qtd', 1, 'CONTRATO', 'AJUSTE', 'CODIGO', 'NUMERO',
    'Quantidade de contratos verificados no Comprasnet incluidos no relacionamento'),
   ('receita_serie_anual', 1, 'CEDENTE', 'AJUSTE', 'CODIGO', 'OBJETO',
-   'Fatos da serie anual de recebimentos para o ajuste de PD');
+   'Fatos da serie anual de recebimentos para o ajuste de PD'),
+  ('contratos_valor_total_ativo_rs', 1, 'CONTRATO', 'AJUSTE', 'CODIGO', 'NUMERO',
+   'Valor total ativo de contratos usado no limite legado');
 
 NOTIFY pgrst, 'reload schema';

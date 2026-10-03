@@ -24,6 +24,13 @@ def _integer(value: Any) -> int | None:
         return None
 
 
+def _number(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _annual_series_fact(receipts: dict[str, Any]) -> dict[str, Any]:
     volatility = receipts.get("volatilidade") or {}
     series = receipts.get("serie_anual") or receipts.get("valor_por_ano") or {}
@@ -90,6 +97,11 @@ def emit_sacado_orgao(
             int(contracts.get("contratos_comprasnet_incluidos") or 0),
             component="contratos", path="contratos_comprasnet_incluidos",
             fingerprint=fingerprint,
+        ))
+        result.append(finding(
+            "contratos_valor_total_ativo_rs", Escopo.CONTRATO,
+            _number(contracts.get("valor_total_ativo")), component="contratos",
+            path="valor_total_ativo", fingerprint=fingerprint,
         ))
     if not isinstance(receipts, dict):
         for code, scope, path in (("hhi_recebimentos", Escopo.SACADO, "concentracao.hhi"), ("meses_com_recebimento", Escopo.CEDENTE, "meses_com_recebimento"), ("volatilidade_cv", Escopo.CEDENTE, "volatilidade.cv"), ("anos_completos_receita", Escopo.CEDENTE, "volatilidade.anos_completos"), ("receita_serie_anual", Escopo.CEDENTE, "volatilidade.anos_completos,serie_anual,valor_por_ano")):

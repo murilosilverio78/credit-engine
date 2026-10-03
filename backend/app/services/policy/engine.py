@@ -97,6 +97,29 @@ def _new_effects(entrada, rules, trail):
     return effects
 
 
+def _limit(entrada, params, trail):
+    value = _finding(entrada, "contratos_valor_total_ativo_rs", trail, "limite")
+    total_active = _number(value.valor) if value else 0.0
+    operation = entrada.operation
+    margin, contract, balance = (_number(operation.get(key)) for key in ("margem_disponivel", "contrato_saldo", "saldo_vincendo"))
+    requested, framed, maximum = (_number(operation.get(key)) for key in ("valor_solicitado", "valor_enquadrado", "pct_max_contrato"))
+    if framed > 0:
+        return (min(framed, requested) if requested > 0 else framed), []
+    if margin > 0:
+        balance = round(margin / _number(params["pct_margem_sobre_saldo"]), 2)
+    elif balance <= 0:
+        if total_active > 0:
+            balance = total_active
+        elif contract > 0:
+            balance = contract
+        else:
+            return 0.0, ["limite_sem_base_contrato"]
+    if maximum <= 0:
+        return 0.0, ["limite_sem_pct_max_contrato"]
+    limit = round(balance * maximum, 2)
+    return (min(limit, requested) if requested > 0 else limit), []
+
+
 def _band(value: float, bands: list[dict[str, Any]]) -> float:
     for band in bands:
         if "ate" not in band:
@@ -118,7 +141,7 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
         if found and found.estado == "CONFIRMADO" and found.confianca == "ALTA" and bool(found.valor):
             vetos.append(str(found.codigo))
     if vetos:
-        return ResultadoPolitica(_number(parametros["score_bloqueio"]), "E", "E", _number(parametros["score_bloqueio"]), _number(parametros["score_bloqueio"]), 1.0, 1.0, 0.0, 0.0, vetos, None, {}, [], trail)
+        return ResultadoPolitica(_number(parametros["score_bloqueio"]), "E", "E", _number(parametros["score_bloqueio"]), _number(parametros["score_bloqueio"]), 1.0, 1.0, 0.0, 0.0, [], vetos, None, {}, [], trail)
 
     idade = _finding(entrada, "idade_empresa_anos", trail, "saude_cadastral")
     capital = _finding(entrada, "capital_social_rs", trail, "saude_cadastral")
@@ -182,6 +205,6 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
     score = round(max(0.0, round(merit_potential * factor, 1) - balance_penalty), 1)
     rating = _rating(score, parametros["faixas_rating"])
     potential_rating = _rating(round(merit_potential * factor_potential, 1), parametros["faixas_rating"])
-    limit = min(_number(entrada.operation.get("valor_enquadrado")), _number(entrada.operation.get("valor_solicitado")) or _number(entrada.operation.get("valor_enquadrado")))
+    limit, limit_flags = _limit(entrada, parametros, trail)
     effects = _new_effects(entrada, regras, trail)
-    return ResultadoPolitica(score, rating, potential_rating, merit, merit_potential, factor, factor_potential, balance_penalty, limit, [], _pd(entrada, parametros, rating, trail, data_referencia), {"saude_cadastral": health, "relacionamento_governamental": relationship, "porte_operacionalidade": capability_score, "reputacao_mercado": reputation_score}, effects, trail)
+    return ResultadoPolitica(score, rating, potential_rating, merit, merit_potential, factor, factor_potential, balance_penalty, limit, limit_flags, [], _pd(entrada, parametros, rating, trail, data_referencia), {"saude_cadastral": health, "relacionamento_governamental": relationship, "porte_operacionalidade": capability_score, "reputacao_mercado": reputation_score}, effects, trail)

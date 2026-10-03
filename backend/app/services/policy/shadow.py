@@ -32,8 +32,9 @@ def _official(database, operation_id: str) -> tuple[dict[str, Any] | None, date]
     return rows[0]["parsed_result"], _reference(rows[0].get("created_at"))
 
 
-def _hash(runs: dict[str, dict[str, str]], policy_id: str, ref: date) -> str:
-    raw = json.dumps({"runs": runs, "policy_version_id": policy_id, "data_referencia": ref.isoformat()}, sort_keys=True, separators=(",", ":"))
+def _hash(runs: dict[str, dict[str, str]], operation: dict[str, Any], policy_id: str, ref: date) -> str:
+    context = {key: operation.get(key) for key in ("valor_enquadrado", "valor_solicitado", "pct_max_contrato", "margem_disponivel", "contrato_saldo", "saldo_vincendo")}
+    raw = json.dumps({"runs": runs, "contexto": context, "policy_version_id": policy_id, "data_referencia": ref.isoformat()}, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -64,7 +65,7 @@ def avaliar_sombra(operation_id: str, *, database=None, aplicar: bool = False) -
         classe = "ESPERADA"
     else:
         classe = "INESPERADA"
-    payload = {"operation_id": operation_id, "ambiente": entrada.operation.get("ambiente") or "PRODUCAO", "policy_version_id": policy["version"]["id"], "entrada_hash": _hash(entrada.runs_usados, str(policy["version"]["id"]), ref), "data_referencia": ref.isoformat(), "runs_usados": entrada.runs_usados, "resultado": result.as_dict(), "oficial": official or {}, "divergencias": divergencias, "classe_geral": classe, "parametros_divergentes": []}
+    payload = {"operation_id": operation_id, "ambiente": entrada.operation.get("ambiente") or "PRODUCAO", "policy_version_id": policy["version"]["id"], "entrada_hash": _hash(entrada.runs_usados, entrada.operation, str(policy["version"]["id"]), ref), "data_referencia": ref.isoformat(), "runs_usados": entrada.runs_usados, "resultado": result.as_dict(), "oficial": official or {}, "divergencias": divergencias, "classe_geral": classe, "parametros_divergentes": []}
     if aplicar:
         database.table("policy_shadow_runs").insert(payload).execute()
     return payload

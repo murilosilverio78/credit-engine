@@ -35,6 +35,7 @@ class ResultadoPolitica:
     fator_potencial: float
     penalizacao_balanco: float
     limite_aprovado_rs: float
+    limite_flags: list[str]
     bloqueios: list[str]
     ajuste_pd: dict[str, Any] | None
     dimensoes: dict[str, float]
@@ -50,6 +51,7 @@ class ResultadoPolitica:
             "fator_potencial": self.fator_potencial,
             "penalizacao_balanco": self.penalizacao_balanco,
             "limite_aprovado_rs": self.limite_aprovado_rs,
+            "limite_flags": self.limite_flags,
             "bloqueios": self.bloqueios, "ajuste_pd": self.ajuste_pd,
             "dimensoes": self.dimensoes, "efeitos_novos": self.efeitos_novos,
             "trilha": self.trilha,

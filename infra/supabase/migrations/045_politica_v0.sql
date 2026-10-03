@@ -165,6 +165,7 @@ CROSS JOIN (VALUES
   ('pd_cv_corte_moderado', '0.7'::JSONB), ('pd_cv_corte_alto', '0.8'::JSONB),
   ('pd_mult_historico_insuficiente', '1.08'::JSONB), ('pd_mult_volatilidade_moderada', '1.08'::JSONB), ('pd_mult_volatilidade_alta', '1.15'::JSONB),
   ('pd_performada', '0.016'::JSONB), ('pd_mult_por_rating', '{"A":0.6,"B":1.0,"C":2.0,"D":5.0,"E":10.0}'::JSONB)
+  ,('pct_margem_sobre_saldo', '0.70'::JSONB)
 ) AS seed(chave, valor)
 WHERE policy_versions.versao = 1
 ON CONFLICT (policy_version_id, chave) DO NOTHING;
