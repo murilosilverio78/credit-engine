@@ -23,8 +23,10 @@ from app.services.policy.types import EntradaPolitica, FindingValue
 from app.workers.tasks import score_engine
 
 
-SEED = 20261003
-SYNTHETIC_CASES = 300
+# Two stable seeds make a failure reproducible while exercising independent
+# paths.  Keep the seed in the pytest id and assertion message.
+SYNTHETIC_SEEDS = (20261003, 20261117)
+SYNTHETIC_CASES_PER_SEED = 250
 SQL = Path(__file__).parents[2] / "infra/supabase/migrations/045_politica_v0.sql"
 VETO_RULES = [
     {"classe": "VETO", "codigo": "cadastro_inativo"},
@@ -60,14 +62,18 @@ def _certificate(kind: str, reference: date) -> dict[str, Any] | None:
 
 
 def _snapshot(case: dict[str, Any], reference: date) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    age = float(case["age"])
-    opened = reference - timedelta(days=round(age * 365.25))
+    age = case.get("age")
+    opened = (
+        reference - timedelta(days=round(float(age) * 365.25))
+        if age is not None else None
+    )
     contract_count = int(case["active_contracts"])
     duration = float(case["duration"])
+    org_divisor = max(1, int(case["org_count"]))
     contracts = [
         {
             "ativo": True,
-            "orgao": f"ORGAO-{index % int(case['org_count'])}",
+            "orgao": f"ORGAO-{index % org_divisor}",
             "data_inicio": (reference - timedelta(days=round(duration * 365.25))).isoformat(),
             "data_fim": reference.isoformat(),
         }
@@ -75,19 +81,25 @@ def _snapshot(case: dict[str, Any], reference: date) -> tuple[dict[str, Any], di
     ]
     years = case["series_years"]
     documents_source = case["balance_source"]
+    statuses = {component: "completed" for component in (
+        "brasil_api", "pessoa_juridica", "ceis", "cnep", "cepim", "ceaf",
+        "acordos_leniencia",
+    )}
+    statuses.update(case.get("source_statuses") or {})
     snapshots: dict[str, Any] = {
-        "__statuses__": {component: "completed" for component in ("brasil_api", "pessoa_juridica", "ceis", "cnep", "cepim", "ceaf", "acordos_leniencia")},
+        "__statuses__": statuses,
         "brasil_api": {
             "situacao_cadastral": case["situacao"],
-            "data_abertura": opened.isoformat(),
+            "data_abertura": opened.isoformat() if opened else None,
             "capital_social": case["capital"],
             "porte": case["porte_cadastral"],
             "natureza_juridica": case["natureza"],
-            "qsa": [{"data_entrada": (reference - timedelta(days=round(float(case["qsa_years"]) * 365.25))).isoformat(), "qualificacao": "Administrador"}],
+            "qsa": (
+                [{"data_entrada": (reference - timedelta(days=round(float(case["qsa_years"]) * 365.25))).isoformat(), "qualificacao": "Administrador"}]
+                if case.get("qsa_years") is not None else []
+            ),
         },
         "pessoa_juridica": {},
-        "ceis": {"total_registros": 0}, "cnep": {"total_registros": 0}, "cepim": {"total_registros": 0}, "ceaf": {"total_registros": 0},
-        "acordos_leniencia": {"total_acordos": 0},
         "contratos": {
             "contratos_ativos": contract_count,
             "total_contratos": case["total_contracts"],
@@ -104,11 +116,39 @@ def _snapshot(case: dict[str, Any], reference: date) -> tuple[dict[str, Any], di
         },
         "web_research": {
             "nivel": case["reputacao"],
-            "fatores_reputacao": ["sinal positivo"] if case["reputacao"] == "Excepcional" else [],
+            "fatores_reputacao": ["sinal positivo"] if case.get("positive_signals") else [],
             "flags_reputacao": case["reputacao_flags"],
         },
         "score_engine": {"dimensoes": {"porte_operacionalidade": {"nivel": case["porte_llm"], "flags": case["porte_flags"]}}},
     }
+    for component in ("brasil_api", "pessoa_juridica"):
+        if statuses.get(component) != "completed":
+            snapshots.pop(component, None)
+    sanction_case = case.get("sanction_case", "none")
+    for component in ("ceis", "cnep", "cepim", "ceaf"):
+        if statuses.get(component) == "completed":
+            snapshots[component] = {"total_registros": 0}
+    if sanction_case == "active":
+        snapshots["ceis"] = {"possui_sancao": True, "total_registros": 1, "registros": [{"situacao": "vigente"}]}
+    elif sanction_case == "count_empty":
+        snapshots["cepim"] = {"possui_sancao": True, "total_registros": 2, "registros": []}
+    elif sanction_case == "closed":
+        snapshots["ceis"] = {"possui_sancao": True, "total_registros": 1, "registros": [{"situacao": "encerrado", "data_fim": "2019-01-01"}]}
+    elif sanction_case == "pessoa":
+        snapshots.setdefault("pessoa_juridica", {})["possui_sancao"] = True
+    if sanction_case == "failed":
+        statuses["ceis"] = "failed"
+        snapshots.pop("ceis", None)
+    agreement_case = case.get("agreement_case", "none")
+    if statuses.get("acordos_leniencia") == "completed":
+        snapshots["acordos_leniencia"] = {"total_acordos": 0}
+    if agreement_case == "active":
+        snapshots["acordos_leniencia"] = {"possui_acordo": True, "total_acordos": 1, "acordos": [{"situacao": "vigente"}]}
+    elif agreement_case == "count_empty":
+        snapshots["acordos_leniencia"] = {"possui_acordo": True, "total_acordos": 2, "acordos": []}
+    elif agreement_case == "failed":
+        statuses["acordos_leniencia"] = "failed"
+        snapshots.pop("acordos_leniencia", None)
     for component, kind in zip(("cnd_federal", "cndt_tst", "fgts"), case["certidoes"]):
         certificate = _certificate(kind, reference)
         if certificate is not None:
@@ -125,6 +165,11 @@ def _snapshot(case: dict[str, Any], reference: date) -> tuple[dict[str, Any], di
     elif documents_source == "ambos":
         snapshots["catalogo_broadfactor"] = {"documentos_broadfactor": [document]}
         snapshots["contrato_extracao"] = {"resultado": {"tipo_documento": "DRE"}}
+
+    for field in case.get("omit_contract_fields") or ():
+        snapshots["contratos"].pop(field, None)
+    if case.get("recursos_status") != "completed" and case.get("recursos_status"):
+        snapshots.pop("recursos_recebidos", None)
 
     operation = {
         "valor_enquadrado": case["valor_enquadrado"], "valor_solicitado": case["valor_solicitado"],
@@ -160,14 +205,30 @@ def _compare(case: dict[str, Any], reference: date) -> list[str]:
     actual = policy.as_dict()
     expected = {
         "score": official.get("score"), "rating": official.get("rating"), "rating_potencial": official.get("rating_potencial"),
-        "merit": official.get("merit"), "merit_potencial": official.get("merit_potencial", "<ausente no retorno oficial>"),
+        "merit": official.get("merit"),
         "fator_regularidade": official.get("fator_regularidade"), "fator_potencial": official.get("regularidade", {}).get("fator_potencial"),
         "penalizacao_balanco": official.get("penalizacao_balanco", 0.0), "limite_aprovado_rs": official.get("limite_aprovado_rs"),
         "limite_flags": [flag for flag in official.get("flags", []) if flag.startswith("limite_")],
-        "bloqueios": official.get("bloqueios"), "ajuste_pd": official.get("ajuste_pd"),
+        "ajuste_pd": official.get("ajuste_pd"),
         "dimensoes": {name: dimension["score"] for name, dimension in official.get("dimensoes", {}).items()},
     }
-    return [f"{field}: politica={actual.get(field)!r}; oficial={value!r}" for field, value in expected.items() if actual.get(field) != value]
+    if "merit_potencial" in official:
+        expected["merit_potencial"] = official["merit_potencial"]
+    def category(value: str) -> str:
+        text = str(value)
+        if text.startswith("Situacao cadastral") or text == "cadastro_inativo":
+            return "cadastro_inativo"
+        if text.startswith("Sancao ativa") or text == "sancao_ativa":
+            return "sancao_ativa"
+        if text.startswith("Acordo de leniencia") or text == "acordo_leniencia_ativo":
+            return "acordo_leniencia_ativo"
+        return text
+    differences = [f"{field}: politica={actual.get(field)!r}; oficial={value!r}" for field, value in expected.items() if actual.get(field) != value]
+    policy_blocks = {category(item) for item in actual.get("bloqueios") or []}
+    official_blocks = {category(item) for item in official.get("bloqueios") or []}
+    if policy_blocks != official_blocks:
+        differences.append(f"bloqueios: politica={sorted(policy_blocks)!r}; oficial={sorted(official_blocks)!r}")
+    return differences
 
 
 def _base_case() -> dict[str, Any]:
@@ -182,26 +243,35 @@ def _base_case() -> dict[str, Any]:
 
 
 def _synthetic_cases() -> list[pytest.ParameterSet]:
-    rng = random.Random(SEED)
     cases = []
     ages = (0.5, 1.0, 1.01, 2.0, 2.01, 5.0, 5.01, 10.0, 10.01, 20.0, 20.01)
     capitals = (9999, 10000, 10001, 49999, 50000, 50001, 199999, 200000, 200001, 499999, 500000, 500001, 2000000, 2000001)
-    for index in range(SYNTHETIC_CASES):
-        case = _base_case()
-        case.update({
-            "age": rng.choice(ages), "capital": rng.choice(capitals), "porte_cadastral": rng.choice(("MEI", "MICRO", "EPP", "MEDIO", "GRANDE", "OUTRO")),
-            "qsa_years": rng.choice((0.5, 1.0, 1.01, 3.0, 3.01, 5.0)), "active_contracts": rng.choice((0, 1, 2, 4, 5, 9, 10)),
+    for seed in SYNTHETIC_SEEDS:
+        rng = random.Random(seed)
+        for index in range(SYNTHETIC_CASES_PER_SEED):
+            case = _base_case()
+            case.update({
+            "age": rng.choice((None, *ages)), "capital": rng.choice((None, 0, *capitals)), "porte_cadastral": rng.choice(("MEI", "MICRO", "EPP", "MEDIO", "GRANDE", "OUTRO", None)),
+            "natureza": rng.choice(("Sociedade empresaria limitada", "Associacao privada", None)),
+            "qsa_years": rng.choice((None, 0.5, 1.0, 1.01, 3.0, 3.01, 5.0)), "active_contracts": rng.choice((0, 1, 2, 4, 5, 9, 10)),
             "total_contracts": rng.choice((0, 2, 3, 5, 6, 12, 13)), "org_count": rng.choice((1, 2, 3, 4, 5)),
             "duration": rng.choice((0.5, 1.0, 2.99, 3.0, 5.0)), "hhi": rng.choice((None, 1000.0, 2499.9, 2500.0, 6000.0, 6000.1)),
             "months": rng.choice((0, 5, 6, 8, 12)), "cv": rng.choice((None, 0.0, 0.7, 0.71, 0.8, 0.81)),
             "anos_informados": rng.choice((None, 0, 1, 2, 3)), "series_years": rng.choice(([], [reference_year := date.today().year - 1], [reference_year - 1, reference_year])),
-            "porte_llm": rng.choice(tuple(score_engine.NIVEL_NOTA)), "reputacao": rng.choice(tuple(score_engine.NIVEL_NOTA)),
+            "porte_llm": rng.choice(tuple(score_engine.NIVEL_NOTA)), "reputacao": rng.choice((*score_engine.NIVEL_NOTA, "invalido", None)),
+            "positive_signals": rng.choice((False, False, True)),
             "certidoes": tuple(rng.choice(("ausente", "vencida", "nao_validada", "positiva", "positiva_com_efeitos", "negativa")) for _ in range(3)),
             "balance_source": rng.choice(("nenhuma", "cotacao", "extracao", "documents", "ambos")), "comprasnet_incluidos": rng.choice((0, 1)),
+            "source_statuses": rng.choice(({}, {"ceis": "failed"}, {"cnep": "pending"}, {"cepim": "failed"})),
+            "sanction_case": rng.choice(("none", "active", "closed", "count_empty", "pessoa", "failed")),
+            "agreement_case": rng.choice(("none", "active", "count_empty", "failed")),
+            "omit_contract_fields": rng.choice(((), ("contratos_ativos",), ("total_contratos",), ("orgaos_contratantes",))),
+            "recursos_status": rng.choice(("completed", "completed", "pending")),
         })
-        if case["porte_cadastral"] == "OUTRO":
-            case["capital"] = min(case["capital"], 300000)
-        cases.append(pytest.param(f"sintetico-{index:03d}", case, id=f"sintetico-{index:03d}"))
+            if case["porte_cadastral"] == "OUTRO" and isinstance(case["capital"], (int, float)):
+                case["capital"] = min(case["capital"], 300000)
+            name = f"sintetico-{seed}-{index:03d}"
+            cases.append(pytest.param(name, case, id=name))
     return cases
 
 
@@ -233,6 +303,21 @@ def _fixed_cases() -> list[pytest.ParameterSet]:
     case = _base_case(); case.update(comprasnet_incluidos=1, valor_total_ativo=750000); cases.append(("comprasnet-mesclado", case))
     case = _base_case(); case.update(balance_source="nenhuma", porte_llm="Critico"); cases.append(("balanco-teto-porte-baixo", case))
     case = _base_case(); case.update(situacao="BAIXADA"); cases.append(("veto-cadastro", case))
+    case = _base_case(); case.update(age=365 / 365.25); cases.append(("idade-365-dias-precisa", case))
+    case = _base_case(); case.update(
+        sanction_case="count_empty", agreement_case="failed",
+        source_statuses={"acordos_leniencia": "failed"},
+    ); cases.append(("veto-cepim-count-empty-com-acordo-falhado", case))
+    case = _base_case(); case.update(
+        balance_source="nenhuma", sanction_case="failed",
+        source_statuses={"ceis": "failed"},
+    ); cases.append(("balanco-ausente-com-sancao-falhada", case))
+    case = _base_case(); case.update(
+        reputacao="Excepcional", positive_signals=False,
+    ); cases.append(("reputacao-excepcional-sem-sinal", case))
+    case = _base_case(); case.update(
+        reputacao="invalido", positive_signals=False,
+    ); cases.append(("reputacao-invalida", case))
     return [pytest.param(name, case, id=name) for name, case in cases]
 
 

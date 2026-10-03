@@ -32,3 +32,23 @@ marcado como `NADA`.
 `catalog_only_types` nao e um quarto fato: e a protecao contra duplicar tipos
 ja vindos de `contrato_extracao`. O emissor registra a proveniencia completa e
 usa a mesma uniao para decidir a presenca do balanco.
+
+## Invariantes de paridade
+
+- `idade_empresa_anos` preserva a precisao integral de dias/365,25 e carrega
+  a data de referencia na evidencia; a faixa e aplicada pelo interpretador.
+- Um registro restritivo confirmado (inclusive uma contagem positiva sem
+  lista de registros) continua sendo veto quando outra fonte falha. A
+  conclusao negativa de sancoes, por outro lado, exige todas as fontes que o
+  motor oficial verifica (`pessoa_juridica`, CEIS, CNEP, CEPIM e acordos).
+- A presenca de balanco depende somente das tres fontes documentais da tabela
+  acima. Indisponibilidade de sancoes nao transforma esse fato conhecido em
+  `NAO_VERIFICADO`.
+- `reputacao_mercado` recebe o nivel efetivo de `score_reputacao`: nivel
+  invalido volta a `Adequado` e `Excepcional` sem sinal positivo e limitado a
+  `Forte`; a evidencia preserva as flags da decisao.
+- Para relacionamento, contagens ausentes usam os mesmos fallbacks do motor
+  oficial (detalhes de contratos e orgaos ativos), e mes de recebimento
+  indisponivel nao e interpretado como zero.
+- Capital social zero tem a mesma semantica de ausente do motor oficial e
+  aciona o teto de dado material da saude cadastral.
