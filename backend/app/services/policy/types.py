@@ -13,6 +13,7 @@ class FindingValue:
     estado: str
     confianca: str
     run_id: str | None = None
+    evidencia: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

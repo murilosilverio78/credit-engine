@@ -31,8 +31,8 @@ def montar_entrada(operation_id: str, *, database=None) -> EntradaPolitica:
         run_id = row.get("id")
         if not run_id:
             continue
-        for finding in _rows(database.table("findings").select("codigo,valor,estado,confianca").eq("run_id", run_id)):
+        for finding in _rows(database.table("findings").select("codigo,valor,estado,confianca,evidencia").eq("run_id", run_id)):
             code = finding.get("codigo")
             if code:
-                findings[str(code)] = FindingValue(str(code), finding.get("valor"), str(finding.get("estado")), str(finding.get("confianca")), str(run_id))
+                findings[str(code)] = FindingValue(str(code), finding.get("valor"), str(finding.get("estado")), str(finding.get("confianca")), str(run_id), list(finding.get("evidencia") or []))
     return EntradaPolitica(op_rows[0], findings, runs_usados, indisponiveis)
