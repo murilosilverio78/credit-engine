@@ -20,11 +20,19 @@ def montar_entrada(operation_id: str, *, database=None) -> EntradaPolitica:
     op_rows = _rows(database.table("operations").select("id,valor_enquadrado,valor_solicitado,pct_max_contrato,margem_disponivel,contrato_saldo,saldo_vincendo,ambiente").eq("id", operation_id).limit(1))
     if not op_rows:
         raise LookupError("operacao nao encontrada")
-    run_rows = _rows(database.table("finding_runs").select("id,especialista,versao_emissor,created_at").eq("operation_id", operation_id).eq("versao_emissor", EMITTER_VERSION).order("created_at", desc=True))
+    run_rows = _rows(database.table("finding_runs").select("id,especialista,versao_emissor,status,created_at").eq("operation_id", operation_id).eq("versao_emissor", EMITTER_VERSION).order("created_at", desc=True))
     latest: dict[str, dict[str, Any]] = {}
     for row in sorted(run_rows, key=lambda item: str(item.get("created_at") or ""), reverse=True):
         latest.setdefault(str(row.get("especialista")), row)
-    runs_usados = {name: {"run_id": str(row["id"]), "versao_emissor": EMITTER_VERSION} for name, row in latest.items() if row.get("id")}
+    runs_usados = {
+        name: {
+            "run_id": str(row["id"]),
+            "versao_emissor": EMITTER_VERSION,
+            "status": str(row.get("status") or ""),
+        }
+        for name, row in latest.items()
+        if row.get("id")
+    }
     indisponiveis = set(REQUIRED) - set(latest)
     findings: dict[str, FindingValue] = {}
     for row in latest.values():

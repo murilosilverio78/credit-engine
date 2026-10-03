@@ -26,10 +26,36 @@ def _reference(value: Any) -> date:
 
 
 def _official(database, operation_id: str) -> tuple[dict[str, Any] | None, date]:
-    rows = _rows(database.table("component_snapshots").select("parsed_result,created_at").eq("operation_id", operation_id).eq("component", "score_engine").eq("status", "completed").order("created_at", desc=True).limit(1))
+    rows = _rows(database.table("component_snapshots").select("parsed_result,completed_at,created_at").eq("operation_id", operation_id).eq("component", "score_engine").eq("status", "completed").order("completed_at", desc=True).limit(1))
     if not rows or not isinstance(rows[0].get("parsed_result"), dict):
         return None, date.today()
-    return rows[0]["parsed_result"], _reference(rows[0].get("created_at"))
+    return rows[0]["parsed_result"], _reference(rows[0].get("completed_at") or rows[0].get("created_at"))
+
+
+def _block_category(value: Any) -> str:
+    text = str(value)
+    if text.startswith("Situacao cadastral") or text == "cadastro_inativo":
+        return "cadastro_inativo"
+    if text.startswith("Sancao ativa") or text == "sancao_ativa":
+        return "sancao_ativa"
+    if text.startswith("Acordo de leniencia") or text == "acordo_leniencia_ativo":
+        return "acordo_leniencia_ativo"
+    return text
+
+
+def _effects_explain(divergencias: list[dict[str, Any]], effects: list[dict[str, Any]]) -> bool:
+    """Only explicitly declared parity fields can justify a divergence.
+
+    Current glosa and conta-vinculada effects target pricing/LGD, neither of
+    which changes the score-parity fields persisted by this shadow runner.
+    """
+    fields = {str(item["campo"]) for item in divergencias}
+    explained = {
+        str(field)
+        for effect in effects
+        for field in (effect.get("campos_paridade") or [])
+    }
+    return bool(fields) and fields <= explained
 
 
 def _hash(runs: dict[str, dict[str, str]], operation: dict[str, Any], policy_id: str, ref: date) -> str:
@@ -51,17 +77,22 @@ def avaliar_sombra(operation_id: str, *, database=None, aplicar: bool = False) -
         computed = result.as_dict()
         for field in _FIELDS:
             policy_value, official_value = computed.get(field), official.get(field)
-            if isinstance(policy_value, (int, float)) and isinstance(official_value, (int, float)):
+            if field == "bloqueios":
+                policy_value = sorted({_block_category(item) for item in (policy_value or [])})
+                official_value = sorted({_block_category(item) for item in (official_value or [])})
+                different = policy_value != official_value
+            elif isinstance(policy_value, (int, float)) and isinstance(official_value, (int, float)):
                 different = abs(policy_value - official_value) > 0.05
             else:
                 different = policy_value != official_value
             if different:
                 divergencias.append({"campo": field, "valor_politica": policy_value, "valor_oficial": official_value, "diferenca": None, "classe": "PARIDADE", "motivo": "valor divergente"})
-    if entrada.indisponiveis or official is None:
+    partial_run = any(str(run.get("status") or "").upper() == "PARCIAL" for run in entrada.runs_usados.values())
+    if entrada.indisponiveis or partial_run or official is None:
         classe = "SEM_DADOS"
     elif not divergencias:
         classe = "IGUAL"
-    elif result.efeitos_novos:
+    elif _effects_explain(divergencias, result.efeitos_novos):
         classe = "ESPERADA"
     else:
         classe = "INESPERADA"
