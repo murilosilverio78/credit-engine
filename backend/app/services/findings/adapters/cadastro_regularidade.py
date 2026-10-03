@@ -40,7 +40,10 @@ def _qsa_stability_indicators(qsa: Any) -> dict[str, Any]:
     }
 
 
-def emit_cadastro_regularidade(snapshots: dict[str, Any], *, fingerprint: str, operation: dict[str, Any] | None = None):
+def emit_cadastro_regularidade(
+    snapshots: dict[str, Any], *, fingerprint: str,
+    operation: dict[str, Any] | None = None, database=None,
+):
     result = []
     statuses = snapshots.get("__statuses__") or {}
     brasil = snapshots.get("brasil_api") or {}
@@ -108,4 +111,19 @@ def emit_cadastro_regularidade(snapshots: dict[str, Any], *, fingerprint: str, o
             pass
     if "qsa" in brasil:
         result.append(finding("qsa_estabilidade", Escopo.CEDENTE, _qsa_stability_indicators(brasil.get("qsa")), component="brasil_api", path="qsa", fingerprint=fingerprint))
+    # Keep these facts exactly aligned with the deterministic score helpers.
+    from app.workers.tasks.score_engine import _atividade_restrita, _is_empresarial
+    cadastro = brasil or pessoa
+    natureza = cadastro.get("natureza_juridica") if isinstance(cadastro, dict) else None
+    result.append(finding(
+        "natureza_juridica_empresarial", Escopo.CEDENTE,
+        _is_empresarial(natureza), component="brasil_api" if brasil else "pessoa_juridica",
+        path="natureza_juridica", fingerprint=fingerprint,
+    ))
+    result.append(finding(
+        "atividade_restrita", Escopo.CEDENTE,
+        _atividade_restrita(cadastro if isinstance(cadastro, dict) else {}),
+        component="brasil_api" if brasil else "pessoa_juridica",
+        path="atividade_principal", fingerprint=fingerprint,
+    ))
     return result

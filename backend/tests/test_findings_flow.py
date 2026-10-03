@@ -157,13 +157,13 @@ def test_emitter_version_participates_in_idempotency_hash(monkeypatch):
 
     emitter.emit_findings("op", "documentos", database=db)
     emitter.emit_findings("op", "documentos", database=db)
-    monkeypatch.setattr(version, "EMITTER_VERSION", "4")
+    monkeypatch.setattr(version, "EMITTER_VERSION", "5")
     emitter.emit_findings("op", "documentos", database=db)
 
     assert db.rpc_inserted == [True, False, True]
     assert db.rpc_calls[0][1]["p_run"]["entrada_hash"] == db.rpc_calls[1][1]["p_run"]["entrada_hash"]
     assert db.rpc_calls[0][1]["p_run"]["entrada_hash"] != db.rpc_calls[2][1]["p_run"]["entrada_hash"]
-    assert db.rpc_calls[2][1]["p_run"]["versao_emissor"] == "4"
+    assert db.rpc_calls[2][1]["p_run"]["versao_emissor"] == "5"
 
 
 def test_hash_extras_are_limited_to_each_specialist(monkeypatch):
@@ -251,8 +251,10 @@ def test_operation_99e4_end_to_end_emits_22_expected_findings(monkeypatch):
         "hhi_recebimentos": ("CONFIRMADO", "ALTA"), "meses_com_recebimento": ("CONFIRMADO", "ALTA"),
         "volatilidade_cv": ("CONFIRMADO", "ALTA"), "anos_completos_receita": ("CONFIRMADO", "ALTA"),
         "cobertura_exposicao": ("CONFIRMADO", "ALTA"), "glosa_historica": ("CONFIRMADO", "ALTA"),
-        "conta_vinculada_regime": ("CONFIRMADO", "MEDIA"), "capacidade_operacional": ("CONFIRMADO", "MEDIA"),
-        "reputacao_mercado": ("CONFIRMADO", "MEDIA"), "alertas_reputacionais": ("CONFIRMADO", "MEDIA"),
+            "conta_vinculada_regime": ("CONFIRMADO", "MEDIA"), "capacidade_operacional": ("CONFIRMADO", "MEDIA"),
+            "reputacao_mercado": ("CONFIRMADO", "MEDIA"), "alertas_reputacionais": ("CONFIRMADO", "MEDIA"),
+            "natureza_juridica_empresarial": ("CONFIRMADO", "ALTA"), "atividade_restrita": ("CONFIRMADO", "ALTA"),
+            "contratos_comprasnet_incluidos_qtd": ("CONFIRMADO", "ALTA"),
     }
     catalog = {f"{code}:1": {"codigo": code, "versao": 1, "escopo": next_scope, "tipo_valor": value_type}
                for code, (next_scope, value_type) in {
@@ -261,9 +263,11 @@ def test_operation_99e4_end_to_end_emits_22_expected_findings(monkeypatch):
                    "balanco_ausente": ("CEDENTE", "BOOLEANO"), "balanco_catalogado_broadfactor": ("CEDENTE", "OBJETO"),
                    "contratos_ativos_qtd": ("CEDENTE", "NUMERO"), "contratos_total_qtd": ("CEDENTE", "NUMERO"), "orgaos_distintos_qtd": ("SACADO", "NUMERO"), "maturidade_max_anos": ("CONTRATO", "NUMERO"),
                    "hhi_recebimentos": ("SACADO", "NUMERO"), "meses_com_recebimento": ("CEDENTE", "NUMERO"), "volatilidade_cv": ("CEDENTE", "NUMERO"), "anos_completos_receita": ("CEDENTE", "NUMERO"),
-                   "cobertura_exposicao": ("OPERACAO", "NUMERO"), "glosa_historica": ("CONTRATO", "OBJETO"), "conta_vinculada_regime": ("CONTRATO", "ENUM"),
-                   "capacidade_operacional": ("CEDENTE", "ENUM"), "reputacao_mercado": ("CEDENTE", "ENUM"), "alertas_reputacionais": ("CEDENTE", "OBJETO"),
-               }.items()}
+                       "cobertura_exposicao": ("OPERACAO", "NUMERO"), "glosa_historica": ("CONTRATO", "OBJETO"), "conta_vinculada_regime": ("CONTRATO", "ENUM"),
+                       "capacidade_operacional": ("CEDENTE", "ENUM"), "reputacao_mercado": ("CEDENTE", "ENUM"), "alertas_reputacionais": ("CEDENTE", "OBJETO"),
+                       "natureza_juridica_empresarial": ("CEDENTE", "BOOLEANO"), "atividade_restrita": ("CEDENTE", "BOOLEANO"),
+                       "contratos_comprasnet_incluidos_qtd": ("CONTRATO", "NUMERO"),
+                   }.items()}
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: catalog)
 
     for specialist in ("cadastro_regularidade", "sacado_orgao", "documentos", "reputacional"):
@@ -271,7 +275,7 @@ def test_operation_99e4_end_to_end_emits_22_expected_findings(monkeypatch):
     emitter.emit_findings("op", "porte", database=db, overrides={"score_engine": {"dimensoes": {"porte_operacionalidade": {"nivel": "Adequado"}}}})
 
     actual = {item["codigo"]: (item["estado"], item["confianca"]) for item in db.persisted_findings}
-    assert len(actual) == 22
+    assert len(actual) == 25
     assert actual == expected
 
 

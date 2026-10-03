@@ -1,6 +1,6 @@
 """Version of the deterministic finding-emission rules."""
 
-EMITTER_VERSION = "3"
+EMITTER_VERSION = "4"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

@@ -29,7 +29,11 @@ def _first_row(query):
     return rows[0] if rows else None
 
 def _load_operation(database, operation_id: str) -> dict[str, Any] | None:
-    return _first_row(database.table("operations").select("ambiente,valor_enquadrado").eq("id", operation_id))
+    return _first_row(
+        database.table("operations")
+        .select("id,cnpj,ambiente,valor_enquadrado")
+        .eq("id", operation_id)
+    )
 
 def _load_snapshots(database, operation_id: str):
     result = database.table("component_snapshots").select("component,status,parsed_result").eq("operation_id", operation_id).execute()
@@ -93,7 +97,10 @@ def emit_findings(operation_id: str, especialista: str, *, database=None, overri
         if "overrides" in extras:
             hash_extras["overrides"] = overrides or {}
         fingerprint = entrada_hash({"versao_emissor": version.EMITTER_VERSION, "insumos": input_rows, "extras": hash_extras})
-        candidates = adapter(snapshots, fingerprint=fingerprint, operation=operation)
+        adapter_kwargs = {"fingerprint": fingerprint, "operation": operation}
+        if especialista == "sacado_orgao":
+            adapter_kwargs["database"] = db
+        candidates = adapter(snapshots, **adapter_kwargs)
         achados = []
         for candidate in candidates:
             definition = catalog.get(f"{candidate.codigo}:{candidate.catalogo_versao}")

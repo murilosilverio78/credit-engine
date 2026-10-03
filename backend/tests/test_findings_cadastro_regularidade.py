@@ -25,3 +25,18 @@ def test_qsa_finding_exposes_only_stability_indicators():
 
     assert qsa.valor == {"socios_qtd": 2, "entrada_mais_recente": "2023-04-05", "entrada_mais_antiga": "2020-02-01", "tem_administrador": True}
     assert "SOCIA FICTICIA" not in json.dumps([item.model_dump(mode="json") for item in findings], ensure_ascii=False)
+
+
+def test_cadastro_adapter_emits_score_equivalent_nature_and_activity_facts():
+    findings = {
+        item.codigo: item
+        for item in emit_cadastro_regularidade({
+            "brasil_api": {
+                "natureza_juridica": "Associacao privada",
+                "atividade_principal": "Vigilancia patrimonial",
+            },
+        }, fingerprint="x")
+    }
+
+    assert findings["natureza_juridica_empresarial"].valor is False
+    assert findings["atividade_restrita"].valor is True

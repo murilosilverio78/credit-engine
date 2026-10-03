@@ -20,3 +20,15 @@ def test_achados_migration_uses_triggers_for_append_only_and_policy_drafts():
     assert "BEFORE UPDATE OR DELETE OR TRUNCATE ON findings" in sql
     assert "policy_rules_only_draft" in sql
     assert "policy_versions_no_delete" in sql
+
+
+def test_catalog_v2_migration_is_append_only_and_reloads_postgrest_schema():
+    sql = (MIGRATION.parent / "044_catalogo_achados_v2.sql").read_text(encoding="utf-8")
+    for code in (
+        "natureza_juridica_empresarial",
+        "atividade_restrita",
+        "contratos_comprasnet_incluidos_qtd",
+    ):
+        assert code in sql
+    assert "INSERT INTO finding_catalog" in sql
+    assert "NOTIFY pgrst, 'reload schema';" in sql

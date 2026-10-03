@@ -2,6 +2,7 @@
 (426), _cobertura_exposicao (405), and contratos_comprasnet._performance (630)."""
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import date, datetime
 from typing import Any
 
@@ -16,9 +17,23 @@ def _date(value: Any):
         return None
 
 
-def emit_sacado_orgao(snapshots: dict[str, Any], *, fingerprint: str, operation: dict[str, Any] | None = None):
+def emit_sacado_orgao(
+    snapshots: dict[str, Any], *, fingerprint: str,
+    operation: dict[str, Any] | None = None, database=None,
+):
     result = []
-    contracts = snapshots.get("contratos")
+    # The score helper mutates only its supplied snapshot copy.  Reusing it
+    # preserves the exact eligibility, de-duplication and date semantics.
+    relationship_snapshots = deepcopy(snapshots)
+    operation = operation or {}
+    operation_id = operation.get("id")
+    cnpj = operation.get("cnpj")
+    if database is not None and operation_id and cnpj:
+        from app.workers.tasks.score_engine import _add_verified_comprasnet_contract_for_score
+        _add_verified_comprasnet_contract_for_score(
+            str(operation_id), str(cnpj), relationship_snapshots, database,
+        )
+    contracts = relationship_snapshots.get("contratos")
     receipts = snapshots.get("recursos_recebidos")
     if not isinstance(contracts, dict):
         result.extend([
@@ -51,6 +66,12 @@ def emit_sacado_orgao(snapshots: dict[str, Any], *, fingerprint: str, operation:
             result.append(finding("maturidade_max_anos", Escopo.CONTRATO, max(durations), component="contratos", path="contratos_detalhe", fingerprint=fingerprint))
         else:
             result.append(unverified("maturidade_max_anos", Escopo.CONTRATO, component="contratos", path="contratos_detalhe", fingerprint=fingerprint))
+        result.append(finding(
+            "contratos_comprasnet_incluidos_qtd", Escopo.CONTRATO,
+            int(contracts.get("contratos_comprasnet_incluidos") or 0),
+            component="contratos", path="contratos_comprasnet_incluidos",
+            fingerprint=fingerprint,
+        ))
     if not isinstance(receipts, dict):
         for code, scope, path in (("hhi_recebimentos", Escopo.SACADO, "concentracao.hhi"), ("meses_com_recebimento", Escopo.CEDENTE, "meses_com_recebimento"), ("volatilidade_cv", Escopo.CEDENTE, "volatilidade.cv"), ("anos_completos_receita", Escopo.CEDENTE, "volatilidade.anos_completos")):
             result.append(unverified(code, scope, component="recursos_recebidos", path=path, fingerprint=fingerprint))
