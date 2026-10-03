@@ -50,3 +50,25 @@ def test_sacado_adapter_reuses_verified_comprasnet_merge_before_derivations():
     assert by_code["contratos_ativos_qtd"].valor == 2
     assert by_code["contratos_total_qtd"].valor == 2
     assert by_code["contratos_comprasnet_incluidos_qtd"].valor == 1
+
+
+def test_sacado_adapter_tolerates_unexpected_numeric_and_series_types():
+    findings = emit_sacado_orgao({
+        "contratos": {
+            "contratos_ativos": "abc", "total_contratos": [],
+            "contratos_comprasnet_incluidos": {}, "contratos_detalhe": {},
+            "orgaos_contratantes": {"nao": "lista"},
+        },
+        "recursos_recebidos": {
+            "concentracao": [], "volatilidade": ["abc"], "serie_anual": [],
+            "faturamento_verificado_12m": {"invalido": True},
+        },
+    }, fingerprint="x", operation={"valor_enquadrado": ["abc"]})
+    by_code = {item.codigo: item for item in findings}
+
+    assert by_code["contratos_ativos_qtd"].valor == 0
+    assert by_code["contratos_comprasnet_incluidos_qtd"].valor == 0
+    assert by_code["receita_serie_anual"].valor == {
+        "anos_informados": None, "serie_qtd_chaves": 0, "anos_na_serie": [],
+    }
+    assert by_code["cobertura_exposicao"].estado.value == "NAO_VERIFICADO"

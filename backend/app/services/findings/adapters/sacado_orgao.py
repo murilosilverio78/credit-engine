@@ -18,21 +18,24 @@ def _date(value: Any):
 
 
 def _integer(value: Any) -> int | None:
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return None
+    number = _score_float(value)
+    return int(number) if number is not None else None
 
 
 def _number(value: Any) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
+    return _score_float(value) or 0.0
+
+
+def _score_float(value: Any) -> float | None:
+    """Use score-engine's tolerant conversion without duplicating its rules."""
+    from app.workers.tasks.score_engine import _as_float
+
+    return _as_float(value)
 
 
 def _annual_series_fact(receipts: dict[str, Any]) -> dict[str, Any]:
     volatility = receipts.get("volatilidade") or {}
+    volatility = volatility if isinstance(volatility, dict) else {}
     series = receipts.get("serie_anual") or receipts.get("valor_por_ano") or {}
     series = series if isinstance(series, dict) else {}
     years = sorted({year for key in series for year in [_integer(key)] if year is not None})
@@ -71,8 +74,8 @@ def emit_sacado_orgao(
     else:
         from app.workers.tasks.score_engine import _active_contracts, _contract_duration_years
         result.extend([
-            finding("contratos_ativos_qtd", Escopo.CEDENTE, int(contracts.get("contratos_ativos") or 0), component="contratos", path="contratos_ativos", fingerprint=fingerprint),
-            finding("contratos_total_qtd", Escopo.CEDENTE, int(contracts.get("total_contratos") or 0), component="contratos", path="total_contratos", fingerprint=fingerprint),
+            finding("contratos_ativos_qtd", Escopo.CEDENTE, _integer(contracts.get("contratos_ativos")) or 0, component="contratos", path="contratos_ativos", fingerprint=fingerprint),
+            finding("contratos_total_qtd", Escopo.CEDENTE, _integer(contracts.get("total_contratos")) or 0, component="contratos", path="total_contratos", fingerprint=fingerprint),
         ])
         declared_orgaos = contracts.get("orgaos_contratantes")
         if isinstance(declared_orgaos, list):
@@ -85,8 +88,8 @@ def emit_sacado_orgao(
             }
         result.append(finding("orgaos_distintos_qtd", Escopo.SACADO, len(orgaos), component="contratos", path="orgaos_contratantes", fingerprint=fingerprint))
         active_contracts = _active_contracts(contracts)
-        ativos = int(contracts.get("contratos_ativos") or len(active_contracts) or 0)
-        total = int(contracts.get("total_contratos") or len(contracts.get("contratos_detalhe") or []) or ativos)
+        ativos = _integer(contracts.get("contratos_ativos")) or len(active_contracts) or 0
+        total = _integer(contracts.get("total_contratos")) or len(contracts.get("contratos_detalhe") or []) or ativos
         result[0] = finding("contratos_ativos_qtd", Escopo.CEDENTE, ativos, component="contratos", path="contratos_ativos", fingerprint=fingerprint)
         result[1] = finding("contratos_total_qtd", Escopo.CEDENTE, total, component="contratos", path="total_contratos", fingerprint=fingerprint)
         durations = []
@@ -102,7 +105,7 @@ def emit_sacado_orgao(
             result.append(unverified("maturidade_max_anos", Escopo.CONTRATO, component="contratos", path="contratos_detalhe", fingerprint=fingerprint))
         result.append(finding(
             "contratos_comprasnet_incluidos_qtd", Escopo.CONTRATO,
-            int(contracts.get("contratos_comprasnet_incluidos") or 0),
+            _integer(contracts.get("contratos_comprasnet_incluidos")) or 0,
             component="contratos", path="contratos_comprasnet_incluidos",
             fingerprint=fingerprint,
         ))
@@ -116,7 +119,9 @@ def emit_sacado_orgao(
             result.append(unverified(code, scope, component="recursos_recebidos", path=path, fingerprint=fingerprint))
     else:
         concentration = receipts.get("concentracao") or {}
+        concentration = concentration if isinstance(concentration, dict) else {}
         volatility = receipts.get("volatilidade") or {}
+        volatility = volatility if isinstance(volatility, dict) else {}
         for code, scope, value, path in (
             ("hhi_recebimentos", Escopo.SACADO, concentration.get("hhi"), "concentracao.hhi"),
             ("meses_com_recebimento", Escopo.CEDENTE, receipts.get("meses_com_recebimento"), "meses_com_recebimento"),
@@ -129,8 +134,10 @@ def emit_sacado_orgao(
             component="recursos_recebidos", path="volatilidade.anos_completos,serie_anual,valor_por_ano",
             fingerprint=fingerprint,
         ))
-        if operation and operation.get("valor_enquadrado") is not None and receipts.get("faturamento_verificado_12m"):
-            result.append(finding("cobertura_exposicao", Escopo.OPERACAO, round(float(operation["valor_enquadrado"]) / float(receipts["faturamento_verificado_12m"]), 4), component="recursos_recebidos", path="faturamento_verificado_12m", fingerprint=fingerprint))
+        framed = _score_float(operation.get("valor_enquadrado")) if operation else None
+        revenue = _score_float(receipts.get("faturamento_verificado_12m"))
+        if framed is not None and revenue:
+            result.append(finding("cobertura_exposicao", Escopo.OPERACAO, round(framed / revenue, 4), component="recursos_recebidos", path="faturamento_verificado_12m", fingerprint=fingerprint))
         else:
             result.append(unverified("cobertura_exposicao", Escopo.OPERACAO, component="recursos_recebidos", path="faturamento_verificado_12m", fingerprint=fingerprint))
     comprasnet = snapshots.get("contratos_comprasnet") or {}
