@@ -69,13 +69,21 @@ def emit_sacado_orgao(
             unverified("maturidade_max_anos", Escopo.CONTRATO, component="contratos", path="contratos_detalhe", fingerprint=fingerprint),
         ])
     else:
+        from app.workers.tasks.score_engine import _active_contracts, _contract_duration_years
         result.extend([
             finding("contratos_ativos_qtd", Escopo.CEDENTE, int(contracts.get("contratos_ativos") or 0), component="contratos", path="contratos_ativos", fingerprint=fingerprint),
             finding("contratos_total_qtd", Escopo.CEDENTE, int(contracts.get("total_contratos") or 0), component="contratos", path="total_contratos", fingerprint=fingerprint),
         ])
-        orgaos = {str(org) for org in (contracts.get("orgaos_contratantes") or []) if org}
+        declared_orgaos = contracts.get("orgaos_contratantes")
+        if isinstance(declared_orgaos, list):
+            orgaos = {str(org) for org in declared_orgaos if org}
+        else:
+            orgaos = {
+                str(contract.get("orgao") or contract.get("orgao_nome") or contract.get("contratante"))
+                for contract in _active_contracts(contracts)
+                if contract.get("orgao") or contract.get("orgao_nome") or contract.get("contratante")
+            }
         result.append(finding("orgaos_distintos_qtd", Escopo.SACADO, len(orgaos), component="contratos", path="orgaos_contratantes", fingerprint=fingerprint))
-        from app.workers.tasks.score_engine import _active_contracts, _contract_duration_years
         active_contracts = _active_contracts(contracts)
         ativos = int(contracts.get("contratos_ativos") or len(active_contracts) or 0)
         total = int(contracts.get("total_contratos") or len(contracts.get("contratos_detalhe") or []) or ativos)

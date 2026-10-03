@@ -67,17 +67,28 @@ def emit_cadastro_regularidade(
             sanction_details.append({"componente": component, "registros": item.get("registros") or []})
     if pessoa.get("possui_sancao") or any(pessoa.get(f"sancionado_{name}") for name in ("ceis", "cnep", "cepim", "ceaf")):
         sanction_details.append({"componente": "pessoa_juridica", "flags": True})
-    sources_ready = all(statuses.get(source, "completed") == "completed" for source in sanction_sources) and not pessoa.get("erro")
-    result.append(unverified("sancao_ativa", Escopo.CEDENTE, component="pessoa_juridica", path="flags_sancao", fingerprint=fingerprint) if not sources_ready else finding("sancao_ativa", Escopo.CEDENTE, sanction_details, component="pessoa_juridica", path="flags_sancao", fingerprint=fingerprint, state=Estado.CONFIRMADO if sanction_details else Estado.NEGATIVO_CONFIRMADO))
+    # A confirmed sanction is decisive even if another source failed.  Only a
+    # negative conclusion requires every available source to have completed.
+    sources_ready = all(statuses.get(source, "missing") == "completed" for source in sanction_sources) and not pessoa.get("erro")
+    result.append(
+        finding("sancao_ativa", Escopo.CEDENTE, sanction_details, component="pessoa_juridica", path="flags_sancao", fingerprint=fingerprint, state=Estado.CONFIRMADO)
+        if sanction_details else (
+            finding("sancao_ativa", Escopo.CEDENTE, [], component="pessoa_juridica", path="flags_sancao", fingerprint=fingerprint, state=Estado.NEGATIVO_CONFIRMADO)
+            if sources_ready else unverified("sancao_ativa", Escopo.CEDENTE, component="pessoa_juridica", path="flags_sancao", fingerprint=fingerprint)
+        )
+    )
     acordos = snapshots.get("acordos_leniencia")
-    if not isinstance(acordos, dict):
-        result.append(unverified("acordo_leniencia_ativo", Escopo.CEDENTE, component="acordos_leniencia", path="acordos", fingerprint=fingerprint))
-    elif statuses.get("acordos_leniencia", "completed") != "completed":
-        result.append(unverified("acordo_leniencia_ativo", Escopo.CEDENTE, component="acordos_leniencia", path="acordos", fingerprint=fingerprint))
-    else:
+    if isinstance(acordos, dict):
         records = _component_list(acordos)
         active = _has_records(acordos, "possui_acordo", "total_registros", "total_acordos") and (not records or any(isinstance(record, dict) and _is_active_record(record) for record in records))
-        result.append(finding("acordo_leniencia_ativo", Escopo.CEDENTE, active, component="acordos_leniencia", path="possui_acordo", fingerprint=fingerprint, state=Estado.CONFIRMADO if active else Estado.NEGATIVO_CONFIRMADO))
+        if active:
+            result.append(finding("acordo_leniencia_ativo", Escopo.CEDENTE, True, component="acordos_leniencia", path="possui_acordo", fingerprint=fingerprint, state=Estado.CONFIRMADO))
+        elif statuses.get("acordos_leniencia", "missing") == "completed":
+            result.append(finding("acordo_leniencia_ativo", Escopo.CEDENTE, False, component="acordos_leniencia", path="possui_acordo", fingerprint=fingerprint, state=Estado.NEGATIVO_CONFIRMADO))
+        else:
+            result.append(unverified("acordo_leniencia_ativo", Escopo.CEDENTE, component="acordos_leniencia", path="acordos", fingerprint=fingerprint))
+    else:
+        result.append(unverified("acordo_leniencia_ativo", Escopo.CEDENTE, component="acordos_leniencia", path="acordos", fingerprint=fingerprint))
     for component, code in (("cnd_federal", "certidao_cnd_federal_pendente"), ("cndt_tst", "certidao_cndt_pendente"), ("fgts", "certidao_fgts_pendente")):
         cert = snapshots.get(component)
         status = statuses.get(component, "completed" if isinstance(cert, dict) else "inexistente")
@@ -98,8 +109,9 @@ def emit_cadastro_regularidade(
     quote_types = _document_types(snapshots.get("catalogo_broadfactor"))
     document_types = extraction_types | operation_types | quote_types
     has_balance = bool(document_types & BALANCO_DOCUMENT_TYPES)
-    complete_sources = all(statuses.get(source, "completed") == "completed" for source in sanction_sources)
-    result.append(finding("balanco_ausente", Escopo.CEDENTE, not has_balance, component="catalogo_broadfactor", path="documentos_broadfactor", fingerprint=fingerprint, state=Estado.NEGATIVO_CONFIRMADO if has_balance else Estado.CONFIRMADO, confidence=Confianca.ALTA) if complete_sources else unverified("balanco_ausente", Escopo.CEDENTE, component="catalogo_broadfactor", path="documentos_broadfactor", fingerprint=fingerprint))
+    # The score only scans document sources; sanction availability cannot make
+    # this presence fact unknown.
+    result.append(finding("balanco_ausente", Escopo.CEDENTE, not has_balance, component="catalogo_broadfactor", path="documentos_broadfactor", fingerprint=fingerprint, state=Estado.NEGATIVO_CONFIRMADO if has_balance else Estado.CONFIRMADO, confidence=Confianca.ALTA))
     if has_balance:
         origins = {}
         for document_type in sorted(document_types & BALANCO_DOCUMENT_TYPES):
@@ -115,9 +127,10 @@ def emit_cadastro_regularidade(
     if brasil.get("data_abertura"):
         try:
             opened = datetime.fromisoformat(str(brasil["data_abertura"]).replace("Z", "+00:00")).date()
-            age = round((datetime.now(timezone.utc).date() - opened).days / 365.25, 2)
+            reference = datetime.now(timezone.utc).date()
+            age = (reference - opened).days / 365.25
             item = finding("idade_empresa_anos", Escopo.CEDENTE, age, component="brasil_api", path="data_abertura", fingerprint=fingerprint)
-            item.evidencia[0]["data_referencia"] = datetime.now(timezone.utc).date().isoformat()
+            item.evidencia[0]["data_referencia"] = reference.isoformat()
             result.append(item)
         except ValueError:
             pass
