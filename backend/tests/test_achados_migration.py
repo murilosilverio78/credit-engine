@@ -28,6 +28,7 @@ def test_catalog_v2_migration_is_append_only_and_reloads_postgrest_schema():
         "natureza_juridica_empresarial",
         "atividade_restrita",
         "contratos_comprasnet_incluidos_qtd",
+        "receita_serie_anual",
     ):
         assert code in sql
     assert "INSERT INTO finding_catalog" in sql

@@ -8,6 +8,8 @@ VALUES
   ('atividade_restrita', 1, 'CEDENTE', 'INFORMATIVO', 'CODIGO', 'BOOLEANO',
    'Atividade restrita ou incompativel'),
   ('contratos_comprasnet_incluidos_qtd', 1, 'CONTRATO', 'AJUSTE', 'CODIGO', 'NUMERO',
-   'Quantidade de contratos verificados no Comprasnet incluidos no relacionamento');
+   'Quantidade de contratos verificados no Comprasnet incluidos no relacionamento'),
+  ('receita_serie_anual', 1, 'CEDENTE', 'AJUSTE', 'CODIGO', 'OBJETO',
+   'Fatos da serie anual de recebimentos para o ajuste de PD');
 
 NOTIFY pgrst, 'reload schema';

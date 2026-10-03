@@ -1,5 +1,6 @@
 from app.services.findings.adapters.sacado_orgao import emit_sacado_orgao
 from tests.fakes.postgrest import Postgrest
+import json
 
 
 def test_sacado_adapter_reads_persisted_relationship_and_glosa_values():
@@ -12,6 +13,17 @@ def test_sacado_adapter_reads_persisted_relationship_and_glosa_values():
     assert by_code["hhi_recebimentos"].valor == 1200
     assert by_code["glosa_historica"].valor["glosa_total"] == 10
     assert by_code["cobertura_exposicao"].valor == 0.5
+
+
+def test_sacado_adapter_emits_sanitized_annual_series_facts():
+    findings = emit_sacado_orgao({
+        "contratos": {},
+        "recursos_recebidos": {"volatilidade": {"anos_completos": "2"}, "serie_anual": {"2024": 999999, "texto": "PESSOA FICTICIA"}},
+    }, fingerprint="x")
+    annual = next(item for item in findings if item.codigo == "receita_serie_anual")
+    assert annual.valor == {"anos_informados": 2, "serie_qtd_chaves": 2, "anos_na_serie": [2024]}
+    assert "PESSOA FICTICIA" not in json.dumps(annual.model_dump(mode="json"))
+    assert "999999" not in json.dumps(annual.model_dump(mode="json"))
 
 
 def test_sacado_adapter_reuses_verified_comprasnet_merge_before_derivations():

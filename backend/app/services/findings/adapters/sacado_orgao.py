@@ -17,6 +17,25 @@ def _date(value: Any):
         return None
 
 
+def _integer(value: Any) -> int | None:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _annual_series_fact(receipts: dict[str, Any]) -> dict[str, Any]:
+    volatility = receipts.get("volatilidade") or {}
+    series = receipts.get("serie_anual") or receipts.get("valor_por_ano") or {}
+    series = series if isinstance(series, dict) else {}
+    years = sorted({year for key in series for year in [_integer(key)] if year is not None})
+    return {
+        "anos_informados": _integer(volatility.get("anos_completos")) if isinstance(volatility, dict) else None,
+        "serie_qtd_chaves": len(series),
+        "anos_na_serie": years,
+    }
+
+
 def emit_sacado_orgao(
     snapshots: dict[str, Any], *, fingerprint: str,
     operation: dict[str, Any] | None = None, database=None,
@@ -73,7 +92,7 @@ def emit_sacado_orgao(
             fingerprint=fingerprint,
         ))
     if not isinstance(receipts, dict):
-        for code, scope, path in (("hhi_recebimentos", Escopo.SACADO, "concentracao.hhi"), ("meses_com_recebimento", Escopo.CEDENTE, "meses_com_recebimento"), ("volatilidade_cv", Escopo.CEDENTE, "volatilidade.cv"), ("anos_completos_receita", Escopo.CEDENTE, "volatilidade.anos_completos")):
+        for code, scope, path in (("hhi_recebimentos", Escopo.SACADO, "concentracao.hhi"), ("meses_com_recebimento", Escopo.CEDENTE, "meses_com_recebimento"), ("volatilidade_cv", Escopo.CEDENTE, "volatilidade.cv"), ("anos_completos_receita", Escopo.CEDENTE, "volatilidade.anos_completos"), ("receita_serie_anual", Escopo.CEDENTE, "volatilidade.anos_completos,serie_anual,valor_por_ano")):
             result.append(unverified(code, scope, component="recursos_recebidos", path=path, fingerprint=fingerprint))
     else:
         concentration = receipts.get("concentracao") or {}
@@ -85,6 +104,11 @@ def emit_sacado_orgao(
             ("anos_completos_receita", Escopo.CEDENTE, volatility.get("anos_completos"), "volatilidade.anos_completos"),
         ):
             result.append(finding(code, scope, value, component="recursos_recebidos", path=path, fingerprint=fingerprint) if value is not None else unverified(code, scope, component="recursos_recebidos", path=path, fingerprint=fingerprint))
+        result.append(finding(
+            "receita_serie_anual", Escopo.CEDENTE, _annual_series_fact(receipts),
+            component="recursos_recebidos", path="volatilidade.anos_completos,serie_anual,valor_por_ano",
+            fingerprint=fingerprint,
+        ))
         if operation and operation.get("valor_enquadrado") is not None and receipts.get("faturamento_verificado_12m"):
             result.append(finding("cobertura_exposicao", Escopo.OPERACAO, round(float(operation["valor_enquadrado"]) / float(receipts["faturamento_verificado_12m"]), 4), component="recursos_recebidos", path="faturamento_verificado_12m", fingerprint=fingerprint))
         else:

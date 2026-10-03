@@ -51,14 +51,19 @@ def _age_at_reference(finding, reference: date) -> float:
     return max(0.0, age - (issued - reference).days / 365.25)
 
 
-def _pd(entrada, params, rating, trail):
+def _pd(entrada, params, rating, trail, data_referencia):
     cv_finding = _finding(entrada, "volatilidade_cv", trail, "ajuste_pd")
-    years_finding = _finding(entrada, "anos_completos_receita", trail, "ajuste_pd")
+    series_finding = _finding(entrada, "receita_serie_anual", trail, "ajuste_pd")
     cv = _number(cv_finding.valor) if cv_finding and cv_finding.valor is not None else None
-    years = int(_number(years_finding.valor)) if years_finding and years_finding.valor is not None else 0
+    series = series_finding.valor if series_finding and isinstance(series_finding.valor, dict) else {}
+    informed = series.get("anos_informados")
+    inferred = len([year for year in series.get("anos_na_serie", []) if isinstance(year, int) and year < data_referencia.year])
+    years = int(informed) if informed is not None else inferred
     minimum = int(_number(params["pd_min_anos_completos_volatilidade"]))
     multiplier, parameter = 1.0, None
-    if cv is None and years < minimum:
+    new_insufficient = cv is None and informed is not None and years < minimum
+    legacy_insufficient = informed is None and cv == 0 and _number(series.get("serie_qtd_chaves")) > 0 and years < minimum
+    if new_insufficient or legacy_insufficient:
         faixa, parameter = "HISTORICO_INSUFICIENTE", "pd_mult_historico_insuficiente"
         multiplier = _number(params.get(parameter) or params.get("pd_mult_volatilidade_moderada"), 1.0)
     elif cv is None:
@@ -179,4 +184,4 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
     potential_rating = _rating(round(merit_potential * factor_potential, 1), parametros["faixas_rating"])
     limit = min(_number(entrada.operation.get("valor_enquadrado")), _number(entrada.operation.get("valor_solicitado")) or _number(entrada.operation.get("valor_enquadrado")))
     effects = _new_effects(entrada, regras, trail)
-    return ResultadoPolitica(score, rating, potential_rating, merit, merit_potential, factor, factor_potential, balance_penalty, limit, [], _pd(entrada, parametros, rating, trail), {"saude_cadastral": health, "relacionamento_governamental": relationship, "porte_operacionalidade": capability_score, "reputacao_mercado": reputation_score}, effects, trail)
+    return ResultadoPolitica(score, rating, potential_rating, merit, merit_potential, factor, factor_potential, balance_penalty, limit, [], _pd(entrada, parametros, rating, trail, data_referencia), {"saude_cadastral": health, "relacionamento_governamental": relationship, "porte_operacionalidade": capability_score, "reputacao_mercado": reputation_score}, effects, trail)
