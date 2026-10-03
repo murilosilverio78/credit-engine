@@ -28,6 +28,7 @@ router = APIRouter()
 IPIFY_URL = "https://api.ipify.org?format=json"
 PORTAL_DIAGNOSTIC_CNPJ = "00000000000191"
 DIAGNOSTIC_TIMEOUT_SECONDS = 15.0
+_monotonic = time.monotonic
 
 
 class FindingsReemitRequest(BaseModel):
@@ -148,10 +149,10 @@ async def reemitir_findings(request: FindingsReemitRequest, _: None = Depends(ve
         limite=request.limite,
         database=supabase,
     )
-    started = time.monotonic()
+    started = _monotonic()
     processed, remaining, operations, totals = 0, [], [], {}
     for index, operation_id in enumerate(operation_ids):
-        if time.monotonic() - started >= 45:
+        if _monotonic() - started >= 45:
             remaining = operation_ids[index:]
             break
         result = await asyncio.to_thread(reemitir_operacao, operation_id, aplicar=request.aplicar, database=supabase)
@@ -178,10 +179,10 @@ async def executar_politica_sombra(request: PolicyShadowRequest, _: None = Depen
         limite=request.limite,
         database=supabase,
     )
-    started = time.monotonic()
+    started = _monotonic()
     operations, remaining, totals = [], [], {}
     for index, operation_id in enumerate(operation_ids):
-        if time.monotonic() - started >= 45:
+        if _monotonic() - started >= 45:
             remaining = operation_ids[index:]
             break
         result = await asyncio.to_thread(avaliar_sombra, operation_id, database=supabase, aplicar=request.aplicar)

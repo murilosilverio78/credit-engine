@@ -8,6 +8,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.api.v1.endpoints import internal  # noqa: E402
+from tests.fakes.postgrest import Postgrest  # noqa: E402
 
 
 def make_client() -> TestClient:
@@ -96,6 +97,58 @@ def test_policy_shadow_requires_token_and_validates_body(monkeypatch):
     assert make_client().post("/api/v1/internal/politica/sombra").status_code == 401
     for body in ({"limite": 0}, {"limite": 101}, {"ambiente": "INVALIDO"}):
         assert make_client().post("/api/v1/internal/politica/sombra", json=body, headers={"X-Internal-Token": "configured-token"}).status_code == 422
+
+
+def test_policy_shadow_rejects_invalid_token_and_empty_server_token(monkeypatch):
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    response = make_client().post("/api/v1/internal/politica/sombra", json={}, headers={"X-Internal-Token": "wrong-token"})
+    assert response.status_code == 401
+
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "")
+    response = make_client().post("/api/v1/internal/politica/sombra", json={}, headers={"X-Internal-Token": "configured-token"})
+    assert response.status_code == 503
+
+
+def test_policy_shadow_dry_run_does_not_persist_and_apply_is_idempotent(monkeypatch):
+    persisted: set[str] = set()
+    calls: list[bool] = []
+
+    def fake_shadow(operation_id, *, aplicar, **_kwargs):
+        calls.append(aplicar)
+        if aplicar:
+            persisted.add(operation_id)
+        return {"classe_geral": "IGUAL", "divergencias": []}
+
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    from app.core import database
+    monkeypatch.setattr(database, "supabase", Postgrest({"operations": [{"id": "op-1", "ambiente": "PRODUCAO"}]}))
+    monkeypatch.setattr(internal, "load_policy", lambda **_kwargs: {"version": {"id": "shadow"}})
+    monkeypatch.setattr(internal, "avaliar_sombra", fake_shadow)
+
+    client = make_client()
+    dry = client.post("/api/v1/internal/politica/sombra", json={"aplicar": False}, headers={"X-Internal-Token": "configured-token"})
+    assert dry.status_code == 200 and persisted == set() and calls == [False]
+
+    first = client.post("/api/v1/internal/politica/sombra", json={"aplicar": True}, headers={"X-Internal-Token": "configured-token"})
+    second = client.post("/api/v1/internal/politica/sombra", json={"aplicar": True}, headers={"X-Internal-Token": "configured-token"})
+    assert first.status_code == second.status_code == 200
+    assert persisted == {"op-1"}
+    assert "configured-token" not in first.text and "configured-token" not in second.text
+
+
+def test_policy_shadow_reports_remaining_after_budget(monkeypatch):
+    clock = iter((0.0, 0.0, 46.0))
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    monkeypatch.setattr(internal, "load_policy", lambda **_kwargs: {"version": {"id": "shadow"}})
+    monkeypatch.setattr(internal, "select_operations", lambda **_kwargs: ["op-1", "op-2"])
+    monkeypatch.setattr(internal, "avaliar_sombra", lambda *_args, **_kwargs: {"classe_geral": "IGUAL", "divergencias": []})
+    monkeypatch.setattr(internal, "_monotonic", lambda: next(clock))
+
+    response = make_client().post("/api/v1/internal/politica/sombra", json={}, headers={"X-Internal-Token": "configured-token"})
+
+    assert response.status_code == 200
+    assert response.json()["processadas"] == 1
+    assert response.json()["restantes"] == ["op-2"]
 
 
 def test_policy_shadow_returns_409_without_shadow_version(monkeypatch):
