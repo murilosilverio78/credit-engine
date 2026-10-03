@@ -1,6 +1,7 @@
 import ast
 import inspect
 from datetime import date
+import pytest
 
 from app.services.policy.engine import avaliar
 from app.services.policy.types import EntradaPolitica, FindingValue
@@ -17,3 +18,26 @@ def test_engine_is_pure_and_tracks_facts():
     result = avaliar(EntradaPolitica({"valor_enquadrado":100,"valor_solicitado":120}, findings), _params(), [], date(2026, 1, 1))
     assert result.score >= 0 and result.limite_aprovado_rs == 100
     assert result.trilha["regularidade"]
+
+
+def test_balance_penalty_is_limited_by_low_capability_contribution():
+    findings = {
+        code: FindingValue(code, value, "CONFIRMADO", "ALTA", "run")
+        for code, value in {
+            "idade_empresa_anos": 4, "capital_social_rs": 300000,
+            "porte_cadastral": "EPP", "qsa_estabilidade": {},
+            "contratos_ativos_qtd": 3, "contratos_total_qtd": 3,
+            "orgaos_distintos_qtd": 2, "hhi_recebimentos": 3000,
+            "meses_com_recebimento": 8, "maturidade_max_anos": 4,
+            "capacidade_operacional": "Critico", "reputacao_mercado": "Atencao",
+            "certidao_cnd_federal_pendente": {"estado": "negativa"},
+            "certidao_cndt_pendente": {"estado": "negativa"},
+            "certidao_fgts_pendente": {"estado": "negativa"},
+            "balanco_ausente": True,
+        }.items()
+    }
+    result = avaliar(EntradaPolitica({}, findings), _params(), [], date(2026, 1, 1))
+    # 20 (Critico) * 0.28: the official engine cannot deduct all 10 points.
+    assert result.penalizacao_balanco == 5.6
+    assert result.merit_potencial - result.merit == pytest.approx(5.6)
+    assert result.dimensoes["porte_operacionalidade"] == 0.0

@@ -14,6 +14,25 @@ def test_cadastro_adapter_emits_official_gate_and_balance_catalog():
     assert by_code["balanco_catalogado_broadfactor"].valor["tipos"] == ["DRE"]
 
 
+def test_balance_union_matches_score_document_sources_and_keeps_provenance():
+    from app.services.document_types import BALANCO_DOCUMENT_TYPES
+    from app.workers.tasks.score_engine import _document_types
+
+    patterns = [
+        ({}, True),
+        ({"contrato_extracao": {"documentos_broadfactor": [{"tipo": "DRE"}]}, "catalogo_broadfactor": {"documentos_broadfactor": [{"tipo": "DRE"}]}}, False),
+        ({"catalogo_broadfactor": {"documentos_broadfactor": [{"tipo": "PENULTIMO_BALANCO"}]}}, False),
+        ({"contrato_extracao": {"resultado": {"tipo_documento": "ULTIMO_BALANCO"}}}, False),
+        ({"documentos_operacao": {"documentos": [{"document_type": "BALANCO"}]}}, False),
+    ]
+    for extra, absent in patterns:
+        findings = {item.codigo: item for item in emit_cadastro_regularidade(extra, fingerprint="x")}
+        assert findings["balanco_ausente"].valor is absent
+        assert findings["balanco_ausente"].valor is (not bool(_document_types(extra) & BALANCO_DOCUMENT_TYPES))
+    both = {item.codigo: item for item in emit_cadastro_regularidade(patterns[1][0], fingerprint="x")}
+    assert both["balanco_catalogado_broadfactor"].valor["fontes"]["DRE"] == ["cotacao", "extracao"]
+
+
 def test_qsa_finding_exposes_only_stability_indicators():
     findings = emit_cadastro_regularidade({
         "brasil_api": {"qsa": [

@@ -15,7 +15,7 @@ REQUIRED = {
     "documentos": ("contrato_extracao",), "reputacional": ("web_research",), "porte": (),
 }
 OPTIONAL_INPUTS = {
-    "cadastro_regularidade": ("cnd_federal", "cndt_tst", "fgts", "ceaf"),
+    "cadastro_regularidade": ("cnd_federal", "cndt_tst", "fgts", "ceaf", "contrato_extracao"),
     "sacado_orgao": (), "documentos": (), "reputacional": (), "porte": (),
 }
 TERMINAL = {"completed", "failed"}
@@ -52,6 +52,15 @@ def _quote_catalog(database, operation_id: str):
         return None
     return {"documentos_broadfactor": [{"tipo": item} for item in (row.get("tipos_documento") or []) if item]}
 
+def _operation_documents(database, operation_id: str):
+    """Return the optional operation-document catalog without affecting emission."""
+    try:
+        result = database.table("documents").select("document_type").eq("operation_id", operation_id).limit(1000).execute()
+        return {"documentos": (result.data or []) if result else []}
+    except Exception as exc:
+        logger.warning("findings.operation_documents_unavailable", operation_id=operation_id, error=str(exc))
+        return {"documentos": []}
+
 def emit_findings(operation_id: str, especialista: str, *, database=None, overrides: dict[str, Any] | None = None) -> EmissionResult:
     """Emit one idempotent run without changing a decision.
 
@@ -81,6 +90,10 @@ def emit_findings(operation_id: str, especialista: str, *, database=None, overri
         quote_catalog = _quote_catalog(db, operation_id) if "tipos_documento" in extras else None
         if quote_catalog:
             snapshots["catalogo_broadfactor"] = quote_catalog
+        operation_documents = None
+        if "documentos_operacao" in extras:
+            operation_documents = _operation_documents(db, operation_id)
+            snapshots["documentos_operacao"] = operation_documents
         if overrides and "overrides" in extras:
             snapshots.update(overrides)
         snapshots["__statuses__"] = statuses
@@ -94,6 +107,8 @@ def emit_findings(operation_id: str, especialista: str, *, database=None, overri
             hash_extras["valor_enquadrado"] = operation.get("valor_enquadrado")
         if "tipos_documento" in extras:
             hash_extras["tipos_documento"] = (quote_catalog or {}).get("documentos_broadfactor")
+        if "documentos_operacao" in extras:
+            hash_extras["documentos_operacao"] = (operation_documents or {}).get("documentos")
         if "overrides" in extras:
             hash_extras["overrides"] = overrides or {}
         fingerprint = entrada_hash({"versao_emissor": version.EMITTER_VERSION, "insumos": input_rows, "extras": hash_extras})

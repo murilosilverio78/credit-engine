@@ -4,7 +4,7 @@ EMITTER_VERSION = "4"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {
-    "cadastro_regularidade": ("tipos_documento",),
+    "cadastro_regularidade": ("tipos_documento", "documentos_operacao"),
     "sacado_orgao": ("valor_enquadrado",),
     "documentos": (),
     "reputacional": (),

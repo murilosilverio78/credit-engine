@@ -200,11 +200,26 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
     factor_potential = round(max(_number(parametros["piso_fator_regularidade"]), 1 - haircuts), 2)
     factor = round(max(0.0, factor_potential - penalties / 100), 2)
     balance = _finding(entrada, "balanco_ausente", trail, "balanco")
-    balance_penalty = _number(parametros["penalidade_balanco_ausente"]) if balance and bool(balance.valor) else 0.0
-    merit = merit_potential
+    configured_balance_penalty = _number(parametros["penalidade_balanco_ausente"])
+    porte_weight = _number(weights["porte_operacionalidade"])
+    balance_penalty = 0.0
+    effective_capability_score = capability_score
+    if balance and bool(balance.valor):
+        # `_apply_missing_balance_penalty` limits the final-score reduction to
+        # the Porte/Operacionalidade contribution; keep the potential score
+        # untouched and lower only the effective dimension.
+        balance_penalty = min(configured_balance_penalty, capability_score * porte_weight)
+        effective_capability_score = max(0.0, capability_score - (balance_penalty / porte_weight)) if porte_weight > 0 else capability_score
+    merit = round(
+        relationship * _number(weights["relacionamento_governamental"])
+        + effective_capability_score * porte_weight
+        + health * _number(weights["saude_cadastral"])
+        + reputation_score * _number(weights["reputacao_mercado"]),
+        1,
+    )
     score = round(max(0.0, round(merit_potential * factor, 1) - balance_penalty), 1)
     rating = _rating(score, parametros["faixas_rating"])
     potential_rating = _rating(round(merit_potential * factor_potential, 1), parametros["faixas_rating"])
     limit, limit_flags = _limit(entrada, parametros, trail)
     effects = _new_effects(entrada, regras, trail)
-    return ResultadoPolitica(score, rating, potential_rating, merit, merit_potential, factor, factor_potential, balance_penalty, limit, limit_flags, [], _pd(entrada, parametros, rating, trail, data_referencia), {"saude_cadastral": health, "relacionamento_governamental": relationship, "porte_operacionalidade": capability_score, "reputacao_mercado": reputation_score}, effects, trail)
+    return ResultadoPolitica(score, rating, potential_rating, merit, merit_potential, factor, factor_potential, round(balance_penalty, 2), limit, limit_flags, [], _pd(entrada, parametros, rating, trail, data_referencia), {"saude_cadastral": health, "relacionamento_governamental": relationship, "porte_operacionalidade": effective_capability_score, "reputacao_mercado": reputation_score}, effects, trail)

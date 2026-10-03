@@ -1,15 +1,34 @@
 # Auditoria de insumos da politica v0
 
-| Saida oficial | Funcoes e insumos | Destino da politica |
-|---|---|---|
-| Saude cadastral | `score_saude_cadastral`: Brasil/PJ (`situacao`, abertura, capital, porte, natureza, QSA, atividade) | achados de cadastro, capital, porte, natureza, QSA e atividade; situacao e veto |
-| Relacionamento | `score_relacionamento`: contratos ativos/totais, orgaos, detalhes, HHI, meses, Comprasnet | achados de contratos, orgaos, maturidade, HHI, meses e Comprasnet |
-| Niveis LLM | `score_porte_llm`, `score_reputacao`, `_valid_level` | `capacidade_operacional`, `reputacao_mercado` |
-| Regularidade | `score_regularidade`, `_certidao_estado`, `_apply_missing_balance_penalty` | achados de tres certidoes, balanco e catalogo |
-| Vetos | `gates_deterministicos`, `_is_active_record` | achados `cadastro_inativo`, `sancao_ativa`, `acordo_leniencia_ativo` |
-| PD | `_ajuste_pd_volatilidade`: CV, anos informados, serie anual, parametros e matriz | `volatilidade_cv`, `anos_completos_receita`, `receita_serie_anual`; parametros 045 |
-| Limite | `_limite_aprovado`: enquadrado, solicitado, margem, saldo, contrato, total ativo e percentual | contexto de operation; `contratos_valor_total_ativo_rs`; `pct_margem_sobre_saldo` |
+Inventario por campo das funcoes alcançadas por `consolidar_score` e por
+`_fetch`. `Achado` significa um fato append-only da versao atual do emissor;
+`Contexto` e coluna de `operations` carregada por `montar_entrada`; e
+`Parametro` e valor versionado na migration 045. Nao ha insumo de decisao
+marcado como `NADA`.
 
-Constantes de pesos, niveis, faixas, haircuts, penalidades e risco sao parametros da
-045. `PCT_MARGEM_SOBRE_SALDO` e `0.70` em `eligibility_service.py` e passa a ser
-`pct_margem_sobre_saldo`. Nenhum insumo de decisao acima fica sem destino.
+| Funcao oficial | Campo lido | Origem | Como a politica recebe |
+|---|---|---|---|
+| `score_saude_cadastral`, `_idade_score` | `data_abertura`/`abertura` | `brasil_api`, `pessoa_juridica` | Achado `idade_empresa_anos` |
+| `score_saude_cadastral`, `_capital_score` | `capital_social` | `brasil_api`, `pessoa_juridica` | Achado `capital_social_rs` |
+| `score_saude_cadastral`, `_porte_score` | `porte`, `natureza_juridica` | `brasil_api`, `pessoa_juridica` | Achados `porte_cadastral`, `natureza_juridica_empresarial` |
+| `score_saude_cadastral`, `_qsa_estabilidade_score` | `qsa[].data_entrada`/`data_inicio`, qualificacao | `brasil_api`, `pessoa_juridica` | Achado derivado sem PII `qsa_estabilidade` |
+| `score_saude_cadastral`, `_atividade_restrita` | atividade principal, CNAE e secundarias | `brasil_api`, `pessoa_juridica` | Achado `atividade_restrita` |
+| `gates_deterministicos`, `_is_active_record` | situacao cadastral, registros e vigencia | cadastro, CEIS/CNEP/CEPIM/CEAF, acordos | Achados `cadastro_inativo`, `sancao_ativa`, `acordo_leniencia_ativo` |
+| `score_relacionamento`, `_active_contracts`, `_contract_duration_years` | quantidades, detalhes, orgaos, situacao, inicio/fim | `contratos`, adicional Comprasnet verificado | Achados de contratos, orgaos, maturidade e Comprasnet |
+| `score_relacionamento` | `valor_total_ativo` | `contratos`, ja mesclado ao Comprasnet | Achado `contratos_valor_total_ativo_rs` |
+| `score_relacionamento` | HHI, meses e historico | `recursos_recebidos` | Achados `hhi_recebimentos`, `meses_com_recebimento`, `anos_completos_receita` |
+| `_ajuste_pd_volatilidade` | CV, anos completos e chaves da serie | `recursos_recebidos` | Achados `volatilidade_cv`, `receita_serie_anual` |
+| `score_porte_llm`, `_faturamento_context`, `_cobertura_exposicao` | nivel, flags, faturamento; valor enquadrado | resultado LLM/snapshots e `operations` | Achado `capacidade_operacional`; `valor_enquadrado` em Contexto |
+| `score_reputacao`, `_valid_level` | nivel e flags de pesquisa | `web_research`/resultado LLM | Achado `reputacao_mercado` |
+| `score_regularidade`, `_certidao_estado` | validade, positiva/negativa e status | tres componentes de certidao | Achados `certidao_*_pendente` |
+| `_apply_missing_balance_penalty`, `_document_types` | tipos recursivos `tipo`, `tipo_documento`, `document_type` | `contrato_extracao` | Achado `balanco_catalogado_broadfactor`, fonte `extracao` |
+| `_apply_missing_balance_penalty`, `_document_types` | `documents[].document_type` | tabela `documents` da operacao | Mesmo achado, fonte `documentos_operacao`; tambem entra na hash |
+| `_add_quote_catalog_documents`, `_document_types` | `cotacoes_broadfactor.tipos_documento` | catalogo da cotacao | Mesmo achado, fonte `cotacao`; `catalog_only_types` so evita duplicacao na montagem do score |
+| `_apply_missing_balance_penalty` | tipos de balanco, penalidade, peso de porte | constante e precificacao | Tipo em constante compartilhada; penalidade/pesos em Parametros; teto `min(penalidade, score_porte_potencial * peso_porte)` |
+| `_limite_aprovado` | enquadrado, solicitado, margem, saldos, percentual maximo | `operations` | Contexto: `valor_enquadrado`, `valor_solicitado`, `margem_disponivel`, `contrato_saldo`, `saldo_vincendo`, `pct_max_contrato` |
+| `_limite_aprovado` | percentual margem/saldo | `PCT_MARGEM_SOBRE_SALDO` | Parametro `pct_margem_sobre_saldo` (0,70) |
+| `consolidar_score` | pesos, subpesos, faixas, niveis, haircuts, penalidades, matriz PD | constantes e `get_pricing_config` | Parametros e faixas versionados na 045 |
+
+`catalog_only_types` nao e um quarto fato: e a protecao contra duplicar tipos
+ja vindos de `contrato_extracao`. O emissor registra a proveniencia completa e
+usa a mesma uniao para decidir a presenca do balanco.

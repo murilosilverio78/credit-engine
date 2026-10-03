@@ -90,12 +90,24 @@ def emit_cadastro_regularidade(
             item = finding(code, Escopo.CEDENTE, {"estado": estado, "status_componente": status, "validade": cert.get("data_validade") or cert.get("validade"), "fator": fator}, component=component, path="valida", fingerprint=fingerprint, state=Estado.NEGATIVO_CONFIRMADO if estado == "negativa" else Estado.CONFIRMADO, confidence=Confianca.ALTA)
         item.evidencia[0]["status_componente"] = status
         result.append(item)
-    document_types = _types(snapshots)
+    # Exact score semantics: extraction, operation documents and quote catalog
+    # are recursively scanned by the same helper used by score_engine.
+    from app.workers.tasks.score_engine import _document_types
+    extraction_types = _document_types(snapshots.get("contrato_extracao"))
+    operation_types = _document_types(snapshots.get("documentos_operacao"))
+    quote_types = _document_types(snapshots.get("catalogo_broadfactor"))
+    document_types = extraction_types | operation_types | quote_types
     has_balance = bool(document_types & BALANCO_DOCUMENT_TYPES)
     complete_sources = all(statuses.get(source, "completed") == "completed" for source in sanction_sources)
     result.append(finding("balanco_ausente", Escopo.CEDENTE, not has_balance, component="catalogo_broadfactor", path="documentos_broadfactor", fingerprint=fingerprint, state=Estado.NEGATIVO_CONFIRMADO if has_balance else Estado.CONFIRMADO, confidence=Confianca.ALTA) if complete_sources else unverified("balanco_ausente", Escopo.CEDENTE, component="catalogo_broadfactor", path="documentos_broadfactor", fingerprint=fingerprint))
     if has_balance:
-        result.append(finding("balanco_catalogado_broadfactor", Escopo.CEDENTE, {"tipos": sorted(document_types & BALANCO_DOCUMENT_TYPES)}, component="catalogo_broadfactor", path="documentos_broadfactor", fingerprint=fingerprint))
+        origins = {}
+        for document_type in sorted(document_types & BALANCO_DOCUMENT_TYPES):
+            origins[document_type] = [
+                source for source, values in (("cotacao", quote_types), ("extracao", extraction_types), ("documentos_operacao", operation_types))
+                if document_type in values
+            ]
+        result.append(finding("balanco_catalogado_broadfactor", Escopo.CEDENTE, {"tipos": sorted(origins), "fontes": origins}, component="catalogo_broadfactor", path="documentos_broadfactor,contrato_extracao,documentos_operacao", fingerprint=fingerprint))
     for code, field in (("capital_social_rs", "capital_social"), ("porte_cadastral", "porte")):
         value = brasil.get(field)
         if value is not None:

@@ -43,3 +43,27 @@ def test_emitter_skips_unknown_code_and_unavailable_catalog(monkeypatch):
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: None)
     emitter.emit_findings("op", "documentos", database=db)
     assert db.rpc_calls == []
+
+
+def test_cadastro_hash_includes_operation_documents_and_loads_empty_catalog_safely(monkeypatch):
+    components = ("brasil_api", "pessoa_juridica", "ceis", "cnep", "cepim", "acordos_leniencia")
+    base = {
+        "operations": [{"id": "op", "ambiente": "TESTE", "valor_enquadrado": 100}],
+        "component_snapshots": [
+            {"operation_id": "op", "component": component, "status": "completed", "parsed_result": {}}
+            for component in components
+        ],
+        "cotacoes_broadfactor": [],
+    }
+    captured = []
+    monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: {})
+    monkeypatch.setitem(emitter.ADAPTERS, "cadastro_regularidade", lambda snapshots, **_kwargs: captured.append(snapshots) or [])
+    with_documents = Postgrest({**base, "documents": [{"operation_id": "op", "document_type": "BALANCO"}]})
+    without_documents = Postgrest({**base, "documents": []})
+
+    emitter.emit_findings("op", "cadastro_regularidade", database=with_documents)
+    emitter.emit_findings("op", "cadastro_regularidade", database=without_documents)
+
+    assert captured[0]["documentos_operacao"] == {"documentos": [{"operation_id": "op", "document_type": "BALANCO"}]}
+    assert captured[1]["documentos_operacao"] == {"documentos": []}
+    assert with_documents.rpc_calls[0][1]["p_run"]["entrada_hash"] != without_documents.rpc_calls[0][1]["p_run"]["entrada_hash"]
