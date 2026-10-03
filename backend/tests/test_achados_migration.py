@@ -32,3 +32,14 @@ def test_catalog_v2_migration_is_append_only_and_reloads_postgrest_schema():
         assert code in sql
     assert "INSERT INTO finding_catalog" in sql
     assert "NOTIFY pgrst, 'reload schema';" in sql
+
+
+def test_policy_v0_migration_adds_shadow_state_and_service_role_only_storage():
+    sql = (MIGRATION.parent / "045_politica_v0.sql").read_text(encoding="utf-8")
+    assert "'SOMBRA'" in sql
+    assert "policy_versions_one_shadow" in sql
+    assert "policy_shadow_runs" in sql
+    assert "BEFORE UPDATE OR DELETE OR TRUNCATE ON policy_shadow_runs" in sql
+    assert "WITH (security_invoker = true)" in sql
+    assert "REVOKE ALL ON policy_parameters, policy_shadow_runs FROM PUBLIC, anon, authenticated" in sql
+    assert "GRANT SELECT ON policy_parameters, policy_shadow_runs, vw_policy_shadow_ultimos TO service_role" in sql
