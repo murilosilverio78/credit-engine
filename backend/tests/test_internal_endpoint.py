@@ -91,6 +91,20 @@ def test_findings_reemit_requires_internal_token_and_validates_limit(monkeypatch
         assert response.status_code == 422
 
 
+def test_policy_shadow_requires_token_and_validates_body(monkeypatch):
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    assert make_client().post("/api/v1/internal/politica/sombra").status_code == 401
+    for body in ({"limite": 0}, {"limite": 101}, {"ambiente": "INVALIDO"}):
+        assert make_client().post("/api/v1/internal/politica/sombra", json=body, headers={"X-Internal-Token": "configured-token"}).status_code == 422
+
+
+def test_policy_shadow_returns_409_without_shadow_version(monkeypatch):
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    monkeypatch.setattr(internal, "load_policy", lambda **_kwargs: (_ for _ in ()).throw(LookupError()))
+    response = make_client().post("/api/v1/internal/politica/sombra", json={}, headers={"X-Internal-Token": "configured-token"})
+    assert response.status_code == 409
+
+
 def test_live_ingestion_returns_202_and_uses_background_task(monkeypatch):
     calls = []
 

@@ -6,13 +6,15 @@ from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.services.analysis_runtime import is_shutting_down
 from app.services.operation_watchdog_service import run_operation_watchdog
 from app.services.findings.backfill import reemitir_operacao, select_operations
+from app.services.policy.loader import load_policy
+from app.services.policy.shadow import avaliar_sombra
 from app.workers.http_utils import (
     acquire_portal_call,
     portal_api_url,
@@ -33,6 +35,20 @@ class FindingsReemitRequest(BaseModel):
     ambiente: str = "PRODUCAO"
     limite: int = Field(default=20, ge=1, le=100)
     aplicar: bool = False
+
+
+class PolicyShadowRequest(BaseModel):
+    operation_ids: list[UUID] | None = None
+    ambiente: str = "PRODUCAO"
+    limite: int = Field(default=20, ge=1, le=100)
+    aplicar: bool = False
+
+    @field_validator("ambiente")
+    @classmethod
+    def validate_ambiente(cls, value: str) -> str:
+        if value not in {"PRODUCAO", "TESTE"}:
+            raise ValueError("ambiente deve ser PRODUCAO ou TESTE")
+        return value
 
 
 def verify_internal_token(
@@ -144,6 +160,35 @@ async def reemitir_findings(request: FindingsReemitRequest, _: None = Depends(ve
         for outcome in result["especialistas"].values():
             totals[outcome] = totals.get(outcome, 0) + 1
     return {"aplicar": request.aplicar, "processadas": processed, "restantes": remaining, "operacoes": operations, "totais": totals}
+
+
+@router.post("/politica/sombra")
+async def executar_politica_sombra(request: PolicyShadowRequest, _: None = Depends(verify_internal_token)):
+    """Run shadow comparison sequentially; this endpoint never decides credit."""
+    from app.core.database import supabase
+
+    try:
+        await asyncio.to_thread(load_policy, database=supabase, status="SOMBRA")
+    except LookupError:
+        raise HTTPException(status_code=409, detail="Nao ha politica em SOMBRA.")
+    operation_ids = await asyncio.to_thread(
+        select_operations,
+        operation_ids=[str(item) for item in request.operation_ids] if request.operation_ids is not None else None,
+        ambiente=request.ambiente,
+        limite=request.limite,
+        database=supabase,
+    )
+    started = time.monotonic()
+    operations, remaining, totals = [], [], {}
+    for index, operation_id in enumerate(operation_ids):
+        if time.monotonic() - started >= 45:
+            remaining = operation_ids[index:]
+            break
+        result = await asyncio.to_thread(avaliar_sombra, operation_id, database=supabase, aplicar=request.aplicar)
+        operations.append({"operation_id": operation_id, "classe_geral": result["classe_geral"], "divergencias": result["divergencias"]})
+        key = result["classe_geral"]
+        totals[key] = totals.get(key, 0) + 1
+    return {"aplicar": request.aplicar, "processadas": len(operations), "restantes": remaining, "operacoes": operations, "totais": totals}
 
 
 @router.post("/ingestao/broadfactor")
