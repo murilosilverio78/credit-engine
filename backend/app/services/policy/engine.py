@@ -94,7 +94,10 @@ def _new_effects(entrada, rules, trail):
 
 def _band(value: float, bands: list[dict[str, Any]]) -> float:
     for band in bands:
-        if "ate" not in band or value < _number(band["ate"]):
+        if "ate" not in band:
+            return _number(band["nota"])
+        threshold = _number(band["ate"])
+        if value < threshold or (bool(band.get("inclusivo")) and value == threshold):
             return _number(band["nota"])
     return _number(bands[-1]["nota"])
 
