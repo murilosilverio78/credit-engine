@@ -40,6 +40,35 @@ def test_shadow_classifies_missing_runs_and_dry_run_does_not_persist(monkeypatch
     assert len(db.inserted) == 1
 
 
+def test_shadow_does_not_require_documentos_run_for_score_parity(monkeypatch):
+    monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": {}, "regras": []})
+    runs = {name: {"run_id": name, "status": "COMPLETO"} for name in (
+        "cadastro_regularidade", "sacado_orgao", "reputacional", "porte",
+    )}
+    monkeypatch.setattr(shadow, "montar_entrada", lambda *_args, **_kwargs: EntradaPolitica({}, {}, runs, {"documentos"}))
+    official = {field: None for field in shadow._FIELDS}
+    monkeypatch.setattr(shadow, "_official", lambda *_args: (official, date(2026, 1, 1)))
+    monkeypatch.setattr(shadow, "avaliar", lambda *_args: type("Result", (), {
+        "as_dict": lambda self: {field: None for field in shadow._FIELDS}, "efeitos_novos": [],
+    })())
+
+    assert shadow.avaliar_sombra("op", database=_Db())["classe_geral"] == "IGUAL"
+
+
+def test_shadow_requires_reputacional_when_official_score_exists(monkeypatch):
+    monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": {}, "regras": []})
+    runs = {name: {"run_id": name, "status": "COMPLETO"} for name in (
+        "cadastro_regularidade", "sacado_orgao", "porte",
+    )}
+    monkeypatch.setattr(shadow, "montar_entrada", lambda *_args, **_kwargs: EntradaPolitica({}, {}, runs, {"documentos", "reputacional"}))
+    monkeypatch.setattr(shadow, "_official", lambda *_args: ({"score": 70}, date(2026, 1, 1)))
+    monkeypatch.setattr(shadow, "avaliar", lambda *_args: type("Result", (), {
+        "as_dict": lambda self: {field: (70 if field == "score" else None) for field in shadow._FIELDS}, "efeitos_novos": [],
+    })())
+
+    assert shadow.avaliar_sombra("op", database=_Db())["classe_geral"] == "SEM_DADOS"
+
+
 def test_official_uses_score_completion_date_before_operation_creation():
     db = Postgrest({"component_snapshots": [{
         "operation_id": "op", "component": "score_engine", "status": "completed",
@@ -129,7 +158,10 @@ def test_shadow_compares_veto_blocks_by_category(monkeypatch):
 
 def test_shadow_effects_without_parity_field_do_not_explain_divergence(monkeypatch):
     monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": {}, "regras": []})
-    monkeypatch.setattr(shadow, "montar_entrada", lambda *_args, **_kwargs: EntradaPolitica({}, {}, {}, set()))
+    runs = {name: {"run_id": name, "status": "COMPLETO"} for name in (
+        "cadastro_regularidade", "sacado_orgao", "reputacional", "porte",
+    )}
+    monkeypatch.setattr(shadow, "montar_entrada", lambda *_args, **_kwargs: EntradaPolitica({}, {}, runs, set()))
     monkeypatch.setattr(shadow, "_official", lambda *_args: ({"score": 70}, date(2026, 1, 1)))
     monkeypatch.setattr(shadow, "avaliar", lambda *_args: type("Result", (), {
         "as_dict": lambda self: {field: (60 if field == "score" else None) for field in shadow._FIELDS},
@@ -141,7 +173,10 @@ def test_shadow_effects_without_parity_field_do_not_explain_divergence(monkeypat
 
 def test_shadow_effect_with_explicit_parity_field_explains_divergence(monkeypatch):
     monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": {}, "regras": []})
-    monkeypatch.setattr(shadow, "montar_entrada", lambda *_args, **_kwargs: EntradaPolitica({}, {}, {}, set()))
+    runs = {name: {"run_id": name, "status": "COMPLETO"} for name in (
+        "cadastro_regularidade", "sacado_orgao", "reputacional", "porte",
+    )}
+    monkeypatch.setattr(shadow, "montar_entrada", lambda *_args, **_kwargs: EntradaPolitica({}, {}, runs, set()))
     monkeypatch.setattr(shadow, "_official", lambda *_args: ({"score": 70}, date(2026, 1, 1)))
     monkeypatch.setattr(shadow, "avaliar", lambda *_args: type("Result", (), {
         "as_dict": lambda self: {field: (60 if field == "score" else None) for field in shadow._FIELDS},

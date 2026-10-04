@@ -11,6 +11,7 @@ from app.services.policy.inputs import montar_entrada
 from app.services.policy.loader import load_policy
 
 _FIELDS = ("merit", "merit_potencial", "fator_regularidade", "fator_potencial", "penalizacao_balanco", "score", "rating", "rating_potencial", "limite_aprovado_rs", "bloqueios", "ajuste_pd")
+_PARITY_SPECIALISTS = frozenset({"cadastro_regularidade", "sacado_orgao"})
 
 
 def _rows(query) -> list[dict[str, Any]]:
@@ -81,6 +82,16 @@ def _effects_explain(divergencias: list[dict[str, Any]], effects: list[dict[str,
     return bool(fields) and fields <= explained
 
 
+def _missing_parity_specialists(runs_usados: dict[str, dict[str, str]], official: dict[str, Any] | None) -> set[str]:
+    """Return only the runs needed to compare the persisted score.
+
+    ``documentos`` feeds a policy effect, but not score parity.  Porte and
+    reputacao are only comparable when an official score exists.
+    """
+    required = _PARITY_SPECIALISTS | ({"reputacional", "porte"} if official is not None else set())
+    return required - set(runs_usados)
+
+
 def _hash(runs: dict[str, dict[str, str]], operation: dict[str, Any], policy_id: str, ref: date) -> str:
     context = {key: operation.get(key) for key in ("valor_enquadrado", "valor_solicitado", "pct_max_contrato", "margem_disponivel", "contrato_saldo", "saldo_vincendo")}
     raw = json.dumps({"runs": runs, "contexto": context, "policy_version_id": policy_id, "data_referencia": ref.isoformat()}, sort_keys=True, separators=(",", ":"))
@@ -112,7 +123,7 @@ def avaliar_sombra(operation_id: str, *, database=None, aplicar: bool = False) -
             if different:
                 divergencias.append({"campo": field, "valor_politica": policy_value, "valor_oficial": official_value, "diferenca": None, "classe": "PARIDADE", "motivo": "valor divergente"})
     partial_run = any(str(run.get("status") or "").upper() == "PARCIAL" for run in entrada.runs_usados.values())
-    if entrada.indisponiveis or partial_run or official is None:
+    if _missing_parity_specialists(entrada.runs_usados, official) or partial_run or official is None:
         classe = "SEM_DADOS"
     elif not divergencias:
         classe = "IGUAL"
