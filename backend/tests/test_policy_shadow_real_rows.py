@@ -102,3 +102,52 @@ def test_official_score_without_reputacional_run_is_sem_dados():
     result = shadow.avaliar_sombra("99e4d490-8dd2-4669-b5e5-b78323b57074", database=db)
 
     assert result["classe_geral"] == "SEM_DADOS"
+
+
+def test_real_row_1d0d5e00_is_equal():
+    row = _load("shadow_1d0d5e00.json")
+    result = shadow.avaliar_sombra(row["operation"]["id"], database=_database(row))
+
+    assert result["classe_geral"] == "IGUAL"
+    assert result["divergencias"] == []
+
+
+def test_real_row_caf47df0_uses_potential_porte_before_balance_penalty():
+    row = _load("shadow_caf47df0.json")
+    result = shadow.avaliar_sombra(row["operation"]["id"], database=_database(row))
+
+    assert result["classe_geral"] == "IGUAL"
+    assert result["divergencias"] == []
+    assert result["resultado"]["merit_potencial"] == 67.7
+    assert result["resultado"]["penalizacao_balanco"] == 10.0
+
+
+def test_real_row_3ce51357_marks_old_pd_as_non_comparable():
+    row = _load("shadow_3ce51357.json")
+    result = shadow.avaliar_sombra(row["operation"]["id"], database=_database(row))
+
+    assert result["classe_geral"] == "IGUAL"
+    assert result["divergencias"] == [
+        {
+            "campo": "ajuste_pd",
+            "valor_politica": result["resultado"]["ajuste_pd"],
+            "valor_oficial": row["score_snapshot"]["parsed_result"]["ajuste_pd"],
+            "diferenca": None,
+            "classe": "NAO_COMPARAVEL",
+            "motivo": "formato antigo de ajuste_pd sem anos completos",
+        }
+    ]
+
+
+def test_legacy_99e4_snapshot_absent_fields_are_non_comparable():
+    row = _load("shadow_99e4d490.json")
+    official = row["score_snapshot"]["parsed_result"]
+    for field in ("merit_potencial", "rating_potencial", "penalizacao_balanco", "ajuste_pd", "regularidade"):
+        official.pop(field)
+    result = shadow.avaliar_sombra(row["operation"]["id"], database=_database(row))
+
+    assert result["classe_geral"] == "IGUAL"
+    assert {item["campo"] for item in result["divergencias"]} == {
+        "merit_potencial", "rating_potencial", "penalizacao_balanco", "ajuste_pd", "fator_potencial",
+    }
+    assert {item["classe"] for item in result["divergencias"]} == {"NAO_COMPARAVEL"}
