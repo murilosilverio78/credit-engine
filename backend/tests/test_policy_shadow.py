@@ -69,6 +69,18 @@ def test_official_uses_creation_date_only_when_completion_is_null():
     assert reference == date(2026, 1, 1)
 
 
+def test_official_reads_fator_potencial_from_real_regularidade_shape():
+    db = Postgrest({"component_snapshots": [{
+        "operation_id": "op", "component": "score_engine", "status": "completed",
+        "created_at": "2026-01-01T00:00:00Z", "completed_at": "2026-01-02T00:00:00Z",
+        "parsed_result": {"regularidade": {"fator_potencial": 0.91}},
+    }]})
+
+    official, _reference_date = shadow._official(db, "op")
+
+    assert official["fator_potencial"] == 0.91
+
+
 def test_shadow_uses_eligibility_cap_when_no_official_score(monkeypatch):
     import app.services.eligibility_params_service as eligibility
     monkeypatch.setattr(eligibility, "get_eligibility_config", lambda: {"pct_max_contrato": 0.35})

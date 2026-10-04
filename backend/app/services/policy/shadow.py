@@ -29,7 +29,12 @@ def _official(database, operation_id: str) -> tuple[dict[str, Any] | None, date]
     rows = _rows(database.table("component_snapshots").select("parsed_result,completed_at,created_at").eq("operation_id", operation_id).eq("component", "score_engine").eq("status", "completed").order("completed_at", desc=True).limit(1))
     if not rows or not isinstance(rows[0].get("parsed_result"), dict):
         return None, date.today()
-    return rows[0]["parsed_result"], _reference(rows[0].get("completed_at") or rows[0].get("created_at"))
+    official = dict(rows[0]["parsed_result"])
+    # Snapshots reais do score persistem esse fator dentro de regularidade;
+    # versões anteriores também podem tê-lo no nível superior.
+    if "fator_potencial" not in official and isinstance(official.get("regularidade"), dict):
+        official["fator_potencial"] = official["regularidade"].get("fator_potencial")
+    return official, _reference(rows[0].get("completed_at") or rows[0].get("created_at"))
 
 
 def _set_pct_max_contrato(operation: dict[str, Any], official: dict[str, Any] | None) -> None:
