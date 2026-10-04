@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from app.services.policy import loader, shadow
+from app.services.findings.version import EMITTER_VERSION
 from tests.fakes.postgrest import Postgrest
 
 
@@ -43,7 +44,7 @@ def _database(row: dict) -> Postgrest:
     row = deepcopy(row)
     operation = row["operation"]
     operation_id = operation["id"]
-    runs = [{**run, "operation_id": operation_id, "versao_emissor": "4"} for run in row["finding_runs"]]
+    runs = [{**run, "operation_id": operation_id, "versao_emissor": EMITTER_VERSION} for run in row["finding_runs"]]
     snapshot = row.get("score_snapshot")
     tables = {
         **_policy_tables(),

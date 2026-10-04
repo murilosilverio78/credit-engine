@@ -1,4 +1,5 @@
 from app.services.policy.inputs import montar_entrada
+from app.services.findings.version import EMITTER_VERSION
 from tests.fakes.postgrest import Postgrest
 
 
@@ -7,7 +8,7 @@ def test_inputs_use_latest_current_emitter_run_per_specialist_only():
         "operations": [{"id": "op", "valor_enquadrado": 10, "valor_solicitado": 20, "pct_max_contrato": .2}],
         "finding_runs": [
             {"id": "old", "operation_id": "op", "especialista": "sacado_orgao", "versao_emissor": "3", "status": "COMPLETO", "created_at": "2026-01-02"},
-            {"id": "new", "operation_id": "op", "especialista": "sacado_orgao", "versao_emissor": "4", "status": "PARCIAL", "created_at": "2026-01-01"},
+            {"id": "new", "operation_id": "op", "especialista": "sacado_orgao", "versao_emissor": EMITTER_VERSION, "status": "PARCIAL", "created_at": "2026-01-01"},
         ],
         "findings": [{"run_id": "new", "codigo": "contratos_ativos_qtd", "valor": 2, "estado": "CONFIRMADO", "confianca": "ALTA"}],
     })
