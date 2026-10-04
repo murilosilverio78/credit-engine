@@ -26,6 +26,17 @@ class _Db:
         return _InsertQuery(self.inserted)
 
 
+def _complete_parity_runs():
+    return {
+        name: {"run_id": name, "status": "COMPLETO"}
+        for name in ("cadastro_regularidade", "sacado_orgao", "reputacional", "porte")
+    }
+
+
+def _shadow_result(values):
+    return type("Result", (), {"as_dict": lambda self: values, "efeitos_novos": []})()
+
+
 def test_shadow_classifies_missing_runs_and_dry_run_does_not_persist(monkeypatch):
     params = {"score_bloqueio": 20}
     monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": params, "regras": []})
@@ -196,3 +207,70 @@ def test_shadow_partial_run_is_sem_dados(monkeypatch):
     })())
 
     assert shadow.avaliar_sombra("op", database=_Db())["classe_geral"] == "SEM_DADOS"
+
+
+def test_shadow_marks_absent_legacy_official_fields_as_non_comparable(monkeypatch):
+    values = {field: None for field in shadow._FIELDS}
+    values.update({"score": 70, "rating": "C", "bloqueios": [], "fator_regularidade": 1.0})
+    official = {key: value for key, value in values.items() if key not in {
+        "merit_potencial", "rating_potencial", "penalizacao_balanco", "ajuste_pd", "fator_potencial",
+    }}
+    monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": {}, "regras": []})
+    monkeypatch.setattr(shadow, "montar_entrada", lambda *_args, **_kwargs: EntradaPolitica({}, {}, _complete_parity_runs(), set()))
+    monkeypatch.setattr(shadow, "_official", lambda *_args: (official, date(2026, 1, 1)))
+    monkeypatch.setattr(shadow, "_set_pct_max_contrato", lambda *_args: None)
+    monkeypatch.setattr(shadow, "avaliar", lambda *_args: _shadow_result(values))
+
+    payload = shadow.avaliar_sombra("op", database=_Db())
+
+    assert payload["classe_geral"] == "IGUAL"
+    assert {item["campo"] for item in payload["divergencias"]} == {
+        "merit_potencial", "rating_potencial", "penalizacao_balanco", "ajuste_pd", "fator_potencial",
+    }
+    assert {item["classe"] for item in payload["divergencias"]} == {"NAO_COMPARAVEL"}
+
+
+def test_shadow_marks_old_pd_shape_as_non_comparable(monkeypatch):
+    adjustment = {
+        "faixa_volatilidade": "BAIXA", "multiplicador_volatilidade": 1.0,
+        "pd_base": 0.032, "pd_ajustada": 0.032,
+        "min_anos_completos": 2, "anos_completos": 10,
+    }
+    values = {field: None for field in shadow._FIELDS}
+    values.update({"score": 70, "rating": "C", "bloqueios": [], "fator_regularidade": 1.0, "fator_potencial": 1.0, "ajuste_pd": adjustment})
+    official = dict(values)
+    official["ajuste_pd"] = {key: value for key, value in adjustment.items() if key not in {"min_anos_completos", "anos_completos"}}
+    monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": {}, "regras": []})
+    monkeypatch.setattr(shadow, "montar_entrada", lambda *_args, **_kwargs: EntradaPolitica({}, {}, _complete_parity_runs(), set()))
+    monkeypatch.setattr(shadow, "_official", lambda *_args: (official, date(2026, 1, 1)))
+    monkeypatch.setattr(shadow, "_set_pct_max_contrato", lambda *_args: None)
+    monkeypatch.setattr(shadow, "avaliar", lambda *_args: _shadow_result(values))
+
+    payload = shadow.avaliar_sombra("op", database=_Db())
+
+    assert payload["classe_geral"] == "IGUAL"
+    assert payload["divergencias"] == [{
+        "campo": "ajuste_pd", "valor_politica": adjustment,
+        "valor_oficial": official["ajuste_pd"], "diferenca": None,
+        "classe": "NAO_COMPARAVEL",
+        "motivo": "formato antigo de ajuste_pd sem anos completos",
+    }]
+
+
+def test_shadow_compares_only_current_pd_projection(monkeypatch):
+    adjustment = {
+        "faixa_volatilidade": "BAIXA", "multiplicador_volatilidade": 1.0,
+        "pd_base": 0.032, "pd_ajustada": 0.032,
+        "min_anos_completos": 2, "anos_completos": 10, "parametro": "novo",
+    }
+    values = {field: None for field in shadow._FIELDS}
+    values.update({"score": 70, "rating": "C", "bloqueios": [], "fator_regularidade": 1.0, "fator_potencial": 1.0, "ajuste_pd": adjustment})
+    official = dict(values)
+    official["ajuste_pd"] = {**adjustment, "parametro": "historico"}
+    monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": {}, "regras": []})
+    monkeypatch.setattr(shadow, "montar_entrada", lambda *_args, **_kwargs: EntradaPolitica({}, {}, _complete_parity_runs(), set()))
+    monkeypatch.setattr(shadow, "_official", lambda *_args: (official, date(2026, 1, 1)))
+    monkeypatch.setattr(shadow, "_set_pct_max_contrato", lambda *_args: None)
+    monkeypatch.setattr(shadow, "avaliar", lambda *_args: _shadow_result(values))
+
+    assert shadow.avaliar_sombra("op", database=_Db())["divergencias"] == []

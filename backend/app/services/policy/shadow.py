@@ -12,6 +12,8 @@ from app.services.policy.loader import load_policy
 
 _FIELDS = ("merit", "merit_potencial", "fator_regularidade", "fator_potencial", "penalizacao_balanco", "score", "rating", "rating_potencial", "limite_aprovado_rs", "bloqueios", "ajuste_pd")
 _PARITY_SPECIALISTS = frozenset({"cadastro_regularidade", "sacado_orgao"})
+_AJUSTE_PD_FIELDS = ("faixa_volatilidade", "multiplicador_volatilidade", "pd_base", "pd_ajustada")
+_AJUSTE_PD_CURRENT_FIELDS = frozenset({"min_anos_completos", "anos_completos"})
 
 
 def _rows(query) -> list[dict[str, Any]]:
@@ -82,6 +84,30 @@ def _effects_explain(divergencias: list[dict[str, Any]], effects: list[dict[str,
     return bool(fields) and fields <= explained
 
 
+def _non_comparable(field: str, policy_value: Any, official_value: Any, reason: str) -> dict[str, Any]:
+    return {
+        "campo": field,
+        "valor_politica": policy_value,
+        "valor_oficial": official_value,
+        "diferenca": None,
+        "classe": "NAO_COMPARAVEL",
+        "motivo": reason,
+    }
+
+
+def _ajuste_pd_values(policy_value: Any, official_value: Any) -> tuple[Any, Any] | None:
+    """Project the current PD contract, or flag old persisted snapshots."""
+    if not isinstance(official_value, dict):
+        return policy_value, official_value
+    if not _AJUSTE_PD_CURRENT_FIELDS <= set(official_value):
+        return None
+    policy_pd = policy_value if isinstance(policy_value, dict) else {}
+    return (
+        {key: policy_pd.get(key) for key in _AJUSTE_PD_FIELDS},
+        {key: official_value.get(key) for key in _AJUSTE_PD_FIELDS},
+    )
+
+
 def _missing_parity_specialists(runs_usados: dict[str, dict[str, str]], official: dict[str, Any] | None) -> set[str]:
     """Return only the runs needed to compare the persisted score.
 
@@ -111,7 +137,17 @@ def avaliar_sombra(operation_id: str, *, database=None, aplicar: bool = False) -
     if official:
         computed = result.as_dict()
         for field in _FIELDS:
-            policy_value, official_value = computed.get(field), official.get(field)
+            policy_value = computed.get(field)
+            if field not in official:
+                divergencias.append(_non_comparable(field, policy_value, None, "campo ausente no snapshot oficial"))
+                continue
+            official_value = official[field]
+            if field == "ajuste_pd":
+                adjusted = _ajuste_pd_values(policy_value, official_value)
+                if adjusted is None:
+                    divergencias.append(_non_comparable(field, policy_value, official_value, "formato antigo de ajuste_pd sem anos completos"))
+                    continue
+                policy_value, official_value = adjusted
             if field == "bloqueios":
                 policy_value = sorted({_block_category(item) for item in (policy_value or [])})
                 official_value = sorted({_block_category(item) for item in (official_value or [])})
@@ -123,11 +159,12 @@ def avaliar_sombra(operation_id: str, *, database=None, aplicar: bool = False) -
             if different:
                 divergencias.append({"campo": field, "valor_politica": policy_value, "valor_oficial": official_value, "diferenca": None, "classe": "PARIDADE", "motivo": "valor divergente"})
     partial_run = any(str(run.get("status") or "").upper() == "PARCIAL" for run in entrada.runs_usados.values())
+    parity_divergencias = [item for item in divergencias if item["classe"] == "PARIDADE"]
     if _missing_parity_specialists(entrada.runs_usados, official) or partial_run or official is None:
         classe = "SEM_DADOS"
-    elif not divergencias:
+    elif not parity_divergencias:
         classe = "IGUAL"
-    elif _effects_explain(divergencias, result.efeitos_novos):
+    elif _effects_explain(parity_divergencias, result.efeitos_novos):
         classe = "ESPERADA"
     else:
         classe = "INESPERADA"
