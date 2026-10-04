@@ -1,0 +1,31 @@
+-- Valide contra producao: o resultado deve ficar vazio.
+-- Cada ARRAY no VALUES contem todas as colunas esperadas para a respectiva
+-- tabela; expected_columns expande os pares (tabela, coluna) antes do join.
+WITH expected_tables(table_name, columns) AS (
+  VALUES
+    ('operations', ARRAY['ambiente','analysis_attempts','cliente_cadastro_revision','cliente_id','cnpj','completed_at','contrato_id','contrato_saldo','cotacao_id','created_at','created_by','dado_cadastral_degradado','error_message','expires_at','fonte_prazo_vincendo','fonte_valor_global','heartbeat_at','id','limite_aprovado','margem_disponivel','origem_dados','parecer','prazo_dias','prazo_final_meses','prazo_vincendo_indisponivel','prazo_vincendo_meses','pricing_skipped_reason','rating','razao_social','retomadas_count','saldo_vincendo','score','source','status','taxa_breakdown','taxa_sugerida','uasg','updated_at','valor_enquadrado','valor_global_contrato','valor_operacao_relatorio','valor_solicitado']::text[]),
+    ('finding_runs', ARRAY['ambiente','created_at','custo_usd','duracao_ms','entrada_hash','erro','especialista','id','modelo','operation_id','status','versao_emissor','versao_schema']::text[]),
+    ('findings', ARRAY['catalogo_versao','codigo','confianca','created_at','entidade','escopo','estado','evidencia','id','operation_id','pendencia','run_id','valido_ate','valor']::text[]),
+    ('finding_catalog', ARRAY['ativo','classe_padrao','codigo','created_at','descricao','escopo','natureza','tipo_valor','versao']::text[]),
+    ('component_snapshots', ARRAY['completed_at','component','cost_usd','created_at','duration_ms','error_message','id','operation_id','parsed_result','raw_result','retry_count','score_contrib','source_cliente_snapshot_id','started_at','status','updated_at']::text[]),
+    ('cotacoes_broadfactor', ARRAY['ambiente','cnpj','cotacao_id','created_at','data_cotacao','data_expiracao','estagio','estagio_atualizado_em','estagio_max','estagio_motivo','margem_disponivel','n_documentos','nome_fornecedor','operation_id','payload_bruto','saldo_vincendo','status_ingestao','tipo','tipos_documento','valor_enquadrado','valor_solicitado']::text[]),
+    ('documents', ARRAY['created_at','document_type','file_size_bytes','filename','id','issuer','mime_type','operation_id','storage_key','upload_ip','upload_source','uploaded_by','valid_until']::text[]),
+    ('policy_versions', ARRAY['ativada_em','created_at','criada_por','descricao','id','sombra_desde','status','versao']::text[]),
+    ('policy_parameters', ARRAY['chave','descricao','id','policy_version_id','unidade','valor']::text[]),
+    ('policy_rules', ARRAY['classe','codigo','condicao','direcao','id','magnitude','ordem','parametro_alvo','policy_version_id']::text[]),
+    ('policy_shadow_runs', ARRAY['ambiente','classe_geral','created_at','data_referencia','divergencias','entrada_hash','id','oficial','operation_id','parametros_divergentes','policy_version_id','resultado','runs_usados']::text[]),
+    ('pricing_parameters', ARRAY['grupo','key','label','unit','updated_at','updated_by','value']::text[]),
+    ('pricing_rating_matrix', ARRAY['bond_cobertura','bond_premio_aa','lgd_mult','ordem','pd_mult','perfil','rating','recusa','updated_at','updated_by']::text[]),
+    ('eligibility_parameters', ARRAY['grupo','key','label','unit','updated_at','updated_by','value']::text[])
+), expected_columns AS (
+  SELECT table_name, unnest(columns) AS column_name
+  FROM expected_tables
+)
+SELECT expected_columns.table_name, expected_columns.column_name
+FROM expected_columns
+LEFT JOIN information_schema.columns AS actual
+  ON actual.table_schema = 'public'
+ AND actual.table_name = expected_columns.table_name
+ AND actual.column_name = expected_columns.column_name
+WHERE actual.column_name IS NULL
+ORDER BY expected_columns.table_name, expected_columns.column_name;
