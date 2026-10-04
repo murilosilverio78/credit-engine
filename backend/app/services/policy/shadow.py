@@ -32,6 +32,24 @@ def _official(database, operation_id: str) -> tuple[dict[str, Any] | None, date]
     return rows[0]["parsed_result"], _reference(rows[0].get("completed_at") or rows[0].get("created_at"))
 
 
+def _set_pct_max_contrato(operation: dict[str, Any], official: dict[str, Any] | None) -> None:
+    """Use the exact historical cap, falling back to the score's config source."""
+    if isinstance(official, dict) and official.get("limite_sugerido_pct_contrato") is not None:
+        operation["pct_max_contrato"] = official["limite_sugerido_pct_contrato"]
+        operation["pct_max_contrato_origem"] = "oficial"
+        return
+    try:
+        from app.services.eligibility_params_service import get_eligibility_config
+
+        operation["pct_max_contrato"] = get_eligibility_config()["pct_max_contrato"]
+        operation["pct_max_contrato_origem"] = "eligibility"
+    except Exception:
+        # Keep it absent: _limit emits limite_sem_pct_max_contrato just as the
+        # deterministic score does when the cap is unavailable.
+        operation.pop("pct_max_contrato", None)
+        operation["pct_max_contrato_origem"] = "indisponivel"
+
+
 def _block_category(value: Any) -> str:
     text = str(value)
     if text.startswith("Situacao cadastral") or text == "cadastro_inativo":
@@ -71,6 +89,7 @@ def avaliar_sombra(operation_id: str, *, database=None, aplicar: bool = False) -
     policy = load_policy(database=database, status="SOMBRA")
     entrada = montar_entrada(operation_id, database=database)
     official, ref = _official(database, operation_id)
+    _set_pct_max_contrato(entrada.operation, official)
     result = avaliar(entrada, policy["parametros"], policy["regras"], ref)
     divergencias = []
     if official:

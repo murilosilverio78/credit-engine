@@ -1,6 +1,7 @@
 from datetime import date
 
 from app.services.policy import shadow
+from app.services.policy.engine import _limit
 from app.services.policy.types import EntradaPolitica
 from tests.fakes.postgrest import Postgrest
 
@@ -66,6 +67,38 @@ def test_official_uses_creation_date_only_when_completion_is_null():
     _official, reference = shadow._official(db, "op")
 
     assert reference == date(2026, 1, 1)
+
+
+def test_shadow_uses_eligibility_cap_when_no_official_score(monkeypatch):
+    import app.services.eligibility_params_service as eligibility
+    monkeypatch.setattr(eligibility, "get_eligibility_config", lambda: {"pct_max_contrato": 0.35})
+    operation = {}
+
+    shadow._set_pct_max_contrato(operation, None)
+
+    assert operation == {"pct_max_contrato": 0.35, "pct_max_contrato_origem": "eligibility"}
+
+
+def test_shadow_preserves_official_cap_after_eligibility_changes(monkeypatch):
+    import app.services.eligibility_params_service as eligibility
+    monkeypatch.setattr(eligibility, "get_eligibility_config", lambda: {"pct_max_contrato": 0.10})
+    operation = {}
+
+    shadow._set_pct_max_contrato(operation, {"limite_sugerido_pct_contrato": 0.42})
+
+    assert operation == {"pct_max_contrato": 0.42, "pct_max_contrato_origem": "oficial"}
+
+
+def test_shadow_missing_eligibility_cap_keeps_limit_flag(monkeypatch):
+    import app.services.eligibility_params_service as eligibility
+    monkeypatch.setattr(eligibility, "get_eligibility_config", lambda: (_ for _ in ()).throw(RuntimeError("offline")))
+    operation = {"contrato_saldo": 500_000}
+
+    shadow._set_pct_max_contrato(operation, None)
+    _value, flags = _limit(EntradaPolitica(operation, {}), {"pct_margem_sobre_saldo": 0.7}, {})
+
+    assert operation["pct_max_contrato_origem"] == "indisponivel"
+    assert flags == ["limite_sem_pct_max_contrato"]
 
 
 def test_shadow_compares_veto_blocks_by_category(monkeypatch):
