@@ -201,6 +201,11 @@ def _findings(snapshots: dict[str, Any], operation: dict[str, Any]) -> dict[str,
 def _compare(case: dict[str, Any], reference: date) -> list[str]:
     snapshots, operation, porte_dimension = _snapshot(case, reference)
     official = score_engine.consolidar_score("12345678000199", snapshots, operation, porte_dimension=porte_dimension)
+    # ``consolidar_score`` omits these keys for an early veto, whereas the
+    # persisted score-engine snapshot stores them as JSON null.  Normalize to
+    # that real snapshot contract before doing the exact field comparison.
+    if official.get("bloqueios"):
+        official = {**official, "merit_potencial": None, "penalizacao_balanco": None}
     policy = avaliar(EntradaPolitica(operation, _findings(snapshots, operation)), PARAMS, VETO_RULES, reference)
     actual = policy.as_dict()
     expected = {
@@ -333,6 +338,6 @@ def test_policy_matches_official_score_engine(name: str, case: dict[str, Any]):
     reference = date.today()
     differences = _compare(case, reference)
     assert not differences, (
-        f"seed={SEED}; case={name}; payload={json.dumps(case, sort_keys=True)}; "
+        f"seeds={SYNTHETIC_SEEDS}; case={name}; payload={json.dumps(case, sort_keys=True)}; "
         f"divergencias={' | '.join(differences)}"
     )

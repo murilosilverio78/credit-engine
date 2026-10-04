@@ -30,10 +30,10 @@ class ResultadoPolitica:
     rating: str
     rating_potencial: str
     merit: float
-    merit_potencial: float
+    merit_potencial: float | None
     fator_regularidade: float
     fator_potencial: float
-    penalizacao_balanco: float
+    penalizacao_balanco: float | None
     limite_aprovado_rs: float
     limite_flags: list[str]
     bloqueios: list[str]

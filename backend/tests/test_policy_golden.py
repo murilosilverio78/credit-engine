@@ -44,3 +44,5 @@ def test_golden_99e4_parity_inputs():
 def test_veto_forces_score_rating_limit_and_null_pd():
     result = avaliar(EntradaPolitica({}, {"cadastro_inativo": _finding("cadastro_inativo", True)}), _params(), [{"classe": "VETO", "codigo": "cadastro_inativo"}], date(2026, 1, 1))
     assert (result.score, result.rating, result.limite_aprovado_rs, result.ajuste_pd) == (20, "E", 0, None)
+    assert result.merit_potencial is None
+    assert result.penalizacao_balanco is None

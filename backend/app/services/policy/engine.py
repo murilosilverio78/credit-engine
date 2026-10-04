@@ -285,7 +285,11 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
                 "saude_cadastral", "reputacao_mercado",
             )
         }
-        return ResultadoPolitica(gate_score, "E", "E", gate_score, gate_score, factor, factor_potential, 0.0, 0.0, [], vetos, None, dimensions, [], trail)
+        # The official snapshot retains the regularity factors under a veto,
+        # but deliberately persists no potential merit or balance penalty.
+        # Mirror those nulls so differential parity remains field-for-field
+        # strict instead of omitting fields from the comparison.
+        return ResultadoPolitica(gate_score, "E", "E", gate_score, None, factor, factor_potential, None, 0.0, [], vetos, None, dimensions, [], trail)
     rating = _rating(score, parametros["faixas_rating"])
     potential_rating = _rating(round(merit_potential * factor_potential, 1), parametros["faixas_rating"])
     limit, limit_flags = _limit(entrada, parametros, trail)

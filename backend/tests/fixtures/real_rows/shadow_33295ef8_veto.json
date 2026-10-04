@@ -1,0 +1,50 @@
+{
+  "operation": {
+    "id": "33295ef8-2196-4fc6-a52e-e8f8169e3e4e",
+    "valor_enquadrado": 422500.0,
+    "valor_solicitado": 500000.0,
+    "margem_disponivel": 591500.0,
+    "contrato_saldo": null,
+    "saldo_vincendo": 845000.0,
+    "ambiente": "PRODUCAO"
+  },
+  "finding_runs": [
+    {"id": "f5392f7c-bf75-4178-8c1c-7d74951a2506", "especialista": "cadastro_regularidade", "status": "COMPLETO", "created_at": "2026-10-04T03:39:34+00:00"},
+    {"id": "c127246e-ea75-43be-a21c-3bfddbbdd896", "especialista": "sacado_orgao", "status": "COMPLETO", "created_at": "2026-10-04T03:39:35+00:00"},
+    {"id": "05432823-d072-4175-81f8-2405c29774c8", "especialista": "documentos", "status": "COMPLETO", "created_at": "2026-10-04T03:39:35.7+00:00"},
+    {"id": "8ed583b4-03e8-462a-8138-04907508d3cd", "especialista": "reputacional", "status": "COMPLETO", "created_at": "2026-10-04T03:39:36+00:00"},
+    {"id": "ce61bfee-7934-4995-ab1b-7fd6322aaf36", "especialista": "porte", "status": "COMPLETO", "created_at": "2026-10-04T03:39:36.5+00:00"}
+  ],
+  "findings": [
+    {"run_id": "f5392f7c-bf75-4178-8c1c-7d74951a2506", "codigo": "cadastro_inativo", "valor": false, "estado": "NEGATIVO_CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "f5392f7c-bf75-4178-8c1c-7d74951a2506", "codigo": "sancao_ativa", "valor": [{"flags": true, "componente": "pessoa_juridica"}], "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "f5392f7c-bf75-4178-8c1c-7d74951a2506", "codigo": "acordo_leniencia_ativo", "valor": false, "estado": "NEGATIVO_CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "f5392f7c-bf75-4178-8c1c-7d74951a2506", "codigo": "certidao_cnd_federal_pendente", "valor": {"estado": "ausente"}, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "f5392f7c-bf75-4178-8c1c-7d74951a2506", "codigo": "certidao_cndt_pendente", "valor": {"estado": "ausente"}, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "f5392f7c-bf75-4178-8c1c-7d74951a2506", "codigo": "certidao_fgts_pendente", "valor": {"estado": "ausente"}, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "f5392f7c-bf75-4178-8c1c-7d74951a2506", "codigo": "balanco_ausente", "valor": true, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "f5392f7c-bf75-4178-8c1c-7d74951a2506", "codigo": "capital_social_rs", "valor": 100000, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "f5392f7c-bf75-4178-8c1c-7d74951a2506", "codigo": "porte_cadastral", "valor": "EMPRESA DE PEQUENO PORTE", "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "f5392f7c-bf75-4178-8c1c-7d74951a2506", "codigo": "idade_empresa_anos", "valor": 13.979466119096509, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": [{"data_referencia": "2026-10-04"}]},
+    {"run_id": "f5392f7c-bf75-4178-8c1c-7d74951a2506", "codigo": "qsa_estabilidade", "valor": {"entrada_mais_recente": "2017-02-09"}, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "f5392f7c-bf75-4178-8c1c-7d74951a2506", "codigo": "natureza_juridica_empresarial", "valor": true, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "8ed583b4-03e8-462a-8138-04907508d3cd", "codigo": "reputacao_mercado", "valor": "Atencao", "estado": "CONFIRMADO", "confianca": "MEDIA", "evidencia": []},
+    {"run_id": "c127246e-ea75-43be-a21c-3bfddbbdd896", "codigo": "contratos_ativos_qtd", "valor": 0, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "c127246e-ea75-43be-a21c-3bfddbbdd896", "codigo": "contratos_total_qtd", "valor": 1, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "c127246e-ea75-43be-a21c-3bfddbbdd896", "codigo": "orgaos_distintos_qtd", "valor": 1, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "c127246e-ea75-43be-a21c-3bfddbbdd896", "codigo": "maturidade_max_anos", "valor": null, "estado": "NAO_VERIFICADO", "confianca": "BAIXA", "evidencia": []},
+    {"run_id": "c127246e-ea75-43be-a21c-3bfddbbdd896", "codigo": "contratos_valor_total_ativo_rs", "valor": 0.0, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "c127246e-ea75-43be-a21c-3bfddbbdd896", "codigo": "hhi_recebimentos", "valor": 3457.8, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "c127246e-ea75-43be-a21c-3bfddbbdd896", "codigo": "meses_com_recebimento", "valor": 19, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "c127246e-ea75-43be-a21c-3bfddbbdd896", "codigo": "volatilidade_cv", "valor": 1.1046, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "c127246e-ea75-43be-a21c-3bfddbbdd896", "codigo": "receita_serie_anual", "valor": {"anos_na_serie": [2017, 2019, 2020, 2021, 2022, 2023], "anos_informados": 6, "serie_qtd_chaves": 6}, "estado": "CONFIRMADO", "confianca": "ALTA", "evidencia": []},
+    {"run_id": "ce61bfee-7934-4995-ab1b-7fd6322aaf36", "codigo": "capacidade_operacional", "valor": "Critico", "estado": "CONFIRMADO", "confianca": "MEDIA", "evidencia": []}
+  ],
+  "score_snapshot": {
+    "completed_at": "2026-09-23T01:14:34.159144+00:00",
+    "created_at": "2026-09-23T01:10:04.057906+00:00",
+    "component": "score_engine",
+    "status": "completed",
+    "parsed_result": {"merit": 20, "score": 20, "rating": "E", "rating_potencial": "E", "fator_regularidade": 0.82, "limite_aprovado_rs": 0.0, "limite_sugerido_pct_contrato": 0.5, "bloqueios": ["Sancao ativa identificada em bases restritivas"], "merit_potencial": null, "penalizacao_balanco": null, "ajuste_pd": null, "regularidade": {"fator_potencial": 1.0}}
+  }
+}
