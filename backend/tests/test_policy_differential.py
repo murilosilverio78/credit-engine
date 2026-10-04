@@ -206,7 +206,14 @@ def _compare(case: dict[str, Any], reference: date) -> list[str]:
     # that real snapshot contract before doing the exact field comparison.
     if official.get("bloqueios"):
         official = {**official, "merit_potencial": None, "penalizacao_balanco": None}
-    policy = avaliar(EntradaPolitica(operation, _findings(snapshots, operation)), PARAMS, VETO_RULES, reference)
+    # The score hook emits findings from the persisted final result.  In
+    # particular, Porte/Operacionalidade contains its effective level plus
+    # ``nivel_potencial`` after a balance penalty has been applied.
+    snapshots_for_findings = {
+        **snapshots,
+        "score_engine": {"dimensoes": official.get("dimensoes") or {}},
+    }
+    policy = avaliar(EntradaPolitica(operation, _findings(snapshots_for_findings, operation)), PARAMS, VETO_RULES, reference)
     actual = policy.as_dict()
     expected = {
         "score": official.get("score"), "rating": official.get("rating"), "rating_potencial": official.get("rating_potencial"),
@@ -285,6 +292,11 @@ def _fixed_cases() -> list[pytest.ParameterSet]:
     cases: list[tuple[str, dict[str, Any]]] = []
     for source in ("nenhuma", "ambos", "cotacao", "extracao", "documents"):
         case = _base_case(); case["balance_source"] = source; cases.append((f"balanco-{source}", case))
+    for balance_source in ("nenhuma", "cotacao"):
+        for porte_level in score_engine.NIVEL_NOTA:
+            case = _base_case()
+            case.update(balance_source=balance_source, porte_llm=porte_level)
+            cases.append((f"porte-{porte_level}-balanco-{balance_source}", case))
     for certificate in ("ausente", "vencida", "nao_validada", "positiva", "positiva_com_efeitos", "negativa"):
         case = _base_case(); case["certidoes"] = (certificate,) * 3; cases.append((f"certidao-{certificate}", case))
     for hhi, months in ((1000.0, 5), (3000.0, 6), (7000.0, 12), (None, 0)):
