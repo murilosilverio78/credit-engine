@@ -1,0 +1,52 @@
+{
+  "rows": [
+    {
+      "id": "08f91143-7292-40c6-9467-ed7d6a5cfd31",
+      "operation": {"valor_enquadrado": 169488.0, "valor_solicitado": 200000.0, "margem_disponivel": 237283.2, "contrato_saldo": null, "saldo_vincendo": 338976.0},
+      "score_completed_at": "2026-09-23T01:14:49.623901+00:00",
+      "facts": {"capital": 16945400, "idade": 31.904175222450377, "porte_operacional": "Atencao", "reputacao": "Fraco", "cobertura": 0.0941, "ativos": 15, "total": 15, "valor_ativo": 14078440.84, "hhi": 4800.9, "meses": 8, "orgaos": 5, "anos": 0, "serie": [2026], "cv": null, "glosa": {"taxa_glosa": 0.0, "glosa_total": 0.0, "faturado_total": 155850.71}, "qsa": {"socios_qtd": 2, "tem_administrador": true, "entrada_mais_antiga": "2022-04-01", "entrada_mais_recente": "2022-04-01"}},
+      "official": {"merit": 60.6, "score": 47.9, "rating": "D", "merit_potencial": 70.6, "rating_potencial": "B", "fator_regularidade": 0.82, "limite_aprovado_rs": 169488.0, "penalizacao_balanco": 10.0, "limite_sugerido_pct_contrato": 0.5, "regularidade": {"fator_potencial": 1.0}, "ajuste_pd": {"pd_base": 0.08, "pd_ajustada": 0.0864, "anos_completos": 0, "min_anos_completos": 2, "faixa_volatilidade": "HISTORICO_INSUFICIENTE", "multiplicador_volatilidade": 1.08}},
+      "componentes_concluidos": [{"component": "brasil_api", "completed_at": "2026-09-22T03:38:00+00:00"}, {"component": "contratos", "completed_at": "2026-09-22T03:38:01+00:00"}, {"component": "recursos_recebidos", "completed_at": "2026-09-22T03:38:02+00:00"}]
+    },
+    {
+      "id": "15908cda-06f1-4341-9255-b4190b9d41b7",
+      "operation": {"valor_enquadrado": 363951.28, "valor_solicitado": 500000.0, "margem_disponivel": 509531.8, "contrato_saldo": null, "saldo_vincendo": 727902.57},
+      "score_completed_at": "2026-09-23T01:14:46.970148+00:00",
+      "facts": {"capital": 16945400, "idade": 31.904175222450377, "porte_operacional": "Fraco", "reputacao": "Fraco", "cobertura": 0.202, "ativos": 15, "total": 15, "valor_ativo": 14078440.84, "hhi": 4800.9, "meses": 8, "orgaos": 5, "anos": 0, "serie": [2026], "cv": null, "glosa": {"taxa_glosa": 0.003938, "glosa_total": 961.0, "faturado_total": 244026.35}, "qsa": {"socios_qtd": 2, "tem_administrador": true, "entrada_mais_antiga": "2022-04-01", "entrada_mais_recente": "2022-04-01"}},
+      "official": {"merit": 56.4, "score": 44.4, "rating": "D", "merit_potencial": 66.4, "rating_potencial": "C", "fator_regularidade": 0.82, "limite_aprovado_rs": 363951.28, "penalizacao_balanco": 10.0, "limite_sugerido_pct_contrato": 0.5, "regularidade": {"fator_potencial": 1.0}, "ajuste_pd": {"pd_base": 0.08, "pd_ajustada": 0.0864, "anos_completos": 0, "min_anos_completos": 2, "faixa_volatilidade": "HISTORICO_INSUFICIENTE", "multiplicador_volatilidade": 1.08}},
+      "componentes_concluidos": [{"component": "brasil_api", "completed_at": "2026-09-22T03:38:00+00:00"}, {"component": "contratos", "completed_at": "2026-09-22T03:38:01+00:00"}, {"component": "recursos_recebidos", "completed_at": "2026-09-22T03:38:02+00:00"}]
+    },
+    {
+      "id": "28f62ceb-f0c8-4fea-a7d8-54229d8a5b1c",
+      "operation": {"valor_enquadrado": 237829.14, "valor_solicitado": 330000.0, "margem_disponivel": 332960.8, "contrato_saldo": null, "saldo_vincendo": 475658.29},
+      "score_completed_at": "2026-09-23T01:14:57.084822+00:00",
+      "facts": {"capital": 6000000, "idade": 13.404517453798768, "porte_operacional": "Adequado", "reputacao": "Atencao", "cobertura": 0.0185, "ativos": 15, "total": 65, "valor_ativo": 13020943.0, "hhi": 2681.2, "meses": 24, "orgaos": 6, "anos": 2, "serie": [2024, 2025, 2026], "cv": 0.2036, "glosa": {"taxa_glosa": 0.0, "glosa_total": 0.0, "faturado_total": 66870.82}, "qsa": {"socios_qtd": 1, "tem_administrador": true, "entrada_mais_antiga": "2013-05-09", "entrada_mais_recente": "2013-05-09"}},
+      "official": {"merit": 66.9, "score": 53.1, "rating": "D", "merit_potencial": 76.9, "rating_potencial": "B", "fator_regularidade": 0.82, "limite_aprovado_rs": 237829.14, "penalizacao_balanco": 10.0, "limite_sugerido_pct_contrato": 0.5, "regularidade": {"fator_potencial": 1.0}, "ajuste_pd": {"pd_base": 0.08, "pd_ajustada": 0.08, "anos_completos": 2, "min_anos_completos": 2, "faixa_volatilidade": "BAIXA", "multiplicador_volatilidade": 1.0}},
+      "componentes_concluidos": [{"component": "brasil_api", "completed_at": "2026-09-22T03:38:00+00:00"}, {"component": "contratos", "completed_at": "2026-09-22T03:38:01+00:00"}, {"component": "recursos_recebidos", "completed_at": "2026-09-22T03:38:02+00:00"}]
+    },
+    {
+      "id": "3f563558-2ff1-40a5-b0be-236aa9123b25",
+      "operation": {"valor_enquadrado": 100000.0, "valor_solicitado": 100000.0, "margem_disponivel": 198846.06, "contrato_saldo": null, "saldo_vincendo": 284065.8},
+      "score_completed_at": "2026-09-23T01:15:07.867963+00:00",
+      "facts": {"capital": 5000, "idade": 1.83709787816564, "porte_cadastral": "MICRO EMPRESA", "porte_operacional": "Atencao", "reputacao": "Adequado", "reputacao_confianca": "BAIXA", "cobertura": 3.0598, "ativos": 1, "comprasnet": 1, "total": 1, "valor_ativo": 0.0, "hhi": 9862.9, "meses": 12, "orgaos": 1, "anos": 1, "serie": [2025, 2026], "cv": null, "glosa": {"taxa_glosa": null, "glosa_total": 0.0, "faturado_total": 0.0}, "qsa": {"socios_qtd": 0, "tem_administrador": false, "entrada_mais_antiga": null, "entrada_mais_recente": null}},
+      "official": {"merit": 42.3, "score": 32.9, "rating": "E", "merit_potencial": 52.3, "rating_potencial": "D", "fator_regularidade": 0.82, "limite_aprovado_rs": 100000.0, "penalizacao_balanco": 10.0, "limite_sugerido_pct_contrato": 0.5, "regularidade": {"fator_potencial": 1.0}, "ajuste_pd": {"pd_base": 0.16, "pd_ajustada": 0.1728, "anos_completos": 1, "min_anos_completos": 2, "faixa_volatilidade": "HISTORICO_INSUFICIENTE", "multiplicador_volatilidade": 1.08}},
+      "componentes_concluidos": [{"component": "brasil_api", "completed_at": "2026-10-01T03:38:00+00:00"}, {"component": "pessoa_juridica", "completed_at": "2026-10-01T03:38:00+00:00"}, {"component": "ceis", "completed_at": "2026-10-01T03:38:00+00:00"}, {"component": "cnep", "completed_at": "2026-10-01T03:38:00+00:00"}, {"component": "cepim", "completed_at": "2026-10-01T03:38:00+00:00"}, {"component": "acordos_leniencia", "completed_at": "2026-10-01T03:38:00+00:00"}, {"component": "cnd_federal", "completed_at": "2026-10-01T03:38:00+00:00"}, {"component": "cndt_tst", "completed_at": "2026-10-01T03:38:00+00:00"}, {"component": "fgts", "completed_at": "2026-10-01T03:38:00+00:00"}, {"component": "ceaf", "completed_at": "2026-10-01T03:38:00+00:00"}, {"component": "contrato_extracao", "completed_at": "2026-10-01T03:38:00+00:00"}, {"component": "contratos", "completed_at": "2026-10-01T03:38:00+00:00"}, {"component": "recursos_recebidos", "completed_at": "2026-10-01T03:38:00+00:00"}, {"component": "contratos_comprasnet", "completed_at": "2026-10-01T03:38:00+00:00"}, {"component": "web_research", "completed_at": "2026-10-01T03:38:00+00:00"}]
+    },
+    {
+      "id": "6e781fe8-bcfc-477a-87be-ef71dc5fe8b6",
+      "operation": {"valor_enquadrado": 569839.11, "valor_solicitado": 797000.0, "margem_disponivel": 797774.76, "contrato_saldo": null, "saldo_vincendo": 1139678.23},
+      "score_completed_at": "2026-09-23T01:14:47.959671+00:00",
+      "facts": {"capital": 6000000, "idade": 13.404517453798768, "porte_operacional": "Adequado", "reputacao": "Adequado", "cobertura": 0.0444, "ativos": 15, "total": 65, "valor_ativo": 13020943.0, "hhi": 2681.2, "meses": 24, "orgaos": 6, "anos": 2, "serie": [2024, 2025, 2026], "cv": 0.2036, "glosa": {"taxa_glosa": 0.0, "glosa_total": 0.0, "faturado_total": 527195.0}, "qsa": {"socios_qtd": 1, "tem_administrador": true, "entrada_mais_antiga": "2013-05-09", "entrada_mais_recente": "2013-05-09"}},
+      "official": {"merit": 69.6, "score": 55.3, "rating": "C", "merit_potencial": 79.6, "rating_potencial": "B", "fator_regularidade": 0.82, "limite_aprovado_rs": 569839.11, "penalizacao_balanco": 10.0, "limite_sugerido_pct_contrato": 0.5, "regularidade": {"fator_potencial": 1.0}, "ajuste_pd": {"pd_base": 0.032, "pd_ajustada": 0.032, "anos_completos": 2, "min_anos_completos": 2, "faixa_volatilidade": "BAIXA", "multiplicador_volatilidade": 1.0}},
+      "componentes_concluidos": [{"component": "brasil_api", "completed_at": "2026-09-22T03:38:00+00:00"}, {"component": "contratos", "completed_at": "2026-09-22T03:38:01+00:00"}, {"component": "recursos_recebidos", "completed_at": "2026-09-22T03:38:02+00:00"}]
+    },
+    {
+      "id": "837b9b81-a4bc-456b-86f7-89b8a7b2351d",
+      "operation": {"valor_enquadrado": 200000.0, "valor_solicitado": 200000.0, "margem_disponivel": null, "contrato_saldo": 1000000.0, "saldo_vincendo": 1000000.0},
+      "score_completed_at": "2026-09-29T00:57:27.844042+00:00",
+      "facts": {"capital": 6200000, "idade": 28.320328542094455, "porte_operacional": "Forte", "reputacao": "Atencao", "cobertura": 0.0068, "ativos": 3, "total": 53, "valor_ativo": 66998798.12, "hhi": 8826.5, "meses": 12, "orgaos": 13, "anos": 1, "serie": [2025, 2026], "cv": null, "glosa": {"taxa_glosa": null, "glosa_total": 0.0, "faturado_total": 0.0}, "qsa": {"socios_qtd": 1, "tem_administrador": true, "entrada_mais_antiga": "1998-06-09", "entrada_mais_recente": "1998-06-09"}},
+      "official": {"merit": 67.2, "score": 53.3, "rating": "D", "merit_potencial": 77.2, "rating_potencial": "B", "fator_regularidade": 0.82, "limite_aprovado_rs": 200000.0, "penalizacao_balanco": 10.0, "limite_sugerido_pct_contrato": 0.5, "regularidade": {"fator_potencial": 1.0}, "ajuste_pd": {"pd_base": 0.08, "pd_ajustada": 0.0864, "anos_completos": 1, "min_anos_completos": 2, "faixa_volatilidade": "HISTORICO_INSUFICIENTE", "multiplicador_volatilidade": 1.08}},
+      "componentes_concluidos": [{"component": "brasil_api", "completed_at": "2026-09-22T03:38:00+00:00"}, {"component": "contratos", "completed_at": "2026-09-22T03:38:01+00:00"}, {"component": "recursos_recebidos", "completed_at": "2026-09-22T03:38:02+00:00"}]
+    }
+  ]
+}
