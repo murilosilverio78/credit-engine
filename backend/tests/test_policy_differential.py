@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import random
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -347,7 +347,9 @@ def pricing_seed(monkeypatch):
 
 @pytest.mark.parametrize(("name", "case"), _synthetic_cases() + _fixed_cases())
 def test_policy_matches_official_score_engine(name: str, case: dict[str, Any]):
-    reference = date.today()
+    # The score engine and finding adapter use UTC for their age reference.
+    # Keeping the oracle in that same clock avoids a one-day boundary mismatch.
+    reference = datetime.now(timezone.utc).date()
     differences = _compare(case, reference)
     assert not differences, (
         f"seeds={SYNTHETIC_SEEDS}; case={name}; payload={json.dumps(case, sort_keys=True)}; "
