@@ -274,3 +274,66 @@ def test_shadow_compares_only_current_pd_projection(monkeypatch):
     monkeypatch.setattr(shadow, "avaliar", lambda *_args: _shadow_result(values))
 
     assert shadow.avaliar_sombra("op", database=_Db())["divergencias"] == []
+
+
+def test_input_components_after_score_ignores_score_and_older_snapshots():
+    db = Postgrest({"component_snapshots": [
+        {"operation_id": "op", "component": "score_engine", "status": "completed", "completed_at": "2026-09-23T01:00:00+00:00"},
+        {"operation_id": "op", "component": "contratos", "status": "completed", "completed_at": "2026-10-01T01:00:00+00:00"},
+        {"operation_id": "op", "component": "brasil_api", "status": "completed", "completed_at": "2026-09-22T01:00:00+00:00"},
+        {"operation_id": "op", "component": "score_engine", "status": "completed", "completed_at": "2026-10-02T01:00:00+00:00"},
+        {"operation_id": "op", "component": "desconhecido", "status": "completed", "completed_at": "2026-10-03T01:00:00+00:00"},
+    ]})
+
+    assert shadow._input_components_after_score(db, "op") == []
+
+
+def test_input_components_after_score_lists_newer_recognized_inputs():
+    db = Postgrest({"component_snapshots": [
+        {"operation_id": "op", "component": "score_engine", "status": "completed", "completed_at": "2026-09-23T01:00:00+00:00"},
+        {"operation_id": "op", "component": "contratos", "status": "completed", "completed_at": "2026-10-01T01:00:00+00:00"},
+        {"operation_id": "op", "component": "brasil_api", "status": "completed", "completed_at": "2026-10-01T01:00:00+00:00"},
+        {"operation_id": "op", "component": "score_engine", "status": "completed", "completed_at": "2026-09-23T01:00:00+00:00"},
+    ]})
+
+    assert shadow._input_components_after_score(db, "op") == ["brasil_api", "contratos"]
+
+
+def test_shadow_marks_parity_divergence_as_later_input(monkeypatch):
+    values = {field: None for field in shadow._FIELDS}
+    values.update({"score": 60, "bloqueios": []})
+    official = {**values, "score": 70}
+    monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": {}, "regras": []})
+    monkeypatch.setattr(shadow, "montar_entrada", lambda *_args, **_kwargs: EntradaPolitica({}, {}, _complete_parity_runs(), set()))
+    monkeypatch.setattr(shadow, "_official", lambda *_args: (official, date(2026, 1, 1)))
+    monkeypatch.setattr(shadow, "_input_components_after_score", lambda *_args: ["contratos"])
+    monkeypatch.setattr(shadow, "_set_pct_max_contrato", lambda *_args: None)
+    monkeypatch.setattr(shadow, "avaliar", lambda *_args: _shadow_result(values))
+
+    payload = shadow.avaliar_sombra("op", database=_Db())
+
+    assert payload["classe_geral"] == "SEM_DADOS"
+    assert payload["oficial"]["_insumos_posteriores"] == ["contratos"]
+    assert payload["divergencias"] == [{
+        "campo": "score", "valor_politica": 60, "valor_oficial": 70,
+        "diferenca": None, "classe": "INSUMO_POSTERIOR",
+        "motivo": "insumos refeitos apos o score oficial",
+        "componentes_posteriores": ["contratos"],
+    }]
+
+
+def test_shadow_keeps_equal_when_later_inputs_reproduce_official(monkeypatch):
+    values = {field: None for field in shadow._FIELDS}
+    values.update({"score": 60, "bloqueios": []})
+    monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": {}, "regras": []})
+    monkeypatch.setattr(shadow, "montar_entrada", lambda *_args, **_kwargs: EntradaPolitica({}, {}, _complete_parity_runs(), set()))
+    monkeypatch.setattr(shadow, "_official", lambda *_args: (dict(values), date(2026, 1, 1)))
+    monkeypatch.setattr(shadow, "_input_components_after_score", lambda *_args: ["contratos"])
+    monkeypatch.setattr(shadow, "_set_pct_max_contrato", lambda *_args: None)
+    monkeypatch.setattr(shadow, "avaliar", lambda *_args: _shadow_result(values))
+
+    payload = shadow.avaliar_sombra("op", database=_Db())
+
+    assert payload["classe_geral"] == "IGUAL"
+    assert payload["divergencias"] == []
+    assert payload["oficial"]["_insumos_posteriores"] == ["contratos"]

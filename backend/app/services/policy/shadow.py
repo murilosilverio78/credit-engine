@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 from app.services.policy.engine import avaliar
@@ -14,6 +14,12 @@ _FIELDS = ("merit", "merit_potencial", "fator_regularidade", "fator_potencial", 
 _PARITY_SPECIALISTS = frozenset({"cadastro_regularidade", "sacado_orgao"})
 _AJUSTE_PD_FIELDS = ("faixa_volatilidade", "multiplicador_volatilidade", "pd_base", "pd_ajustada")
 _AJUSTE_PD_CURRENT_FIELDS = frozenset({"min_anos_completos", "anos_completos"})
+_INPUT_COMPONENTS = frozenset({
+    "brasil_api", "pessoa_juridica", "ceis", "cnep", "cepim",
+    "acordos_leniencia", "cnd_federal", "cndt_tst", "fgts", "ceaf",
+    "contrato_extracao", "contratos", "recursos_recebidos",
+    "contratos_comprasnet", "web_research",
+})
 
 
 def _rows(query) -> list[dict[str, Any]]:
@@ -28,6 +34,14 @@ def _reference(value: Any) -> date:
         return date.today()
 
 
+def _timestamp(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def _official(database, operation_id: str) -> tuple[dict[str, Any] | None, date]:
     rows = _rows(database.table("component_snapshots").select("parsed_result,completed_at,created_at").eq("operation_id", operation_id).eq("component", "score_engine").eq("status", "completed").order("completed_at", desc=True).limit(1))
     if not rows or not isinstance(rows[0].get("parsed_result"), dict):
@@ -38,6 +52,33 @@ def _official(database, operation_id: str) -> tuple[dict[str, Any] | None, date]
     if "fator_potencial" not in official and isinstance(official.get("regularidade"), dict):
         official["fator_potencial"] = official["regularidade"].get("fator_potencial")
     return official, _reference(rows[0].get("completed_at") or rows[0].get("created_at"))
+
+
+def _input_components_after_score(database, operation_id: str) -> list[str]:
+    """Return completed score inputs newer than the persisted official score."""
+    try:
+        score_rows = _rows(database.table("component_snapshots").select("completed_at,created_at").eq("operation_id", operation_id).eq("component", "score_engine").eq("status", "completed"))
+        if not score_rows:
+            return []
+        score_completed_at = max(
+            (
+                timestamp
+                for row in score_rows
+                if (timestamp := _timestamp(row.get("completed_at") or row.get("created_at"))) is not None
+            ),
+            default=None,
+        )
+        if score_completed_at is None:
+            return []
+        rows = _rows(database.table("component_snapshots").select("component,completed_at").eq("operation_id", operation_id).eq("status", "completed"))
+    except Exception:
+        return []
+    return sorted({
+        str(row["component"])
+        for row in rows
+        if row.get("component") in _INPUT_COMPONENTS
+        and (_timestamp(row.get("completed_at")) or score_completed_at) > score_completed_at
+    })
 
 
 def _set_pct_max_contrato(operation: dict[str, Any], official: dict[str, Any] | None) -> None:
@@ -131,6 +172,9 @@ def avaliar_sombra(operation_id: str, *, database=None, aplicar: bool = False) -
     policy = load_policy(database=database, status="SOMBRA")
     entrada = montar_entrada(operation_id, database=database)
     official, ref = _official(database, operation_id)
+    insumos_posteriores = _input_components_after_score(database, operation_id) if official is not None else []
+    if official is not None:
+        official = {**official, "_insumos_posteriores": insumos_posteriores}
     _set_pct_max_contrato(entrada.operation, official)
     result = avaliar(entrada, policy["parametros"], policy["regras"], ref)
     divergencias = []
@@ -160,7 +204,14 @@ def avaliar_sombra(operation_id: str, *, database=None, aplicar: bool = False) -
                 divergencias.append({"campo": field, "valor_politica": policy_value, "valor_oficial": official_value, "diferenca": None, "classe": "PARIDADE", "motivo": "valor divergente"})
     partial_run = any(str(run.get("status") or "").upper() == "PARCIAL" for run in entrada.runs_usados.values())
     parity_divergencias = [item for item in divergencias if item["classe"] == "PARIDADE"]
-    if _missing_parity_specialists(entrada.runs_usados, official) or partial_run or official is None:
+    if parity_divergencias and insumos_posteriores:
+        for divergence in parity_divergencias:
+            divergence.update({
+                "classe": "INSUMO_POSTERIOR",
+                "motivo": "insumos refeitos apos o score oficial",
+                "componentes_posteriores": insumos_posteriores,
+            })
+    if _missing_parity_specialists(entrada.runs_usados, official) or partial_run or official is None or (parity_divergencias and insumos_posteriores):
         classe = "SEM_DADOS"
     elif not parity_divergencias:
         classe = "IGUAL"
