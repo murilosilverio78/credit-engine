@@ -83,6 +83,9 @@ def install_funnel(monkeypatch, cotacoes, documentos=None, initial_quotes=None):
     monkeypatch.setattr(broadfactor_ingestao, "BroadfactorClient", FakeClient)
     monkeypatch.setattr(broadfactor_ingestao, "_get_existing_operation", lambda *_: None)
     monkeypatch.setattr(broadfactor_ingestao, "_count_stages", lambda _: {})
+    monkeypatch.setattr(broadfactor_ingestao, "_listing_is_safe_for_closure", lambda *_: True)
+    monkeypatch.setattr(broadfactor_ingestao, "_record_successful_listing", lambda *_: None)
+    monkeypatch.setattr(broadfactor_ingestao, "_close_linked_operation", lambda *_: None)
 
     def persist(_, cotacao, valor_enquadrado):
         existing = database.quotes.get(cotacao.id, {})
@@ -215,7 +218,7 @@ async def test_stage_two_with_document_reaches_three_and_runs_only_partial_analy
 
 
 @pytest.mark.asyncio
-async def test_missing_quote_is_closed_preserving_maximum_stage(monkeypatch):
+async def test_empty_listing_never_closes_existing_quotes(monkeypatch):
     database, _, _ = install_funnel(
         monkeypatch,
         [],
@@ -227,11 +230,74 @@ async def test_missing_quote_is_closed_preserving_maximum_stage(monkeypatch):
         }],
     )
 
+    monkeypatch.setattr(broadfactor_ingestao, "_listing_is_safe_for_closure", lambda *_: False)
     result = await broadfactor_ingestao.run_broadfactor_ingestao()
 
-    assert database.quotes["C-gone"]["estagio"] == "ENCERRADA"
+    assert database.quotes["C-gone"]["estagio"] == "DOCUMENTADA"
     assert database.quotes["C-gone"]["estagio_max"] == "QUALIFICADA"
-    assert result["encerradas"] == 1
+    assert result["encerradas"] == 0
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["completed", "approved", "rejected", "escalated", "manual_review", "pending", "processing", "running"],
+)
+def test_quote_closure_does_not_change_protected_operation_status(monkeypatch, status):
+    calls = []
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_execute_with_retry",
+        lambda *_args: SimpleNamespace(data={"status": status, "pendencia_coleta": False}),
+    )
+    monkeypatch.setattr(broadfactor_ingestao, "_transition_quote_operation", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    broadfactor_ingestao._close_linked_operation(object(), {"operation_id": "op-1"})
+
+    assert calls == []
+
+
+def test_quote_closure_transitions_only_triage_terminal_status(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_execute_with_retry",
+        lambda *_args: SimpleNamespace(data={"status": "reprovada_triagem", "pendencia_coleta": True}),
+    )
+    monkeypatch.setattr(broadfactor_ingestao, "_transition_quote_operation", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    broadfactor_ingestao._close_linked_operation(object(), {"operation_id": "op-1"})
+
+    assert calls[0][1]["next_status"] == "cotacao_encerrada"
+    assert calls[0][1]["previous_status"] == "reprovada_triagem"
+    assert calls[0][1]["previous_pendencia_coleta"] is True
+
+
+def test_quote_reappearance_restores_pre_closure_status(monkeypatch):
+    responses = iter([
+        SimpleNamespace(data={"status": "cotacao_encerrada"}),
+        SimpleNamespace(data=[{
+            "previous_value": {"status": "aguardando_relatorio"},
+            "payload": {"motivos": ["situacao_cadastral_nao_verificada"], "pendencia_coleta_anterior": True},
+        }]),
+    ])
+    calls = []
+    monkeypatch.setattr(broadfactor_ingestao, "_execute_with_retry", lambda *_args: next(responses))
+    monkeypatch.setattr(broadfactor_ingestao, "_transition_quote_operation", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    broadfactor_ingestao._restore_linked_operation_if_reappeared(object(), "op-1")
+
+    assert calls[0][1]["next_status"] == "aguardando_relatorio"
+    assert calls[0][1]["pendencia_coleta"] is True
+
+
+def test_listing_with_less_than_half_previous_volume_is_not_safe(monkeypatch):
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_execute_with_retry",
+        lambda *_args: SimpleNamespace(data=[{"quote_count": 100}]),
+    )
+
+    assert broadfactor_ingestao._listing_is_safe_for_closure(object(), 49) is False
 
 
 @pytest.mark.asyncio

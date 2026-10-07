@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from httpx import ConnectError, RemoteProtocolError
 
 from app.core.database import supabase
+from app.services.funil_qualificacao_service import classificar_motivos
 import structlog
 
 logger = structlog.get_logger()
@@ -53,7 +54,8 @@ def mapear_motivos_funil(
         codigo = raw_code.strip()
         if not codigo:
             continue
-        tipo = "indisponibilidade" if codigo.startswith("indisponibilidade_fonte:") else "criterio"
+        classification = classificar_motivos([codigo])
+        tipo = "indisponibilidade" if classification["tecnico"] else "criterio"
         detalhe = ""
         rotulo = ""
 
@@ -92,8 +94,11 @@ def mapear_motivos_funil(
             detalhe = "Não foi localizado um contrato elegível no Comprasnet."
         elif codigo.startswith("indisponibilidade_fonte:"):
             fonte = codigo.split(":", 1)[1].replace("_", " ")
-            rotulo = f"Sanções não verificadas (fonte indisponível: {fonte.upper()})"
+            rotulo = f"Fonte indisponível: {fonte.upper()}"
             detalhe = "A fonte necessária para a verificação ficou indisponível."
+        elif codigo == "situacao_cadastral_nao_verificada":
+            rotulo = "Situação cadastral não verificada"
+            detalhe = "A fonte cadastral necessária para a verificação ficou indisponível."
         else:
             rotulo = f"Critério não atendido: {codigo.replace('_', ' ')}"
             detalhe = "Motivo recebido do funil sem rótulo específico."
@@ -288,6 +293,7 @@ class OperationService:
         if estagio:
             return await self._list_funil(
                 estagio=estagio,
+                operation_status=status,
                 cnpj=cnpj,
                 busca=busca,
                 rating=rating,
@@ -387,9 +393,11 @@ class OperationService:
         tipo_motivo: Optional[str],
         limit: int,
         offset: int,
+        operation_status: Optional[str] = None,
     ) -> dict:
         result = supabase.rpc("listar_funil_operacoes", {
             "p_estagio": estagio,
+            "p_operation_status": operation_status,
             "p_cnpj": cnpj,
             "p_busca": busca,
             "p_rating": rating,
@@ -442,6 +450,8 @@ class OperationService:
                 "tipos_documento": quote.get("tipos_documento"),
                 "pendencias": quote.get("pendencias") or [],
                 "score_flags": quote.get("score_flags") or [],
+                "operation_status": quote.get("operation_status"),
+                "pendencia_coleta": bool(quote.get("pendencia_coleta")),
                 "relatorio": relatorio,
             })
 

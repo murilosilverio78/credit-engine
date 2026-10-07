@@ -109,7 +109,7 @@ def test_mapear_motivos_funil_uses_parameters_and_keeps_unknown_code():
     assert motivos[0]["rotulo"] == "Abaixo do ticket mínimo (R$ 100 mil)"
     assert motivos[1]["rotulo"] == "Cobertura 1,61x (mínimo 2x)"
     assert motivos[2]["tipo"] == "indisponibilidade"
-    assert motivos[2]["rotulo"] == "Sanções não verificadas (fonte indisponível: CEIS)"
+    assert motivos[2]["rotulo"] == "Fonte indisponível: CEIS"
     assert motivos[3] == {
         "codigo": "codigo_novo",
         "rotulo": "Critério não atendido: codigo novo",
@@ -214,6 +214,7 @@ def test_list_funil_forwards_server_filters_and_total_from_filtered_page(monkeyp
     assert result["items"][0]["cotacao_id"] == "C-41"
     assert database.rpc_calls == [("listar_funil_operacoes", {
         "p_estagio": "LISTA_ESPERA", "p_cnpj": None, "p_busca": "Fora",
+        "p_operation_status": None,
         "p_rating": None, "p_relatorio": "pendente", "p_tipo_motivo": "criterio",
         "p_limit": 20, "p_offset": 0,
     })]

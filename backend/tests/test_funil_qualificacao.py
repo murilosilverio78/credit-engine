@@ -269,6 +269,50 @@ def test_unverified_registry_status_blocks_qualification(monkeypatch):
     assert reasons == ["situacao_cadastral_nao_verificada"]
 
 
+@pytest.mark.parametrize(
+    ("motivo", "tecnico"),
+    [
+        ("situacao_cadastral_nao_verificada", True),
+        ("indisponibilidade_fonte:ceis", True),
+        ("Sancao ativa em CEIS", False),
+        ("prazo_vincendo_insuficiente:30d", False),
+        ("historico_recebimentos_insuficiente:2m", False),
+        ("orgaos_pagadores_insuficientes:1", False),
+        ("cobertura_insuficiente:1.00", False),
+        ("contrato_comprasnet_nao_encontrado", False),
+    ],
+)
+def test_classificar_motivos_covers_persisted_reason_codes(motivo, tecnico):
+    classificados = service.classificar_motivos([motivo])
+    assert classificados["tecnico" if tecnico else "reprovacao"] == [motivo]
+    assert classificados["reprovacao" if tecnico else "tecnico"] == []
+
+
+def test_classificar_motivos_mixed_rejection_and_collection_failure():
+    assert service.classificar_motivos([
+        "situacao_cadastral_nao_verificada",
+        "indisponibilidade_fonte:ceis",
+        "cobertura_insuficiente:1.00",
+    ]) == {
+        "tecnico": ["situacao_cadastral_nao_verificada", "indisponibilidade_fonte:ceis"],
+        "reprovacao": ["cobertura_insuficiente:1.00"],
+    }
+
+
+@pytest.mark.parametrize(
+    ("motivos", "status", "pendencia_coleta"),
+    [
+        ([], "aguardando_relatorio", False),
+        (["cobertura_insuficiente:1.00"], "reprovada_triagem", False),
+        (["situacao_cadastral_nao_verificada"], "aguardando_relatorio", True),
+    ],
+)
+def test_decidir_status_pos_fase2(motivos, status, pendencia_coleta):
+    outcome = service.decidir_status_pos_fase2(motivos)
+    assert outcome["status"] == status
+    assert outcome["pendencia_coleta"] is pendencia_coleta
+
+
 def test_real_sanction_blocks_qualification(monkeypatch):
     def add_sanction(_operation, snapshots):
         snapshots["ceis"].update(

@@ -10,6 +10,39 @@ from app.workers.tasks.score_engine import gates_deterministicos
 
 SANCTION_COMPONENTS = ("ceis", "cnep", "cepim", "acordos_leniencia")
 UNAVAILABLE_SOURCE_PREFIX = "indisponibilidade_fonte:"
+TECHNICAL_REASONS = frozenset({"situacao_cadastral_nao_verificada"})
+
+
+def classificar_motivos(motivos: list[str]) -> dict[str, list[str]]:
+    """Separa pendências de coleta de reprovações de elegibilidade.
+
+    This boundary is intentionally based on stable persisted reason codes, not
+    on their presentation labels.  It is shared by the funnel state machine
+    and the API serializer so a technical collection failure can never acquire
+    a different colour/meaning in the UI.
+    """
+    tecnico = [
+        motivo
+        for motivo in motivos
+        if motivo in TECHNICAL_REASONS
+        or motivo.startswith(UNAVAILABLE_SOURCE_PREFIX)
+    ]
+    tecnico_set = set(tecnico)
+    return {
+        "reprovacao": [motivo for motivo in motivos if motivo not in tecnico_set],
+        "tecnico": tecnico,
+    }
+
+
+def decidir_status_pos_fase2(motivos: list[str]) -> dict[str, Any]:
+    """Translate phase-two reasons into the operation state-machine outcome."""
+    classificados = classificar_motivos(motivos)
+    pendencia_coleta = bool(classificados["tecnico"]) and not classificados["reprovacao"]
+    return {
+        "status": "reprovada_triagem" if classificados["reprovacao"] else "aguardando_relatorio",
+        "pendencia_coleta": pendencia_coleta,
+        "motivos_classificados": classificados,
+    }
 
 
 def _as_float(value: Any) -> float:

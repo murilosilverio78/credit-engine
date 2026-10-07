@@ -34,6 +34,11 @@ logger = structlog.get_logger()
 SCHEDULE_BRT = ("08:05", "14:15")
 INGESTION_STAGE = "S0_INGESTAO"
 MAX_ANALYSIS_ATTEMPTS = 3
+TERMINAL_QUOTE_OPERATION_STATUSES = {"aguardando_relatorio", "reprovada_triagem"}
+PROTECTED_QUOTE_OPERATION_STATUSES = {
+    "completed", "approved", "rejected", "escalated", "manual_review",
+    "pending", "processing", "running",
+}
 STAGE_ORDER = {
     "LISTA_ESPERA": 1,
     "ENQUADRADA": 2,
@@ -260,13 +265,151 @@ def _documentos_info(documentos: list[DocumentoAnexo]) -> tuple[int, list[str]]:
     return len(documentos), tipos
 
 
+def _listing_is_safe_for_closure(supabase: Any, quote_count: int) -> bool:
+    """Reject empty or anomalously small Broadfactor listings before closure."""
+    if quote_count == 0:
+        logger.warning("broadfactor_ingestao.listagem_suspeita", reason="vazia", quote_count=0)
+        return False
+    try:
+        previous = _execute_with_retry(
+            "broadfactor_ingestao", "broadfactor_ingestao", "load_last_listing_count",
+            lambda: supabase.table("broadfactor_ingestion_listagens")
+            .select("quote_count").order("created_at", desc=True).limit(1).execute(),
+        )
+        rows = previous.data or []
+        last_count = int(rows[0].get("quote_count") or 0) if rows else 0
+    except Exception as exc:
+        logger.warning("broadfactor_ingestao.listagem_suspeita", reason="historico_indisponivel", error=str(exc))
+        return False
+    if last_count and quote_count * 2 < last_count:
+        logger.warning(
+            "broadfactor_ingestao.listagem_suspeita",
+            reason="volume_inferior_a_50_por_cento",
+            quote_count=quote_count,
+            last_successful_count=last_count,
+        )
+        return False
+    return True
+
+
+def _record_successful_listing(supabase: Any, quote_count: int) -> None:
+    _execute_with_retry(
+        "broadfactor_ingestao", "broadfactor_ingestao", "record_successful_listing",
+        lambda: supabase.table("broadfactor_ingestion_listagens")
+        .insert({"quote_count": quote_count}).execute(),
+    )
+
+
+def _transition_quote_operation(
+    supabase: Any,
+    operation_id: str,
+    *,
+    next_status: str,
+    motivos: list[str],
+    action_context: str,
+    previous_status: str | None = None,
+    pendencia_coleta: bool = False,
+    previous_pendencia_coleta: bool | None = None,
+) -> bool:
+    """Persist and audit terminal quote-driven operation state transitions."""
+    if previous_status is None:
+        result = _execute_with_retry(
+            operation_id, "broadfactor_ingestao", "load_operation_for_quote_transition",
+            lambda: supabase.table("operations").select("status,pendencia_coleta")
+            .eq("id", operation_id).maybe_single().execute(),
+        )
+        operation = result.data or {}
+        previous_status = operation.get("status")
+    if previous_status == next_status:
+        return False
+    data = {"status": next_status, "pendencia_coleta": pendencia_coleta}
+    updated = _execute_with_retry(
+        operation_id, "broadfactor_ingestao", "transition_quote_operation",
+        lambda: supabase.table("operations").update(data).eq("id", operation_id)
+        .eq("status", previous_status).select("id").execute(),
+    )
+    if not updated.data:
+        return False
+    from app.services.audit_service import AuditService
+    from app.services.funil_qualificacao_service import classificar_motivos
+
+    AuditService().log(
+        operation_id=operation_id,
+        action="operation_status_changed",
+        actor_type="system",
+        previous_value={"status": previous_status},
+        new_value={"status": next_status},
+        payload={
+            "motivos": motivos,
+            "motivos_classificados": classificar_motivos(motivos),
+            "contexto": action_context,
+            "status_anterior": previous_status,
+            "pendencia_coleta": pendencia_coleta,
+            "pendencia_coleta_anterior": (
+                pendencia_coleta if previous_pendencia_coleta is None else previous_pendencia_coleta
+            ),
+        },
+    )
+    return True
+
+
+def _close_linked_operation(supabase: Any, row: dict[str, Any]) -> None:
+    operation_id = row.get("operation_id")
+    if not operation_id:
+        return
+    result = _execute_with_retry(
+        str(operation_id), "broadfactor_ingestao", "load_operation_for_quote_closure",
+        lambda: supabase.table("operations").select("status,pendencia_coleta")
+        .eq("id", operation_id).maybe_single().execute(),
+    )
+    operation = result.data or {}
+    current = operation.get("status")
+    if current in PROTECTED_QUOTE_OPERATION_STATUSES or current not in TERMINAL_QUOTE_OPERATION_STATUSES:
+        return
+    _transition_quote_operation(
+        supabase, str(operation_id), next_status="cotacao_encerrada",
+        previous_status=current, motivos=["cotacao_ausente_na_listagem"],
+        action_context="cotacao_encerrada",
+        previous_pendencia_coleta=bool(operation.get("pendencia_coleta")),
+    )
+
+
+def _restore_linked_operation_if_reappeared(supabase: Any, operation_id: str) -> None:
+    result = _execute_with_retry(
+        operation_id, "broadfactor_ingestao", "load_operation_for_quote_restore",
+        lambda: supabase.table("operations").select("status")
+        .eq("id", operation_id).maybe_single().execute(),
+    )
+    if (result.data or {}).get("status") != "cotacao_encerrada":
+        return
+    audit_result = _execute_with_retry(
+        operation_id, "broadfactor_ingestao", "load_quote_closure_audit",
+        lambda: supabase.table("audit_trail").select("previous_value,payload")
+        .eq("operation_id", operation_id).eq("action", "operation_status_changed")
+        .order("created_at", desc=True).limit(1).execute(),
+    )
+    audit_row = (audit_result.data or [{}])[0]
+    previous_value = audit_row.get("previous_value") or {}
+    restore_status = previous_value.get("status")
+    if restore_status not in TERMINAL_QUOTE_OPERATION_STATUSES:
+        logger.warning("broadfactor_ingestao.quote_restore_without_prior_status", operation_id=operation_id)
+        return
+    motivos = (audit_row.get("payload") or {}).get("motivos") or []
+    pendencia_coleta = bool((audit_row.get("payload") or {}).get("pendencia_coleta_anterior"))
+    _transition_quote_operation(
+        supabase, operation_id, next_status=str(restore_status),
+        previous_status="cotacao_encerrada", motivos=list(motivos),
+        action_context="cotacao_reapareceu", pendencia_coleta=pendencia_coleta,
+    )
+
+
 def _mark_missing_quotes_closed(supabase: Any, seen_ids: set[str]) -> int:
     result = _execute_with_retry(
         "broadfactor_ingestao",
         "broadfactor_ingestao",
         "load_active_quotes_for_closure",
         lambda: supabase.table("cotacoes_broadfactor")
-        .select("cotacao_id,estagio,estagio_max")
+        .select("cotacao_id,estagio,estagio_max,operation_id")
         .eq("ambiente", "PRODUCAO")
         .neq("estagio", "ENCERRADA")
         .execute(),
@@ -284,6 +427,7 @@ def _mark_missing_quotes_closed(supabase: Any, seen_ids: set[str]) -> int:
             motivo="cotacao_ausente_na_listagem",
             estagio_max=estagio_max,
         )
+        _close_linked_operation(supabase, row)
         closed += 1
     return closed
 
@@ -419,12 +563,14 @@ async def _run_broadfactor_ingestao(
     pendentes_guardrail = 0
 
     seen_ids = {cotacao.id for cotacao in cotacoes}
-    try:
-        encerradas = _mark_missing_quotes_closed(supabase, seen_ids)
-    except Exception as exc:
-        encerradas = 0
-        falhas += 1
-        logger.error("broadfactor_ingestao.close_missing_failed", error=str(exc))
+    encerradas = 0
+    if _listing_is_safe_for_closure(supabase, len(cotacoes)):
+        try:
+            encerradas = _mark_missing_quotes_closed(supabase, seen_ids)
+            _record_successful_listing(supabase, len(cotacoes))
+        except Exception as exc:
+            falhas += 1
+            logger.error("broadfactor_ingestao.close_missing_failed", error=str(exc))
 
     for index, cotacao in enumerate(cotacoes):
         active_tasks = [
@@ -471,6 +617,9 @@ async def _run_broadfactor_ingestao(
             estagio = state.get("estagio") or "LISTA_ESPERA"
             estagio_max = state.get("estagio_max")
             operation_id = str(state["operation_id"]) if state.get("operation_id") else None
+
+            if estagio == "ENCERRADA" and operation_id:
+                _restore_linked_operation_if_reappeared(supabase, operation_id)
 
             motivo_triagem = _triage_reason(
                 cotacao,
@@ -522,6 +671,10 @@ async def _run_broadfactor_ingestao(
                         motivo="QUOTATION_INACTIVE",
                         estagio_max=_stage_max(estagio_max, estagio),
                     )
+                    _close_linked_operation(
+                        supabase,
+                        {"operation_id": operation_id},
+                    )
                     encerradas += 1
                     continue
                 except Exception as exc:
@@ -569,6 +722,9 @@ async def _run_broadfactor_ingestao(
             status_ingestao = "OPERACAO_CRIADA"
             if existing:
                 operation_id = str(existing["id"])
+                if existing.get("status") in {"reprovada_triagem", "cotacao_encerrada"}:
+                    duplicadas += 1
+                    continue
                 if existing.get("status") == "failed":
                     attempt = int(existing.get("analysis_attempts") or 1)
                     if attempt >= MAX_ANALYSIS_ATTEMPTS:

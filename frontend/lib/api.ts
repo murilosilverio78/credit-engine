@@ -147,6 +147,7 @@ export function getFunnelOperations(
     rating?: Rating | "";
     relatorio?: "" | "gerado" | "pendente";
     tipoMotivo?: "" | "criterio" | "indisponibilidade";
+    operationStatus?: "" | "reprovada_triagem" | "cotacao_encerrada";
   } = {},
 ) {
   const params = new URLSearchParams({
@@ -158,6 +159,7 @@ export function getFunnelOperations(
   if (filters.rating) params.set("rating", filters.rating);
   if (filters.relatorio) params.set("relatorio", filters.relatorio);
   if (filters.tipoMotivo) params.set("tipo_motivo", filters.tipoMotivo);
+  if (filters.operationStatus) params.set("status", filters.operationStatus);
   return request<PaginatedFunnel>(`/api/v1/admin/operations?${params}`);
 }
 

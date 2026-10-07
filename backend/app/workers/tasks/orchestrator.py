@@ -755,7 +755,7 @@ async def _complete_phase2_for_funil(operation_id: str):
         operation_id,
         "load_operation_for_funil_completion",
         lambda: supabase.table("operations")
-        .select("cotacao_id")
+        .select("cotacao_id,status")
         .eq("id", operation_id)
         .maybe_single()
         .execute(),
@@ -773,12 +773,21 @@ async def _complete_phase2_for_funil(operation_id: str):
             operation_id,
         )
 
+    from app.services.funil_qualificacao_service import decidir_status_pos_fase2
+
+    outcome = decidir_status_pos_fase2(motivos)
+    classification = outcome["motivos_classificados"]
+    pendencia_coleta = outcome["pendencia_coleta"]
+    next_status = outcome["status"]
+    previous_status = operation.get("status")
+
     _execute_db(
         operation_id,
         "mark_operation_waiting_report",
         lambda: supabase.table("operations")
         .update({
-            "status": "aguardando_relatorio",
+            "status": next_status,
+            "pendencia_coleta": pendencia_coleta,
             "completed_at": None,
             "error_message": None,
             "heartbeat_at": datetime.now(timezone.utc).isoformat(),
@@ -786,6 +795,24 @@ async def _complete_phase2_for_funil(operation_id: str):
         .eq("id", operation_id)
         .execute(),
     )
+    if previous_status != next_status and (
+        previous_status in {"reprovada_triagem", "cotacao_encerrada"}
+        or next_status in {"reprovada_triagem", "cotacao_encerrada"}
+    ):
+        from app.services.audit_service import AuditService
+
+        AuditService().log(
+            operation_id=operation_id,
+            action="operation_status_changed",
+            actor_type="system",
+            previous_value={"status": previous_status},
+            new_value={"status": next_status},
+            payload={
+                "motivos": motivos,
+                "motivos_classificados": classification,
+                "pendencia_coleta": pendencia_coleta,
+            },
+        )
     logger.info(
         "pipeline.phase2_funil_completed",
         operation_id=operation_id,
@@ -795,9 +822,10 @@ async def _complete_phase2_for_funil(operation_id: str):
     )
     return {
         "operation_id": operation_id,
-        "status": "aguardando_relatorio",
+        "status": next_status,
         "estagio": estagio,
         "motivos": motivos,
+        "pendencia_coleta": pendencia_coleta,
     }
 
 

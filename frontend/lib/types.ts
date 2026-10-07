@@ -4,6 +4,8 @@ export type OperationStatus =
   | "pending"
   | "processing"
   | "aguardando_relatorio"
+  | "reprovada_triagem"
+  | "cotacao_encerrada"
   | "completed"
   | "failed"
   | "error"          // alias legado — unificado para 'failed' no backend (PR-4)
@@ -203,6 +205,8 @@ export interface FunnelItem {
   tipos_documento: string[] | null;
   pendencias: PendenciaFunil[];
   score_flags: string[];
+  operation_status?: OperationStatus | null;
+  pendencia_coleta?: boolean;
   relatorio: RelatorioFunil | null;
 }
 
