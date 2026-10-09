@@ -176,6 +176,7 @@ def _page(client: httpx.Client, base: str, cnpj: str, page: int) -> dict[str, An
         try:
             response = client.get(
                 base,
+                headers=_pncp_headers(),
                 params={
                     "q": cnpj,
                     "tipos_documento": "contrato",
@@ -198,6 +199,27 @@ def _page(client: httpx.Client, base: str, cnpj: str, page: int) -> dict[str, An
                 raise
             time.sleep(RETRIES[attempt])
     raise RuntimeError("tentativas PNCP esgotadas")
+
+
+def _pncp_headers() -> dict[str, str]:
+    if settings.PNCP_PROXY_TOKEN:
+        return {"X-Proxy-Token": settings.PNCP_PROXY_TOKEN}
+    return {}
+
+
+def _ensure_snapshot(operation_id: str) -> None:
+    """Cria o snapshot de PNCP sem reiniciar uma execução já registrada."""
+    from app.core.database import supabase
+
+    supabase.table("component_snapshots").upsert(
+        {
+            "operation_id": operation_id,
+            "component": "contratos_pncp",
+            "status": "pending",
+        },
+        on_conflict="operation_id,component",
+        ignore_duplicates=True,
+    ).execute()
 
 
 def _fetch(cnpj: str) -> dict[str, Any]:
@@ -285,11 +307,13 @@ def _associar_contrato_cedido(operation_id: str) -> dict[str, Any]:
 
 
 def run_contratos_pncp(operation_id: str, *, use_cache: bool = True):
+    _ensure_snapshot(operation_id)
     result = _task.execute(
         operation_id,
         component="contratos_pncp",
         handler=_fetch,
         use_cache=use_cache,
     )
-    _associar_contrato_cedido(operation_id)
+    if result.get("status") != "failed":
+        _associar_contrato_cedido(operation_id)
     return result

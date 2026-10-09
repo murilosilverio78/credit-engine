@@ -144,6 +144,24 @@ def test_executar_componente_uses_cache_flag_and_returns_pncp_summary(monkeypatc
     }
 
 
+def test_executar_componente_cria_snapshot_ausente(monkeypatch):
+    db, calls, operation = _setup_component_execution(monkeypatch)
+    db.tables["component_snapshots"] = []
+
+    response = make_client().post(
+        f"/api/v1/internal/operations/{operation['id']}/componentes/contratos_pncp/executar",
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert response.status_code == 200
+    assert calls == [(operation["id"], True)]
+    assert db.tables["component_snapshots"] == [{
+        "operation_id": operation["id"],
+        "component": "contratos_pncp",
+        "status": "pending",
+    }]
+
+
 def test_executar_componente_reavalia_funil_aberto(monkeypatch):
     from app.services import funil_qualificacao_service
 

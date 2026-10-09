@@ -362,6 +362,16 @@ async def executar_componente(
     if operation.get("status") in {"processing", "running"}:
         raise HTTPException(status_code=409, detail="Há análise em andamento para esta operação")
 
+    supabase.table("component_snapshots").upsert(
+        {
+            "operation_id": operation_id_text,
+            "component": component,
+            "status": "pending",
+        },
+        on_conflict="operation_id,component",
+        ignore_duplicates=True,
+    ).execute()
+
     from app.workers.tasks.brasil_api import run_brasil_api
     from app.workers.tasks.contratos_comprasnet import run_contratos_comprasnet
     from app.workers.tasks.contratos_pncp import run_contratos_pncp

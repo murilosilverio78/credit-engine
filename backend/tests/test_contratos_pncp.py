@@ -32,8 +32,8 @@ class FakeClient:
     def __exit__(self, *_):
         return None
 
-    def get(self, url, params):
-        self.calls.append((url, params))
+    def get(self, url, params, headers=None):
+        self.calls.append((url, params, headers))
         item = next(self.responses)
         if isinstance(item, Exception):
             raise item
@@ -69,6 +69,16 @@ def test_descarta_fornecedor_diferente_e_cancelado(monkeypatch):
     assert {
         item["numero_contrato_empenho"] for item in result["contratos_detalhe"]
     } == {"00005", "00006"}
+
+
+def test_envia_token_do_proxy_pncp_quando_configurado(monkeypatch):
+    client = FakeClient([response(200, {"total": 0, "items": []})])
+    monkeypatch.setattr(pncp.httpx, "Client", lambda **_: client)
+    monkeypatch.setattr(pncp.settings, "PNCP_PROXY_TOKEN", "proxy-secret")
+
+    pncp._fetch("46276066000100")
+
+    assert client.calls[0][2] == {"X-Proxy-Token": "proxy-secret"}
 
 
 def test_paginated_search_retries_5xx_and_obeys_pages(monkeypatch):
@@ -214,6 +224,16 @@ def test_cache_hit_associa_contrato_cedido_a_cada_operacao(monkeypatch):
             self.payload = payload
             return self
 
+        def upsert(self, payload, **_kwargs):
+            for row in self.rows:
+                if (
+                    row.get("operation_id") == payload.get("operation_id")
+                    and row.get("component") == payload.get("component")
+                ):
+                    return self
+            self.rows.append(payload.copy())
+            return self
+
         def execute(self):
             rows = [
                 row for row in self.rows
@@ -248,3 +268,40 @@ def test_cache_hit_associa_contrato_cedido_a_cada_operacao(monkeypatch):
     assert second["parsed_result"]["contrato_cedido_match"] == "EXATO"
     assert operations[0]["uasg"] == "200123"
     assert operations[1]["uasg"] == "170607"
+
+
+def test_run_cria_snapshot_ausente_e_nao_associa_quando_falha(monkeypatch):
+    class Query:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def upsert(self, payload, **_kwargs):
+            if not self.rows:
+                self.rows.append(payload.copy())
+            return self
+
+        def execute(self):
+            return SimpleNamespace(data=self.rows)
+
+    snapshots = []
+
+    class Database:
+        def table(self, _name):
+            return Query(snapshots)
+
+    class FailedTask:
+        def execute(self, *_args, **_kwargs):
+            return {"status": "failed"}
+
+    from app.core import database
+
+    monkeypatch.setattr(database, "supabase", Database())
+    monkeypatch.setattr(pncp, "_task", FailedTask())
+
+    pncp.run_contratos_pncp("op-sem-snapshot")
+
+    assert snapshots == [{
+        "operation_id": "op-sem-snapshot",
+        "component": "contratos_pncp",
+        "status": "pending",
+    }]
