@@ -32,7 +32,7 @@ CREATE INDEX IF NOT EXISTS idx_broadfactor_ingestion_listagens_created
 CREATE OR REPLACE FUNCTION listar_funil_operacoes(
   p_estagio TEXT, p_cnpj TEXT, p_busca TEXT, p_rating TEXT, p_relatorio TEXT,
   p_tipo_motivo TEXT, p_limit INTEGER, p_offset INTEGER,
-  p_operation_status TEXT DEFAULT NULL
+  p_operation_status TEXT
 )
 RETURNS TABLE (
   cotacao_id VARCHAR, cnpj VARCHAR, nome_fornecedor TEXT, valor_solicitado NUMERIC,
@@ -48,8 +48,10 @@ LANGUAGE SQL STABLE AS $$
   WITH filtradas AS (
     SELECT f.*, o.status::TEXT AS operation_status,
            COALESCE(o.pendencia_coleta, FALSE) AS pendencia_coleta
+      -- Busca SEM paginar na função base (042); filtra o status terminal e só
+      -- então pagina, para que LIMIT/OFFSET e total_count reflitam o filtro.
       FROM listar_funil_operacoes(p_estagio, p_cnpj, p_busca, p_rating, p_relatorio,
-                                  p_tipo_motivo, p_limit, p_offset) f
+                                  p_tipo_motivo, 2147483647, 0) f
       LEFT JOIN operations o ON o.id = f.operation_id
      WHERE (
        (p_operation_status IS NOT NULL AND o.status::TEXT = p_operation_status)
@@ -65,7 +67,9 @@ LANGUAGE SQL STABLE AS $$
          estagio_atualizado_em, created_at, razao_social, source, operation_created_at,
          rating, score, taxa_sugerida, relatorio_gerado, pendencias, score_flags,
          operation_status, pendencia_coleta, COUNT(*) OVER ()
-    FROM filtradas;
+    FROM filtradas
+   ORDER BY estagio_atualizado_em DESC NULLS LAST, cotacao_id
+   LIMIT GREATEST(p_limit, 1) OFFSET GREATEST(p_offset, 0);
 $$;
 REVOKE ALL ON FUNCTION listar_funil_operacoes(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER, INTEGER, TEXT)
   FROM PUBLIC, anon, authenticated;
@@ -156,8 +160,14 @@ SELECT id, 'operation_status_changed', 'system',
          'motivo', 'backfill_046',
          'motivos', regexp_split_to_array(estagio_motivo, '\s*;\s*'),
          'motivos_classificados', jsonb_build_object(
-           'reprovacao', regexp_split_to_array(estagio_motivo, '\s*;\s*'),
-           'tecnico', ARRAY[]::TEXT[]
+           'reprovacao', ARRAY(
+             SELECT m FROM regexp_split_to_table(estagio_motivo, '\s*;\s*') AS t(m)
+              WHERE m <> '' AND m <> 'situacao_cadastral_nao_verificada'
+                AND m NOT LIKE 'indisponibilidade_fonte:%'),
+           'tecnico', ARRAY(
+             SELECT m FROM regexp_split_to_table(estagio_motivo, '\s*;\s*') AS t(m)
+              WHERE m = 'situacao_cadastral_nao_verificada'
+                 OR m LIKE 'indisponibilidade_fonte:%')
          )
        )
   FROM reprovadas;
