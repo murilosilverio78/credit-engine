@@ -362,6 +362,8 @@ def _first_snapshot(snapshots: dict[str, Any], *components: str) -> dict[str, An
 def _faturamento_context(snapshots: dict[str, Any]) -> dict[str, Any]:
     recursos = _first_snapshot(snapshots, "recursos_recebidos")
     verificado = _as_float(recursos.get("faturamento_verificado_12m"))
+    pncp = _first_snapshot(snapshots, "contratos_pncp")
+    contratado = _as_float(pncp.get("faturamento_contratado_12m"))
     declarado: float | None = None
     for component in ("brasil_api", "pessoa_juridica"):
         snapshot = _first_snapshot(snapshots, component)
@@ -392,10 +394,24 @@ def _faturamento_context(snapshots: dict[str, Any]) -> dict[str, Any]:
         fonte = "INDISPONIVEL"
         flags.append("faturamento_indisponivel")
 
+    # R4: a comparação de escala é entre a receita contratada que efetivamente
+    # cai nos próximos 12 meses e o faturamento já verificado — nunca o antigo
+    # anualizado de contratos vigentes.
+    razao_contratado_sobre_verificado: float | None = None
+    if contratado is not None and contratado >= 0 and verificado and verificado > 0:
+        razao_contratado_sobre_verificado = round(contratado / verificado, 4)
+
     return {
         "valor": valor,
         "fonte": fonte,
         "faturamento_verificado_12m": verificado,
+        "faturamento_contratado_12m": contratado,
+        "razao_contratado_sobre_verificado": razao_contratado_sobre_verificado,
+        "alerta_salto_escala": {
+            "faturamento_contratado_12m": contratado,
+            "faturamento_verificado_12m": verificado,
+            "razao": razao_contratado_sobre_verificado,
+        },
         "faturamento_declarado": declarado,
         "divergencia_pct": divergencia_pct,
         "flags": flags,

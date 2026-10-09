@@ -99,6 +99,19 @@ def test_verified_revenue_wins_and_flags_large_declared_divergence():
     assert "faturamento_declarado_divergente" in context["flags"]
 
 
+def test_scale_jump_uses_contracted_revenue_for_next_twelve_months():
+    context = score_engine._faturamento_context(
+        {
+            "recursos_recebidos": {"faturamento_verificado_12m": 2_000_000},
+            "contratos_pncp": {"faturamento_contratado_12m": 3_000_000},
+        }
+    )
+
+    assert context["faturamento_contratado_12m"] == 3_000_000
+    assert context["razao_contratado_sobre_verificado"] == 1.5
+    assert context["alerta_salto_escala"]["razao"] == 1.5
+
+
 def test_declared_revenue_is_audited_fallback_for_legacy_snapshot():
     context = score_engine._faturamento_context(
         {"pessoa_juridica": {"faturamentoAnual": 800_000}}

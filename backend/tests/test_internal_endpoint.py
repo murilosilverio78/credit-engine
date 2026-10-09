@@ -97,7 +97,11 @@ def _setup_component_execution(monkeypatch, operation=None):
     parsed = {
         "n_contratos": 11,
         "n_vigentes": 4,
+        "n_a_iniciar": 2,
+        "valor_a_iniciar": 100000,
+        "faturamento_contratado_12m": 350000,
         "valor_anualizado_vigente": 300000,
+        "valor_anualizado_vigente_deprecated": True,
         "n_orgaos": 3,
         "contrato_cedido_match": "EXATO",
         "contrato_cedido": {"unidade_codigo": "200123"},
@@ -137,7 +141,11 @@ def test_executar_componente_uses_cache_flag_and_returns_pncp_summary(monkeypatc
     assert response.json()["parsed_result"] == {
         "n_contratos": 11,
         "n_vigentes": 4,
+        "n_a_iniciar": 2,
+        "valor_a_iniciar": 100000,
+        "faturamento_contratado_12m": 350000,
         "valor_anualizado_vigente": 300000,
+        "valor_anualizado_vigente_deprecated": True,
         "n_orgaos": 3,
         "contrato_cedido_match": "EXATO",
         "contrato_cedido": {"unidade_codigo": "200123"},
@@ -160,6 +168,27 @@ def test_executar_componente_cria_snapshot_ausente(monkeypatch):
         "component": "contratos_pncp",
         "status": "pending",
     }]
+
+
+def test_executar_componente_retorna_failed_de_fonte_sem_erro_500(monkeypatch):
+    db, _calls, operation = _setup_component_execution(monkeypatch)
+    from app.workers.tasks import contratos_pncp
+
+    def source_failure(*_args, **_kwargs):
+        db.tables["component_snapshots"][0].update({
+            "status": "failed", "error_message": "PNCP indisponível",
+        })
+        raise RuntimeError("PNCP indisponível")
+
+    monkeypatch.setattr(contratos_pncp, "run_contratos_pncp", source_failure)
+    response = make_client().post(
+        f"/api/v1/internal/operations/{operation['id']}/componentes/contratos_pncp/executar",
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["erro"] == "PNCP indisponível"
 
 
 def test_executar_componente_reavalia_funil_aberto(monkeypatch):

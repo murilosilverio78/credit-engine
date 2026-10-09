@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import time
 import unicodedata
+from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -125,25 +126,73 @@ def _operation_contract_numbers(operation: dict[str, Any]) -> list[str]:
     return [number for number in numbers if number]
 
 
+def _add_months(value: date, months: int) -> date:
+    """Returns the same calendar day ``months`` ahead (or month end)."""
+    month_index = value.month - 1 + months
+    year, month = value.year + month_index // 12, month_index % 12 + 1
+    return date(year, month, min(value.day, monthrange(year, month)[1]))
+
+
+def _months_between(start: date, end: date) -> float:
+    """Calendar-month duration, with a fractional final month when needed."""
+    if end <= start:
+        return 0.0
+    whole_months = (end.year - start.year) * 12 + end.month - start.month
+    anchor = _add_months(start, whole_months)
+    if anchor > end:
+        whole_months -= 1
+        anchor = _add_months(start, whole_months)
+    next_anchor = _add_months(anchor, 1)
+    return whole_months + (end - anchor).days / (next_anchor - anchor).days
+
+
+def _contract_monthly_value(contract: dict[str, Any]) -> float | None:
+    start = _date(contract.get("data_inicio_vigencia"))
+    end = _date(contract.get("data_fim_vigencia"))
+    if not start or not end:
+        return None
+    months = max(_months_between(start, end), 1 / 12)
+    return _number(contract.get("valor_global")) / months
+
+
 def _aggregate(contracts: list[dict[str, Any]], today: date) -> dict[str, Any]:
-    active = [
-        c for c in contracts if (_date(c["data_fim_vigencia"]) or date.min) >= today
-    ]
+    active = []
+    to_start = []
+    projected = []
+    window_end = _add_months(today, 12)
+    for contract in contracts:
+        start = _date(contract.get("data_inicio_vigencia"))
+        end = _date(contract.get("data_fim_vigencia"))
+        if start and end and start <= today <= end:
+            active.append(contract)
+        if start and start > today:
+            to_start.append(contract)
+        if not start or not end:
+            continue
+        overlap_start, overlap_end = max(start, today), min(end, window_end)
+        if overlap_end <= overlap_start:
+            continue
+        monthly_value = _contract_monthly_value(contract)
+        if monthly_value is not None:
+            projected.append(
+                (contract, monthly_value * _months_between(overlap_start, overlap_end))
+            )
+
+    # Campo legado: consumidores antigos ainda o leem, mas novas regras devem
+    # usar faturamento_contratado_12m, que considera a sobreposição real.
     annual = []
     for contract in active:
-        start, end = (
-            _date(contract["data_inicio_vigencia"]),
-            _date(contract["data_fim_vigencia"]),
-        )
-        years = max(((end - start).days / 365.25) if start and end else 1 / 12, 1 / 12)
-        annual.append((contract, _number(contract["valor_global"]) / years))
-    total = sum(value for _, value in annual)
+        monthly_value = _contract_monthly_value(contract)
+        if monthly_value is not None:
+            annual.append((contract, monthly_value * 12))
+    legacy_annualized_total = sum(value for _, value in annual)
+    projected_total = sum(value for _, value in projected)
     by_org: dict[str, float] = {}
-    for contract, value in annual:
+    for contract, value in projected:
         orgao = str(contract.get("orgao_cnpj") or "")
         if orgao:
             by_org[orgao] = by_org.get(orgao, 0.0) + value
-    shares = [value / total for value in by_org.values()] if total else []
+    shares = [value / projected_total for value in by_org.values()] if projected_total else []
     cutoff = today - timedelta(days=365)
     recent = [
         c for c in contracts if (_date(c["data_assinatura"]) or date.min) >= cutoff
@@ -154,7 +203,11 @@ def _aggregate(contracts: list[dict[str, Any]], today: date) -> dict[str, Any]:
         "valor_global_vigente": round(
             sum(_number(c["valor_global"]) for c in active), 2
         ),
-        "valor_anualizado_vigente": round(total, 2),
+        "n_a_iniciar": len(to_start),
+        "valor_a_iniciar": round(sum(_number(c["valor_global"]) for c in to_start), 2),
+        "faturamento_contratado_12m": round(projected_total, 2),
+        "valor_anualizado_vigente": round(legacy_annualized_total, 2),
+        "valor_anualizado_vigente_deprecated": True,
         "n_orgaos": len(
             {c.get("orgao_cnpj") for c in contracts if c.get("orgao_cnpj")}
         ),

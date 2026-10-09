@@ -629,7 +629,10 @@ def pncp_annex(snapshots: dict[str, dict[str, Any]]) -> str:
         [
             ("Contratos", result.get("n_contratos")),
             ("Vigentes", result.get("n_vigentes")),
-            ("Valor anualizado vigente", money(result.get("valor_anualizado_vigente"))),
+            ("Valor global vigente", money(result.get("valor_global_vigente"))),
+            ("A iniciar", result.get("n_a_iniciar")),
+            ("Valor a iniciar", money(result.get("valor_a_iniciar"))),
+            ("Faturamento contratado — próximos 12 meses", money(result.get("faturamento_contratado_12m"))),
             ("Órgãos", result.get("n_orgaos")),
             ("Esferas", ", ".join(map(str, array(result.get("esferas")))) or "-"),
             ("HHI", grouped_number(result.get("hhi"), 0)),

@@ -167,6 +167,39 @@ def test_hhi_agrega_contratos_por_orgao():
     assert result["hhi"] == pytest.approx(5000, abs=1)
 
 
+def test_vigencia_e_faturamento_contratado_separam_ativos_de_a_iniciar():
+    contracts = [
+        {
+            "orgao_cnpj": "A", "valor_global": 2400,
+            "data_inicio_vigencia": "2025-01-01",
+            "data_fim_vigencia": "2027-01-01",
+            "data_assinatura": "2025-01-01", "esfera_id": "F",
+        },
+        {
+            "orgao_cnpj": "B", "valor_global": 1200,
+            "data_inicio_vigencia": "2026-07-01",
+            "data_fim_vigencia": "2027-07-01",
+            "data_assinatura": "2026-06-01", "esfera_id": "F",
+        },
+        {
+            "orgao_cnpj": "C", "valor_global": 900,
+            "data_inicio_vigencia": "2024-01-01",
+            "data_fim_vigencia": "2025-01-01",
+            "data_assinatura": "2024-01-01", "esfera_id": "F",
+        },
+    ]
+
+    result = pncp._aggregate(contracts, date(2026, 1, 1))
+
+    assert result["n_vigentes"] == 1
+    assert result["valor_global_vigente"] == 2400
+    assert result["n_a_iniciar"] == 1
+    assert result["valor_a_iniciar"] == 1200
+    assert result["faturamento_contratado_12m"] == 1800
+    assert result["valor_anualizado_vigente"] == 1200
+    assert result["valor_anualizado_vigente_deprecated"] is True
+
+
 def test_cache_hit_associa_contrato_cedido_a_cada_operacao(monkeypatch):
     from app.core import database
 

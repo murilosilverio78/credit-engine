@@ -326,7 +326,11 @@ def _component_result_summary(component: str, parsed_result: dict) -> dict:
     keys = (
         "n_contratos",
         "n_vigentes",
+        "n_a_iniciar",
+        "valor_a_iniciar",
+        "faturamento_contratado_12m",
         "valor_anualizado_vigente",
+        "valor_anualizado_vigente_deprecated",
         "n_orgaos",
         "contrato_cedido_match",
         "contrato_cedido",
@@ -383,12 +387,18 @@ async def executar_componente(
         "contratos_pncp": run_contratos_pncp,
         "recursos_recebidos": run_recursos_recebidos,
     }
-    await asyncio.to_thread(
-        runners[component], operation_id_text, use_cache=use_cache
-    )
+    execution_error: Exception | None = None
+    try:
+        await asyncio.to_thread(
+            runners[component], operation_id_text, use_cache=use_cache
+        )
+    except Exception as exc:
+        # Falhas de fonte são persistidas pelo componente como ``failed``.
+        # Nesse caso o chamador interno precisa receber o estado útil, não 500.
+        execution_error = exc
     snapshot_result = (
         supabase.table("component_snapshots")
-        .select("status,parsed_result")
+        .select("status,parsed_result,error_message")
         .eq("operation_id", operation_id_text)
         .eq("component", component)
         .maybe_single()
@@ -396,6 +406,8 @@ async def executar_componente(
     )
     snapshot = snapshot_result.data or {}
     parsed_result = snapshot.get("parsed_result") or {}
+    if execution_error is not None and snapshot.get("status") != "failed":
+        raise execution_error
 
     reavaliacao: dict | None = None
     previous_status = operation.get("status")
@@ -444,6 +456,7 @@ async def executar_componente(
         "operation_id": operation_id_text,
         "component": component,
         "status": snapshot.get("status") or "missing",
+        "erro": snapshot.get("error_message") if snapshot.get("status") == "failed" else None,
         "parsed_result": _component_result_summary(component, parsed_result),
         "reavaliacao_funil": reavaliacao,
     }
