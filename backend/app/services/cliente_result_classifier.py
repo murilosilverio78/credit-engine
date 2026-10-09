@@ -105,6 +105,14 @@ def classificar(
             fingerprint=result.get("contratos_detalhe"),
         )
 
+    if component == "contratos_pncp":
+        contracts = result.get("contratos_detalhe")
+        return _classification(
+            result_state="EMPTY" if not contracts else "OK",
+            source="PNCP",
+            fingerprint=contracts,
+        )
+
     if component == "recursos_recebidos":
         source = result.get("fonte_primaria")
         reasons = []

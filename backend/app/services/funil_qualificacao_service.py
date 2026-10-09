@@ -194,6 +194,9 @@ def avaliar_qualificacao_funil(operation_id: str) -> tuple[bool, list[str]]:
         if statuses.get(component) != "completed":
             motivos.append(f"{UNAVAILABLE_SOURCE_PREFIX}{component}")
 
+    if statuses.get("contratos_pncp") != "completed":
+        motivos.append(f"{UNAVAILABLE_SOURCE_PREFIX}contratos_pncp")
+
     if (
         statuses.get("contratos_comprasnet") != "completed"
         or _contract_verification_unavailable(snapshots)

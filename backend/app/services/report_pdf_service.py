@@ -622,6 +622,43 @@ def contracts_annex(
     """
 
 
+def pncp_annex(snapshots: dict[str, dict[str, Any]]) -> str:
+    result = record(snapshots.get("contratos_pncp", {}).get("parsed_result"))
+    cedido = record(result.get("contrato_cedido"))
+    carteira = detail_grid(
+        [
+            ("Contratos", result.get("n_contratos")),
+            ("Vigentes", result.get("n_vigentes")),
+            ("Valor anualizado vigente", money(result.get("valor_anualizado_vigente"))),
+            ("Órgãos", result.get("n_orgaos")),
+            ("Esferas", ", ".join(map(str, array(result.get("esferas")))) or "-"),
+            ("HHI", grouped_number(result.get("hhi"), 0)),
+            ("Assinados nos últimos 12 meses", result.get("n_assinados_12m")),
+            ("Valor assinado nos últimos 12 meses", money(result.get("valor_assinado_12m"))),
+        ],
+        4,
+    )
+    cedido_grid = detail_grid(
+        [
+            ("Órgão", cedido.get("orgao_nome")),
+            ("UASG", cedido.get("unidade_codigo")),
+            ("Contrato", f"{text(cedido.get('numero_contrato_empenho'))}/{text(cedido.get('ano'))}"),
+            ("Vigência", f"{format_date(cedido.get('data_inicio_vigencia'))} a {format_date(cedido.get('data_fim_vigencia'))}"),
+            ("Valor global", optional_money(cedido.get("valor_global"))),
+            ("Mão de obra dedicada", cedido.get("dedicacao_exclusiva")),
+        ],
+        3,
+    )
+    return f"""
+    <section class="page-section">
+      <h1>Carteira pública (PNCP)</h1>
+      {carteira}
+      <h2>Contrato cedido — {esc(result.get("contrato_cedido_match"))}</h2>
+      {cedido_grid if cedido else '<p>Nenhum contrato cedido correspondente foi encontrado no PNCP.</p>'}
+    </section>
+    """
+
+
 def resources_annex(snapshots: dict[str, dict[str, Any]]) -> str:
     result = record(snapshots.get("recursos_recebidos", {}).get("parsed_result"))
     resources = [record(item) for item in array(result.get("recursos_detalhe"))]
@@ -802,6 +839,7 @@ def document_html(operation: dict[str, Any]) -> tuple[str, str, str]:
             regularity_section(engine),
             pricing_section(operation),
             contracts_annex(operation, snapshots),
+            pncp_annex(snapshots),
             resources_annex(snapshots),
             sanctions_and_docs_annex(snapshots),
         ]

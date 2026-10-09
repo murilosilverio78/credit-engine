@@ -143,7 +143,7 @@ def _load_operation(operation_id: str) -> dict[str, Any]:
         lambda: supabase.table("operations")
         .select(
             "cnpj,cotacao_id,contrato_id,margem_disponivel,prazo_vincendo_meses,"
-            "prazo_final_meses,prazo_vincendo_indisponivel,uasg"
+            "prazo_final_meses,prazo_vincendo_indisponivel,uasg,contrato_pncp_controle"
         )
         .eq("id", operation_id)
         .single()
@@ -272,6 +272,7 @@ def _discover_uasg_candidates(
     contracts_snapshot: dict[str, Any],
     receipts: list[Recebimento],
     *,
+    pncp_candidate: _UasgCandidate | None = None,
     pdf_candidates: list[_UasgCandidate] | None = None,
     manual_uasg: str | None = None,
 ) -> list[_UasgCandidate]:
@@ -306,6 +307,9 @@ def _discover_uasg_candidates(
 
     candidates: list[_UasgCandidate] = []
     seen: set[str] = set()
+    if pncp_candidate:
+        candidates.append(pncp_candidate)
+        seen.add(pncp_candidate.codigo)
     manual_code = _digits(manual_uasg)
     if len(manual_code) == 6:
         candidates.append(_UasgCandidate(manual_code, "MANUAL"))
@@ -808,6 +812,14 @@ def _fetch(
             )
 
         contracts_snapshot = _load_contracts_snapshot(operation_id)
+        pncp_code = _digits(operation.get("uasg"))
+        pncp_candidate = None
+        if operation.get("contrato_pncp_controle") and len(pncp_code) == 6:
+            pncp_candidate = _UasgCandidate(
+                codigo=pncp_code,
+                origem="PNCP",
+                numero_preferido=numbers[0] if numbers else None,
+            )
         if cotacao_id:
             try:
                 receipts = broadfactor_client.recebimentos(
@@ -828,6 +840,7 @@ def _fetch(
             numbers,
             contracts_snapshot,
             receipts,
+            pncp_candidate=pncp_candidate,
             pdf_candidates=pdf_candidates,
             manual_uasg=operation.get("uasg"),
         )

@@ -17,6 +17,7 @@ DEFAULT_TTL: dict[str, int] = {
     "brasil_api": 24,
     "pessoa_juridica": 12,
     "contratos": 12,
+    "contratos_pncp": 24,
     "recursos_recebidos": 12,
     "ceis": 12,
     "cnep": 12,

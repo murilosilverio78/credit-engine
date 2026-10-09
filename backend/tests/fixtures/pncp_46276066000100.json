@@ -1,0 +1,45 @@
+{
+  "total": 12,
+  "items": [
+    {
+      "orgao_cnpj": "00394494010441",
+      "orgao_nome": "MINISTERIO DA JUSTICA E SEGURANCA PUBLICA",
+      "unidade_codigo": "200123",
+      "unidade_nome": "SUPERINTENDENCIA REG. POL. RODV. FEDERAL-RN",
+      "esfera_id": "F",
+      "uf": "RN",
+      "numero_contrato_empenho": "00006",
+      "ano": "2026",
+      "numero_controle_pncp": "00394494010441-2-000854/2026",
+      "description": "Prestacao de servicos continuados com dedicacao exclusiva de mao de obra.",
+      "valor_global": 280200.0,
+      "data_assinatura": "2026-08-18",
+      "data_inicio_vigencia": "2026-08-18",
+      "data_fim_vigencia": "2028-08-18",
+      "tipo_contrato_nome": "Contrato",
+      "modalidade_licitacao_nome": "Pregao Eletronico",
+      "fornecedor_ni": "46276066000100",
+      "cancelado": false
+    },
+    {
+      "orgao_cnpj": "00394494000170",
+      "orgao_nome": "MINISTERIO DA GESTAO E DA INOVACAO EM SERVICOS PUBLICOS",
+      "unidade_codigo": "170607",
+      "unidade_nome": "SUPERINTENDENCIA REGIONAL DE ADMINISTRACAO",
+      "esfera_id": "F",
+      "uf": "DF",
+      "numero_contrato_empenho": "00005",
+      "ano": "2026",
+      "numero_controle_pncp": "00394494000170-2-000111/2026",
+      "description": "Servicos administrativos continuados.",
+      "valor_global": 120000.0,
+      "data_assinatura": "2026-06-01",
+      "data_inicio_vigencia": "2026-06-01",
+      "data_fim_vigencia": "2027-06-01",
+      "tipo_contrato_nome": "Contrato",
+      "modalidade_licitacao_nome": "Pregao Eletronico",
+      "fornecedor_ni": "46276066000100",
+      "cancelado": false
+    }
+  ]
+}

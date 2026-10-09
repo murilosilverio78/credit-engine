@@ -21,6 +21,7 @@ PHASE1_COMPONENTS = ("brasil_api", "pessoa_juridica")
 PHASE2_COMPONENTS = (
     "contratos",
     "contrato_extracao",
+    "contratos_pncp",
     "contratos_comprasnet",
     "recursos_recebidos",
     "acordos_leniencia",
@@ -30,6 +31,7 @@ PHASE2_COMPONENTS = (
 )
 PHASE2_FUNIL_COMPONENTS = (
     "contratos",
+    "contratos_pncp",
     "contratos_comprasnet",
     "recursos_recebidos",
     "acordos_leniencia",
@@ -534,6 +536,7 @@ async def _run_analysis(
     from app.workers.tasks.cnep import run_cnep
     from app.workers.tasks.contrato_extracao import run_contrato_extracao
     from app.workers.tasks.contratos import run_contratos
+    from app.workers.tasks.contratos_pncp import run_contratos_pncp
     from app.workers.tasks.contratos_comprasnet import (
         apply_contract_source_precedence,
         run_contratos_comprasnet,
@@ -614,6 +617,9 @@ async def _run_analysis(
             "contratos", run_contratos, operation_id, reusable_components
         )
     )
+    pncp_task = asyncio.create_task(
+        _run_or_reuse_component("contratos_pncp", run_contratos_pncp, operation_id, reusable_components)
+    )
     parallel_tasks = []
     if not partial_until_phase2:
         parallel_tasks.append(
@@ -654,9 +660,10 @@ async def _run_analysis(
         ),
     ])
 
-    # Comprasnet depends on the Portal contract snapshot for the correct UASG.
-    # Other phase-2 components keep running while this dependency is resolved.
+    # Comprasnet consumes the PNCP UASG first, falling back to Portal candidates.
+    # Other phase-2 components keep running while these sources are resolved.
     contracts_result = await contracts_task
+    pncp_result = await pncp_task
     comprasnet_result = await _run_or_reuse_component(
         "contratos_comprasnet",
         run_contratos_comprasnet,
@@ -665,11 +672,12 @@ async def _run_analysis(
     )
     parallel_results = await asyncio.gather(*parallel_tasks)
     if partial_until_phase2:
-        phase2_results = (contracts_result, comprasnet_result, *parallel_results)
+        phase2_results = (contracts_result, pncp_result, comprasnet_result, *parallel_results)
     else:
         phase2_results = (
             contracts_result,
             parallel_results[0],
+            pncp_result,
             comprasnet_result,
             *parallel_results[1:],
         )

@@ -118,6 +118,27 @@ class FakeComprasnet:
         pass
 
 
+def test_pncp_uasg_is_tried_before_manual_and_portal_candidates():
+    pncp = contratos_comprasnet._UasgCandidate(
+        codigo="200123", origem="PNCP", numero_preferido="000062026"
+    )
+
+    candidates = contratos_comprasnet._discover_uasg_candidates(
+        ["000062026"],
+        {"contratos_detalhe": [{"numero": "00006/2026", "unidade_codigo": "158145"}]},
+        [receipt(100, "158403")],
+        pncp_candidate=pncp,
+        manual_uasg="170607",
+    )
+
+    assert [(candidate.codigo, candidate.origem) for candidate in candidates] == [
+        ("200123", "PNCP"),
+        ("170607", "MANUAL"),
+        ("158145", "CONTRATOS_NUMERO"),
+        ("158403", "RECEBIDO"),
+    ]
+
+
 def test_receipt_maps_code_ug_and_orders_by_received_value():
     parsed = Recebimento.de_json(
         {
