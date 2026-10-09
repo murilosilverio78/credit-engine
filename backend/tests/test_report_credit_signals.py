@@ -43,6 +43,12 @@ def test_pdf_cover_shows_operation_conference_and_concentration():
     assert "CONCENTRADO" in result
 
 
+def test_pdf_cover_identifies_cnpja_as_cadastro_source():
+    result = cover_section({}, {"brasil_api": {"parsed_result": {"fonte": "CNPJA_OPEN"}}}, {})
+    assert "Fonte" in result
+    assert "CNPJá" in result
+
+
 def test_pdf_cover_falls_back_to_legacy_contract_balance_and_term():
     operation = {
         "cnpj": "31822605000191",

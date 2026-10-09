@@ -325,6 +325,7 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
         ("Abertura", format_date(company.get("data_abertura"))),
         ("Capital social", money(company.get("capital_social"))),
         ("Situação cadastral", company.get("situacao_cadastral")),
+        *( [("Fonte", "CNPJá")] if company.get("fonte") == "CNPJA_OPEN" else [] ),
         ("Município/UF", f"{text(company.get('municipio'))} / {text(company.get('uf'))}"),
         ("Simples Nacional", company.get("opcao_simples")),
         ("MEI", company.get("opcao_mei")),

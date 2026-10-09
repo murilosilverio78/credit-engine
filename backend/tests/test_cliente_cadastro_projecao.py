@@ -180,6 +180,7 @@ def test_brasil_api_fetch_includes_cnae_and_branch_identifier(monkeypatch):
         def json(self):
             return {
                 "cnpj": "12345678000190",
+                "razao_social": "Empresa Teste",
                 "cnae_fiscal": 6201501,
                 "identificador_matriz_filial": 2,
             }

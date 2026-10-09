@@ -221,3 +221,95 @@ async def trigger_broadfactor_ingestion(
             "limit": limit,
         },
     )
+
+
+@router.post("/operations/{operation_id}/recoletar-cadastro")
+async def recoletar_cadastro(
+    operation_id: UUID,
+    background_tasks: BackgroundTasks,
+    _: None = Depends(verify_internal_token),
+):
+    """Refresh only the registry component, without consuming score work."""
+    from app.core.database import supabase
+    from app.services.audit_service import AuditService
+    from app.workers.tasks.brasil_api import run_brasil_api
+    from app.workers.tasks.orchestrator import refresh_degraded_registry_flag
+
+    operation_id_text = str(operation_id)
+    operation_result = supabase.table("operations").select(
+        "id,status,cotacao_id,source,analysis_attempts"
+    ).eq("id", operation_id_text).maybe_single().execute()
+    operation = operation_result.data or {}
+    if not operation:
+        raise HTTPException(status_code=404, detail="Operação não encontrada")
+    if operation.get("status") in {"processing", "running"}:
+        raise HTTPException(status_code=409, detail="Há análise em andamento para esta operação")
+
+    snapshots_result = supabase.table("component_snapshots").select(
+        "component,status"
+    ).eq("operation_id", operation_id_text).execute()
+    failed_before = {
+        row.get("component") for row in (snapshots_result.data or [])
+        if row.get("status") == "failed"
+    }
+    await asyncio.to_thread(run_brasil_api, operation_id_text, use_cache=False)
+    degraded = await asyncio.to_thread(refresh_degraded_registry_flag, operation_id_text)
+    source_result = supabase.table("component_snapshots").select(
+        "parsed_result"
+    ).eq("operation_id", operation_id_text).eq("component", "brasil_api").maybe_single().execute()
+    parsed = (source_result.data or {}).get("parsed_result") or {}
+    fonte = parsed.get("fonte") or "BRASIL_API"
+    previous_status = operation.get("status")
+    next_status = previous_status
+    outcome: dict | None = None
+
+    if operation.get("cotacao_id") and previous_status == "aguardando_relatorio":
+        from app.services.funil_qualificacao_service import atualizar_estagio_pos_fase2, decidir_status_pos_fase2
+
+        _stage, motivos = await asyncio.to_thread(
+            atualizar_estagio_pos_fase2, str(operation["cotacao_id"]), operation_id_text
+        )
+        outcome = decidir_status_pos_fase2(motivos)
+        next_status = outcome["status"]
+        supabase.table("operations").update({
+            "status": next_status,
+            "pendencia_coleta": outcome["pendencia_coleta"],
+        }).eq("id", operation_id_text).execute()
+    elif (
+        previous_status == "failed"
+        and operation.get("source") == "admin_ui"
+        and failed_before == {"brasil_api"}
+    ):
+        attempts = int(operation.get("analysis_attempts") or 0)
+        if attempts >= 3:
+            raise HTTPException(status_code=409, detail="Limite de tentativas de análise atingido")
+        next_status = "pending"
+        supabase.table("operations").update({
+            "status": next_status,
+            "analysis_attempts": attempts + 1,
+            "error_message": None,
+            "completed_at": None,
+        }).eq("id", operation_id_text).eq("status", "failed").execute()
+        from app.workers.tasks.orchestrator import start_analysis
+        background_tasks.add_task(start_analysis, operation_id_text, recovery=True)
+
+    if next_status != previous_status:
+        AuditService().log(
+            operation_id=operation_id_text,
+            action="operation_status_changed",
+            actor_type="system",
+            previous_value={"status": previous_status},
+            new_value={"status": next_status},
+            payload={
+                "contexto": "recoleta_cadastro",
+                "fonte": fonte,
+                "motivos_classificados": outcome.get("motivos_classificados") if outcome else None,
+            },
+        )
+    return {
+        "operation_id": operation_id_text,
+        "status": next_status,
+        "dado_cadastral_degradado": degraded,
+        "fonte": fonte,
+        "analysis_restarted": next_status == "pending" and previous_status == "failed",
+    }

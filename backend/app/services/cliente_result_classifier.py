@@ -82,7 +82,7 @@ def classificar(
             error = "resposta sem identificacao"
         return _classification(
             result_state=state,
-            source="BRASIL_API",
+            source=result.get("fonte") or "BRASIL_API",
             error_message=error,
             fingerprint=result,
         )

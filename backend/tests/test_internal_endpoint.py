@@ -17,6 +17,66 @@ def make_client() -> TestClient:
     return TestClient(app)
 
 
+def _setup_recoleta(monkeypatch, operation, motivos=None):
+    from app.core import database
+    from app.services import audit_service, funil_qualificacao_service
+    from app.workers.tasks import brasil_api, orchestrator
+
+    db = Postgrest({
+        "operations": [operation],
+        "component_snapshots": [{
+            "operation_id": operation["id"], "component": "brasil_api", "status": "completed",
+            "parsed_result": {"fonte": "CNPJA_OPEN"},
+        }],
+        "audit_trail": [],
+    })
+    monkeypatch.setattr(database, "supabase", db)
+    monkeypatch.setattr(audit_service, "supabase", db)
+    monkeypatch.setattr(brasil_api, "run_brasil_api", lambda *_args, **_kwargs: {"status": "completed"})
+    monkeypatch.setattr(orchestrator, "refresh_degraded_registry_flag", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(funil_qualificacao_service, "atualizar_estagio_pos_fase2", lambda *_args: ("QUALIFICADA", motivos or []))
+    async def no_analysis(*_args, **_kwargs):
+        return {"status": "pending"}
+    monkeypatch.setattr(orchestrator, "start_analysis", no_analysis)
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    return db
+
+
+def test_recoleta_funil_pending_becomes_qualified(monkeypatch):
+    operation = {"id": "00000000-0000-0000-0000-000000000001", "status": "aguardando_relatorio", "cotacao_id": "C-1", "source": "broadfactor_ingestao", "analysis_attempts": 1}
+    db = _setup_recoleta(monkeypatch, operation)
+    response = make_client().post(f"/api/v1/internal/operations/{operation['id']}/recoletar-cadastro", headers={"X-Internal-Token": "configured-token"})
+    assert response.status_code == 200
+    assert db.tables["operations"][0]["status"] == "aguardando_relatorio"
+    assert response.json()["fonte"] == "CNPJA_OPEN"
+
+
+def test_recoleta_funil_with_rejection_becomes_terminal(monkeypatch):
+    operation = {"id": "00000000-0000-0000-0000-000000000002", "status": "aguardando_relatorio", "cotacao_id": "C-2", "source": "broadfactor_ingestao", "analysis_attempts": 1}
+    db = _setup_recoleta(monkeypatch, operation, ["cobertura_insuficiente:1.00"])
+    response = make_client().post(f"/api/v1/internal/operations/{operation['id']}/recoletar-cadastro", headers={"X-Internal-Token": "configured-token"})
+    assert response.status_code == 200
+    assert db.tables["operations"][0]["status"] == "reprovada_triagem"
+    assert db.tables["audit_trail"][0]["payload"]["contexto"] == "recoleta_cadastro"
+
+
+def test_recoleta_admin_failed_only_brasil_restarts_as_pending(monkeypatch):
+    operation = {"id": "00000000-0000-0000-0000-000000000003", "status": "failed", "cotacao_id": None, "source": "admin_ui", "analysis_attempts": 1}
+    db = _setup_recoleta(monkeypatch, operation)
+    db.tables["component_snapshots"][0]["status"] = "failed"
+    response = make_client().post(f"/api/v1/internal/operations/{operation['id']}/recoletar-cadastro", headers={"X-Internal-Token": "configured-token"})
+    assert response.status_code == 200
+    assert response.json()["analysis_restarted"] is True
+    assert db.tables["operations"][0]["status"] == "pending"
+
+
+def test_recoleta_rejects_running_analysis(monkeypatch):
+    operation = {"id": "00000000-0000-0000-0000-000000000004", "status": "processing", "cotacao_id": None, "source": "admin_ui", "analysis_attempts": 1}
+    _setup_recoleta(monkeypatch, operation)
+    response = make_client().post(f"/api/v1/internal/operations/{operation['id']}/recoletar-cadastro", headers={"X-Internal-Token": "configured-token"})
+    assert response.status_code == 409
+
+
 def test_missing_internal_token_returns_401(monkeypatch):
     monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
 
