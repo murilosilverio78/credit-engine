@@ -200,7 +200,7 @@ def _page(client: httpx.Client, base: str, cnpj: str, page: int) -> dict[str, An
     raise RuntimeError("tentativas PNCP esgotadas")
 
 
-def _fetch(cnpj: str, operation_id: str | None = None) -> dict[str, Any]:
+def _fetch(cnpj: str) -> dict[str, Any]:
     cnpj = re.sub(r"\D", "", cnpj)
     base = settings.PNCP_SEARCH_BASE_URL.rstrip("/") + "/api/search/"
     items: list[dict[str, Any]] = []
@@ -229,37 +229,67 @@ def _fetch(cnpj: str, operation_id: str | None = None) -> dict[str, Any]:
         "fonte": "PNCP",
         "consultado_em": datetime.now(timezone.utc).isoformat(),
     }
-    if operation_id:
-        from app.core.database import supabase
-
-        op = (
-            supabase.table("operations")
-            .select("cotacao_id,contrato_id,valor_global_contrato,saldo_vincendo")
-            .eq("id", operation_id)
-            .maybe_single()
-            .execute()
-            .data
-            or {}
-        )
-        cedido, match = _cedido(
-            contracts,
-            _operation_contract_numbers(op),
-            op.get("valor_global_contrato") or op.get("saldo_vincendo"),
-        )
-        result.update({"contrato_cedido": cedido, "contrato_cedido_match": match})
-        if cedido:
-            update = {
-                "uasg": cedido.get("unidade_codigo"),
-                "contrato_vigencia_inicio": cedido.get("data_inicio_vigencia"),
-                "contrato_vigencia_fim": cedido.get("data_fim_vigencia"),
-                "contrato_dedicacao_exclusiva": cedido.get("dedicacao_exclusiva"),
-                "contrato_pncp_controle": cedido.get("numero_controle_pncp"),
-            }
-            if not op.get("valor_global_contrato"):
-                update["valor_global_contrato"] = cedido.get("valor_global")
-            supabase.table("operations").update(update).eq("id", operation_id).execute()
     return result
 
 
-def run_contratos_pncp(operation_id: str):
-    return _task.execute(operation_id, component="contratos_pncp", handler=_fetch)
+def _associar_contrato_cedido(operation_id: str) -> dict[str, Any]:
+    """Associa uma carteira em cache à operação que efetivamente a solicitou."""
+    from app.core.database import supabase
+
+    snapshot = (
+        supabase.table("component_snapshots")
+        .select("parsed_result")
+        .eq("operation_id", operation_id)
+        .eq("component", "contratos_pncp")
+        .maybe_single()
+        .execute()
+        .data
+        or {}
+    )
+    carteira = snapshot.get("parsed_result") or {}
+    operation = (
+        supabase.table("operations")
+        .select("cotacao_id,contrato_id,valor_global_contrato,saldo_vincendo")
+        .eq("id", operation_id)
+        .maybe_single()
+        .execute()
+        .data
+        or {}
+    )
+    cedido, match = _cedido(
+        list(carteira.get("contratos_detalhe") or []),
+        _operation_contract_numbers(operation),
+        operation.get("valor_global_contrato") or operation.get("saldo_vincendo"),
+    )
+    parsed_result = {
+        **carteira,
+        "contrato_cedido": cedido,
+        "contrato_cedido_match": match,
+    }
+    supabase.table("component_snapshots").update({"parsed_result": parsed_result}).eq(
+        "operation_id", operation_id
+    ).eq("component", "contratos_pncp").execute()
+
+    if cedido:
+        update = {
+            "uasg": cedido.get("unidade_codigo"),
+            "contrato_vigencia_inicio": cedido.get("data_inicio_vigencia"),
+            "contrato_vigencia_fim": cedido.get("data_fim_vigencia"),
+            "contrato_dedicacao_exclusiva": cedido.get("dedicacao_exclusiva"),
+            "contrato_pncp_controle": cedido.get("numero_controle_pncp"),
+        }
+        if not operation.get("valor_global_contrato"):
+            update["valor_global_contrato"] = cedido.get("valor_global")
+        supabase.table("operations").update(update).eq("id", operation_id).execute()
+    return parsed_result
+
+
+def run_contratos_pncp(operation_id: str, *, use_cache: bool = True):
+    result = _task.execute(
+        operation_id,
+        component="contratos_pncp",
+        handler=_fetch,
+        use_cache=use_cache,
+    )
+    _associar_contrato_cedido(operation_id)
+    return result

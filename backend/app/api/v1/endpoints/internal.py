@@ -313,3 +313,127 @@ async def recoletar_cadastro(
         "fonte": fonte,
         "analysis_restarted": next_status == "pending" and previous_status == "failed",
     }
+
+
+EXECUTABLE_COMPONENTS = frozenset(
+    {"contratos_pncp", "contratos_comprasnet", "brasil_api", "recursos_recebidos"}
+)
+
+
+def _component_result_summary(component: str, parsed_result: dict) -> dict:
+    if component != "contratos_pncp":
+        return parsed_result
+    keys = (
+        "n_contratos",
+        "n_vigentes",
+        "valor_anualizado_vigente",
+        "n_orgaos",
+        "contrato_cedido_match",
+        "contrato_cedido",
+    )
+    return {key: parsed_result.get(key) for key in keys}
+
+
+@router.post("/operations/{operation_id}/componentes/{component}/executar")
+async def executar_componente(
+    operation_id: UUID,
+    component: str,
+    use_cache: bool = Query(default=True),
+    reavaliar_funil: bool = Query(default=False),
+    _: None = Depends(verify_internal_token),
+):
+    """Executa uma fonte liberada e, opcionalmente, reavalia o funil aberto."""
+    if component not in EXECUTABLE_COMPONENTS:
+        raise HTTPException(status_code=422, detail="Componente não permitido para execução interna")
+
+    from app.core.database import supabase
+
+    operation_id_text = str(operation_id)
+    operation_result = (
+        supabase.table("operations")
+        .select("id,status,cotacao_id")
+        .eq("id", operation_id_text)
+        .maybe_single()
+        .execute()
+    )
+    operation = operation_result.data or {}
+    if not operation:
+        raise HTTPException(status_code=404, detail="Operação não encontrada")
+    if operation.get("status") in {"processing", "running"}:
+        raise HTTPException(status_code=409, detail="Há análise em andamento para esta operação")
+
+    from app.workers.tasks.brasil_api import run_brasil_api
+    from app.workers.tasks.contratos_comprasnet import run_contratos_comprasnet
+    from app.workers.tasks.contratos_pncp import run_contratos_pncp
+    from app.workers.tasks.recursos_recebidos import run_recursos_recebidos
+
+    runners = {
+        "brasil_api": run_brasil_api,
+        "contratos_comprasnet": run_contratos_comprasnet,
+        "contratos_pncp": run_contratos_pncp,
+        "recursos_recebidos": run_recursos_recebidos,
+    }
+    await asyncio.to_thread(
+        runners[component], operation_id_text, use_cache=use_cache
+    )
+    snapshot_result = (
+        supabase.table("component_snapshots")
+        .select("status,parsed_result")
+        .eq("operation_id", operation_id_text)
+        .eq("component", component)
+        .maybe_single()
+        .execute()
+    )
+    snapshot = snapshot_result.data or {}
+    parsed_result = snapshot.get("parsed_result") or {}
+
+    reavaliacao: dict | None = None
+    previous_status = operation.get("status")
+    if (
+        reavaliar_funil
+        and operation.get("cotacao_id")
+        and previous_status == "aguardando_relatorio"
+    ):
+        from app.services.audit_service import AuditService
+        from app.services.funil_qualificacao_service import (
+            atualizar_estagio_pos_fase2,
+            decidir_status_pos_fase2,
+        )
+
+        _stage, motivos = await asyncio.to_thread(
+            atualizar_estagio_pos_fase2,
+            str(operation["cotacao_id"]),
+            operation_id_text,
+        )
+        outcome = decidir_status_pos_fase2(motivos)
+        next_status = outcome["status"]
+        supabase.table("operations").update({
+            "status": next_status,
+            "pendencia_coleta": outcome["pendencia_coleta"],
+        }).eq("id", operation_id_text).execute()
+        reavaliacao = {
+            "status": next_status,
+            "pendencia_coleta": outcome["pendencia_coleta"],
+            "motivos_classificados": outcome["motivos_classificados"],
+        }
+        if next_status != previous_status:
+            AuditService().log(
+                operation_id=operation_id_text,
+                action="operation_status_changed",
+                actor_type="system",
+                previous_value={"status": previous_status},
+                new_value={"status": next_status},
+                payload={
+                    "contexto": "execucao_componente",
+                    "component": component,
+                    "motivos_classificados": outcome["motivos_classificados"],
+                },
+            )
+
+    return {
+        "operation_id": operation_id_text,
+        "component": component,
+        "status": snapshot.get("status") or "missing",
+        "parsed_result": _component_result_summary(component, parsed_result),
+        "reavaliacao_funil": reavaliacao,
+    }

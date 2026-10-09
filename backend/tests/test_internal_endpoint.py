@@ -85,6 +85,100 @@ def test_recoleta_rejects_running_analysis(monkeypatch):
     assert response.status_code == 409
 
 
+def _setup_component_execution(monkeypatch, operation=None):
+    from app.core import database
+    from app.workers.tasks import contratos_pncp
+
+    operation = operation or {
+        "id": "00000000-0000-0000-0000-000000000005",
+        "status": "aguardando_relatorio",
+        "cotacao_id": "C-5",
+    }
+    parsed = {
+        "n_contratos": 11,
+        "n_vigentes": 4,
+        "valor_anualizado_vigente": 300000,
+        "n_orgaos": 3,
+        "contrato_cedido_match": "EXATO",
+        "contrato_cedido": {"unidade_codigo": "200123"},
+        "contratos_detalhe": [{"numero_contrato_empenho": "00006"}],
+    }
+    db = Postgrest({
+        "operations": [operation],
+        "component_snapshots": [{
+            "operation_id": operation["id"],
+            "component": "contratos_pncp",
+            "status": "completed",
+            "parsed_result": parsed,
+        }],
+        "audit_trail": [],
+    })
+    calls = []
+    monkeypatch.setattr(database, "supabase", db)
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    monkeypatch.setattr(
+        contratos_pncp,
+        "run_contratos_pncp",
+        lambda operation_id, *, use_cache: calls.append((operation_id, use_cache)),
+    )
+    return db, calls, operation
+
+
+def test_executar_componente_uses_cache_flag_and_returns_pncp_summary(monkeypatch):
+    _db, calls, operation = _setup_component_execution(monkeypatch)
+
+    response = make_client().post(
+        f"/api/v1/internal/operations/{operation['id']}/componentes/contratos_pncp/executar?use_cache=false",
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert response.status_code == 200
+    assert calls == [(operation["id"], False)]
+    assert response.json()["parsed_result"] == {
+        "n_contratos": 11,
+        "n_vigentes": 4,
+        "valor_anualizado_vigente": 300000,
+        "n_orgaos": 3,
+        "contrato_cedido_match": "EXATO",
+        "contrato_cedido": {"unidade_codigo": "200123"},
+    }
+
+
+def test_executar_componente_reavalia_funil_aberto(monkeypatch):
+    from app.services import funil_qualificacao_service
+
+    db, _calls, operation = _setup_component_execution(monkeypatch)
+    monkeypatch.setattr(
+        funil_qualificacao_service,
+        "atualizar_estagio_pos_fase2",
+        lambda *_args: ("QUALIFICADA", []),
+    )
+
+    response = make_client().post(
+        f"/api/v1/internal/operations/{operation['id']}/componentes/contratos_pncp/executar?reavaliar_funil=true",
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reavaliacao_funil"]["status"] == "aguardando_relatorio"
+    assert db.tables["operations"][0]["pendencia_coleta"] is False
+
+
+def test_executar_componente_rejeita_indisponivel_e_analise_em_andamento(monkeypatch):
+    _db, _calls, operation = _setup_component_execution(monkeypatch)
+    headers = {"X-Internal-Token": "configured-token"}
+    assert make_client().post(
+        f"/api/v1/internal/operations/{operation['id']}/componentes/score_engine/executar",
+        headers=headers,
+    ).status_code == 422
+
+    operation["status"] = "processing"
+    assert make_client().post(
+        f"/api/v1/internal/operations/{operation['id']}/componentes/contratos_pncp/executar",
+        headers=headers,
+    ).status_code == 409
+
+
 def test_missing_internal_token_returns_401(monkeypatch):
     monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
 

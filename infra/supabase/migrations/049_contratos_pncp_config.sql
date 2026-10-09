@@ -24,8 +24,8 @@ SET data_scope = EXCLUDED.data_scope,
 INSERT INTO component_snapshots (operation_id, component, status)
 SELECT o.id, 'contratos_pncp', 'pending'
 FROM operations o
-WHERE o.completed_at IS NULL
-  AND o.status NOT IN ('reprovada_triagem', 'cotacao_encerrada')
+WHERE o.ambiente = 'PRODUCAO'
+  AND o.status = 'aguardando_relatorio'
 ON CONFLICT (operation_id, component) DO NOTHING;
 
 NOTIFY pgrst, 'reload schema';

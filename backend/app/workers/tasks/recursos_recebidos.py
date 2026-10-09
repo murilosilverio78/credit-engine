@@ -502,10 +502,10 @@ def _fetch(
 _task = BaseComponentTask()
 
 
-def run_recursos_recebidos(operation_id: str):
+def run_recursos_recebidos(operation_id: str, *, use_cache: bool = False):
     return _task.execute(
         operation_id,
         component="recursos_recebidos",
         handler=_fetch,
-        use_cache=False,
+        use_cache=use_cache,
     )

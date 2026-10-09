@@ -1,6 +1,7 @@
 import json
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -154,3 +155,96 @@ def test_hhi_agrega_contratos_por_orgao():
     result = pncp._aggregate(contracts, date(2026, 6, 1))
 
     assert result["hhi"] == pytest.approx(5000, abs=1)
+
+
+def test_cache_hit_associa_contrato_cedido_a_cada_operacao(monkeypatch):
+    from app.core import database
+
+    wallet = {
+        "n_contratos": 2,
+        "contratos_detalhe": [
+            pncp._normalize(item) for item in fixture_payload()["items"]
+        ],
+    }
+    operations = [
+        {
+            "id": "op-1",
+            "contrato_id": "000062026",
+            "cotacao_id": None,
+            "valor_global_contrato": None,
+            "saldo_vincendo": 280200,
+        },
+        {
+            "id": "op-2",
+            "contrato_id": "000052026",
+            "cotacao_id": None,
+            "valor_global_contrato": None,
+            "saldo_vincendo": 120000,
+        },
+    ]
+    snapshots = [
+        {
+            "operation_id": operation["id"],
+            "component": "contratos_pncp",
+            "status": "completed",
+            "parsed_result": dict(wallet),
+        }
+        for operation in operations
+    ]
+
+    class Query:
+        def __init__(self, rows):
+            self.rows = rows
+            self.filters = []
+            self.single = False
+            self.payload = None
+
+        def select(self, *_args):
+            return self
+
+        def eq(self, key, value):
+            self.filters.append((key, value))
+            return self
+
+        def maybe_single(self):
+            self.single = True
+            return self
+
+        def update(self, payload):
+            self.payload = payload
+            return self
+
+        def execute(self):
+            rows = [
+                row for row in self.rows
+                if all(row.get(key) == value for key, value in self.filters)
+            ]
+            if self.payload:
+                for row in rows:
+                    row.update(self.payload)
+            data = rows[0].copy() if self.single and rows else None
+            return SimpleNamespace(data=data)
+
+    class Database:
+        def table(self, name):
+            return Query(operations if name == "operations" else snapshots)
+
+    db = Database()
+
+    class CachedTask:
+        def execute(self, *_args, **_kwargs):
+            return {"status": "completed", "cached": True}
+
+    monkeypatch.setattr(database, "supabase", db)
+    monkeypatch.setattr(pncp, "_task", CachedTask())
+
+    pncp.run_contratos_pncp("op-1")
+    pncp.run_contratos_pncp("op-2")
+
+    first, second = snapshots
+    assert first["parsed_result"]["contrato_cedido"]["numero_contrato_empenho"] == "00006"
+    assert second["parsed_result"]["contrato_cedido"]["numero_contrato_empenho"] == "00005"
+    assert first["parsed_result"]["contrato_cedido_match"] == "EXATO"
+    assert second["parsed_result"]["contrato_cedido_match"] == "EXATO"
+    assert operations[0]["uasg"] == "200123"
+    assert operations[1]["uasg"] == "170607"

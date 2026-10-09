@@ -1139,10 +1139,10 @@ def apply_contract_source_precedence(operation_id: str) -> dict[str, Any]:
 _task = BaseComponentTask()
 
 
-def run_contratos_comprasnet(operation_id: str):
+def run_contratos_comprasnet(operation_id: str, *, use_cache: bool = False):
     return _task.execute(
         operation_id,
         component="contratos_comprasnet",
         handler=_fetch,
-        use_cache=False,
+        use_cache=use_cache,
     )
