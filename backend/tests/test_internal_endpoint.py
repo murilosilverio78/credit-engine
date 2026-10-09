@@ -35,10 +35,13 @@ def _setup_recoleta(monkeypatch, operation, motivos=None):
     monkeypatch.setattr(brasil_api, "run_brasil_api", lambda *_args, **_kwargs: {"status": "completed"})
     monkeypatch.setattr(orchestrator, "refresh_degraded_registry_flag", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(funil_qualificacao_service, "atualizar_estagio_pos_fase2", lambda *_args: ("QUALIFICADA", motivos or []))
-    async def no_analysis(*_args, **_kwargs):
+    scheduled = []
+    async def no_analysis(*args, **kwargs):
+        scheduled.append((args, kwargs))
         return {"status": "pending"}
     monkeypatch.setattr(orchestrator, "start_analysis", no_analysis)
     monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    db.scheduled_analyses = scheduled
     return db
 
 
@@ -64,10 +67,15 @@ def test_recoleta_admin_failed_only_brasil_restarts_as_pending(monkeypatch):
     operation = {"id": "00000000-0000-0000-0000-000000000003", "status": "failed", "cotacao_id": None, "source": "admin_ui", "analysis_attempts": 1}
     db = _setup_recoleta(monkeypatch, operation)
     db.tables["component_snapshots"][0]["status"] = "failed"
+    db.tables["component_snapshots"].append({
+        "operation_id": operation["id"], "component": "score_engine", "status": "failed",
+    })
     response = make_client().post(f"/api/v1/internal/operations/{operation['id']}/recoletar-cadastro", headers={"X-Internal-Token": "configured-token"})
     assert response.status_code == 200
     assert response.json()["analysis_restarted"] is True
     assert db.tables["operations"][0]["status"] == "pending"
+    assert db.tables["operations"][0]["analysis_attempts"] == 2
+    assert db.scheduled_analyses == [((operation["id"],), {"recovery": True})]
 
 
 def test_recoleta_rejects_running_analysis(monkeypatch):

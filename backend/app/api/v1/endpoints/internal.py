@@ -278,7 +278,7 @@ async def recoletar_cadastro(
     elif (
         previous_status == "failed"
         and operation.get("source") == "admin_ui"
-        and failed_before == {"brasil_api"}
+        and (failed_before - {"score_engine"}) == {"brasil_api"}
     ):
         attempts = int(operation.get("analysis_attempts") or 0)
         if attempts >= 3:
