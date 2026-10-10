@@ -81,6 +81,10 @@ def mapear_motivos_funil(
             minimo = f"{cobertura_min:g}".replace(".", ",")
             rotulo = f"Cobertura {cobertura}x (mínimo {minimo}x)"
             detalhe = "Recebimentos acumulados insuficientes para o valor enquadrado."
+        elif codigo.startswith("capacidade_insuficiente:"):
+            capacidade = _format_brl(codigo.split(":", 1)[1])
+            rotulo = f"Capacidade do contrato {capacidade} < ticket mínimo"
+            detalhe = "O fluxo futuro líquido do contrato cedido não suporta o ticket mínimo."
         elif codigo.startswith("historico_recebimentos_insuficiente:"):
             meses = codigo.split(":", 1)[1]
             rotulo = f"Histórico de recebimentos: {meses} (mínimo {historico_min}m)"
@@ -92,6 +96,9 @@ def mapear_motivos_funil(
         elif codigo == "contrato_comprasnet_nao_encontrado":
             rotulo = "Contrato no Comprasnet não encontrado"
             detalhe = "Não foi localizado um contrato elegível no Comprasnet."
+        elif codigo == "indisponibilidade_fonte:contrato_cedido":
+            rotulo = "Contrato cedido não identificado"
+            detalhe = "Não foi possível identificar no PNCP o contrato cedido desta cotação."
         elif codigo.startswith("indisponibilidade_fonte:"):
             fonte = codigo.split(":", 1)[1].replace("_", " ")
             rotulo = f"Fonte indisponível: {fonte.upper()}"
@@ -439,6 +446,10 @@ class OperationService:
                 "margem_disponivel": quote.get("margem_disponivel"),
                 "saldo_vincendo": quote.get("saldo_vincendo"),
                 "valor_enquadrado": quote.get("valor_enquadrado"),
+                "valor_enquadrado_pre_capacidade": quote.get("valor_enquadrado_pre_capacidade"),
+                "capacidade_contrato": quote.get("capacidade_contrato"),
+                "capacidade_memoria": quote.get("capacidade_memoria"),
+                "flags_funil": quote.get("flags_funil") or [],
                 "tipo": quote.get("tipo"),
                 "data_expiracao": quote.get("data_expiracao"),
                 "estagio": quote.get("estagio"),

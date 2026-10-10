@@ -18,6 +18,12 @@ REQUIRED_PARAMS = {
     "funil_hist_min_meses",
     "funil_orgaos_min",
     "funil_cobertura_min",
+    "cap_fator_liquido_mao_obra",
+    "cap_fator_liquido_demais",
+    "cap_cobertura_parcela",
+    "cap_taxa_referencia_am",
+    "cap_folga_meses",
+    "alerta_salto_escala",
 }
 
 

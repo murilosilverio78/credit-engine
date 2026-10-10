@@ -622,7 +622,7 @@ def contracts_annex(
     """
 
 
-def pncp_annex(snapshots: dict[str, dict[str, Any]]) -> str:
+def pncp_annex(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]]) -> str:
     result = record(snapshots.get("contratos_pncp", {}).get("parsed_result"))
     cedido = record(result.get("contrato_cedido"))
     carteira = detail_grid(
@@ -652,12 +652,36 @@ def pncp_annex(snapshots: dict[str, dict[str, Any]]) -> str:
         ],
         3,
     )
+    memoria = record(operation.get("capacidade_memoria"))
+    capacidade = ""
+    if memoria:
+        capacidade = f"""
+        <h2>Capacidade do contrato</h2>
+        {detail_grid([
+            ("Capacidade", money(operation.get("capacidade_contrato"))),
+            ("Líquido mensal", money(memoria.get("mensal_liquido"))),
+            ("Parcelas", memoria.get("n")),
+            ("Parcela máxima", money(memoria.get("parcela_max"))),
+            ("Horizonte firme", format_date(memoria.get("horizonte_firme"))),
+        ], 3)}
+        """
+    salto = next(
+        (flag for flag in array(operation.get("flags_funil")) if str(flag).startswith("salto_escala:")),
+        None,
+    )
+    alerta = ""
+    if salto:
+        suffix = str(salto).split(":", 1)[1]
+        label = "sem histórico" if suffix == "sem_historico" else f"{suffix}x"
+        alerta = f'<p class="risk-callout"><strong>Salto de escala: {esc(label)}</strong><span>Faturamento contratado versus recebido nos últimos 12 meses.</span></p>'
     return f"""
     <section class="page-section">
       <h1>Carteira pública (PNCP)</h1>
       {carteira}
       <h2>Contrato cedido — {esc(result.get("contrato_cedido_match"))}</h2>
       {cedido_grid if cedido else '<p>Nenhum contrato cedido correspondente foi encontrado no PNCP.</p>'}
+      {capacidade}
+      {alerta}
     </section>
     """
 
@@ -842,7 +866,7 @@ def document_html(operation: dict[str, Any]) -> tuple[str, str, str]:
             regularity_section(engine),
             pricing_section(operation),
             contracts_annex(operation, snapshots),
-            pncp_annex(snapshots),
+            pncp_annex(operation, snapshots),
             resources_annex(snapshots),
             sanctions_and_docs_annex(snapshots),
         ]

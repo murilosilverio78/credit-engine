@@ -31,16 +31,30 @@ const practicalEffects: Record<string, string> = {
     "Tempo mínimo de existência do CNPJ exigido para elegibilidade.",
   watchdog_heartbeat_timeout_minutos:
     "Tempo sem heartbeat antes de uma análise em andamento ser marcada como falha.",
+  cap_fator_liquido_mao_obra:
+    "Percentual líquido considerado para contratos com dedicação exclusiva de mão de obra.",
+  cap_fator_liquido_demais:
+    "Percentual líquido considerado para os demais contratos cedidos.",
+  cap_cobertura_parcela:
+    "Folga mínima entre o fluxo líquido mensal e a parcela da operação.",
+  cap_taxa_referencia_am:
+    "Taxa mensal usada para trazer a capacidade futura do contrato a valor presente.",
+  cap_folga_meses:
+    "Meses preservados antes do fim do horizonte firme do contrato.",
+  alerta_salto_escala:
+    "Relação entre faturamento contratado e recebido em 12 meses que gera alerta.",
 };
 
 const groupLabels: Record<string, string> = {
   elegibilidade: "Política de elegibilidade",
   operacional: "Proteções operacionais",
+  capacidade: "Capacidade do contrato cedido",
 };
 
 const groupDescriptions: Record<string, string> = {
   elegibilidade: "Limites usados para admitir, enquadrar e definir o prazo das operações.",
   operacional: "Limites de segurança para identificar execuções interrompidas.",
+  capacidade: "Parâmetros usados para dimensionar o valor pelo fluxo futuro líquido do contrato cedido.",
 };
 
 function formatDate(value: string) {
@@ -226,7 +240,7 @@ export default function EligibilitySettingsPage() {
     queryKey: ["eligibility", "parameters"],
   });
   const parameters = parametersQuery.data ?? [];
-  const groups = ["elegibilidade", "operacional"].filter((group) =>
+  const groups = ["elegibilidade", "capacidade", "operacional"].filter((group) =>
     parameters.some((parameter) => parameter.grupo === group),
   );
 

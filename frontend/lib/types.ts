@@ -60,6 +60,10 @@ export interface Operation {
   taxa_breakdown?: Record<string, unknown> | null;
   valor_solicitado?: number | null;
   valor_enquadrado?: number | null;
+  valor_enquadrado_pre_capacidade?: number | null;
+  capacidade_contrato?: number | null;
+  capacidade_memoria?: Record<string, unknown> | null;
+  flags_funil?: string[];
   valor_operacao_relatorio?: number | null;
   saldo_vincendo?: number | null;
   prazo_dias?: number | null;
@@ -194,6 +198,10 @@ export interface FunnelItem {
   margem_disponivel: number | null;
   saldo_vincendo: number | null;
   valor_enquadrado: number | null;
+  valor_enquadrado_pre_capacidade?: number | null;
+  capacidade_contrato?: number | null;
+  capacidade_memoria?: Record<string, unknown> | null;
+  flags_funil?: string[];
   tipo: string | null;
   data_expiracao: string | null;
   estagio: FunilEstagio;

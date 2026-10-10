@@ -226,6 +226,76 @@ def test_executar_componente_rejeita_indisponivel_e_analise_em_andamento(monkeyp
     ).status_code == 409
 
 
+def test_reavaliar_funil_runs_pncp_then_comprasnet_and_promotes_coverage_rejection(monkeypatch):
+    from app.core import database
+    from app.services import audit_service, funil_qualificacao_service
+    from app.workers.tasks import contratos_comprasnet, contratos_pncp
+
+    operation = {
+        "id": "00000000-0000-0000-0000-000000000006",
+        "status": "reprovada_triagem", "cotacao_id": "C-6", "ambiente": "PRODUCAO",
+        "valor_enquadrado": 300_000, "capacidade_contrato": 350_000,
+        "flags_funil": ["salto_escala:2.0"],
+    }
+    db = Postgrest({"operations": [operation], "audit_trail": []})
+    monkeypatch.setattr(database, "supabase", db)
+    monkeypatch.setattr(audit_service, "supabase", db)
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    monkeypatch.setattr(internal, "_operacoes_para_reavaliar_funil", lambda _ids: [operation])
+    calls = []
+    monkeypatch.setattr(contratos_pncp, "run_contratos_pncp", lambda op, **_kwargs: calls.append(("pncp", op)))
+    monkeypatch.setattr(contratos_comprasnet, "run_contratos_comprasnet", lambda op, **_kwargs: calls.append(("comprasnet", op)))
+    monkeypatch.setattr(funil_qualificacao_service, "atualizar_estagio_pos_fase2", lambda *_args: ("QUALIFICADA", []))
+
+    response = make_client().post(
+        "/api/v1/internal/funil/reavaliar",
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert response.status_code == 200
+    assert calls == [("pncp", operation["id"]), ("comprasnet", operation["id"])]
+    assert response.json()["operacoes"][0]["status_novo"] == "aguardando_relatorio"
+    assert db.tables["operations"][0]["status"] == "aguardando_relatorio"
+
+
+def test_reavaliar_funil_keeps_processing_operation_out_of_the_batch(monkeypatch):
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    monkeypatch.setattr(internal, "_operacoes_para_reavaliar_funil", lambda _ids: [{"id": "op", "status": "running"}])
+
+    response = make_client().post(
+        "/api/v1/internal/funil/reavaliar",
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert response.status_code == 409
+
+
+def test_reavaliar_funil_source_failure_is_reported_without_stopping_item(monkeypatch):
+    from app.core import database
+    from app.services import funil_qualificacao_service
+    from app.workers.tasks import contratos_comprasnet, contratos_pncp
+
+    operation = {
+        "id": "00000000-0000-0000-0000-000000000007",
+        "status": "reprovada_triagem", "cotacao_id": "C-7", "ambiente": "PRODUCAO",
+    }
+    db = Postgrest({"operations": [operation]})
+    monkeypatch.setattr(database, "supabase", db)
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    monkeypatch.setattr(internal, "_operacoes_para_reavaliar_funil", lambda _ids: [operation])
+    monkeypatch.setattr(contratos_pncp, "run_contratos_pncp", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("PNCP fora")))
+    monkeypatch.setattr(contratos_comprasnet, "run_contratos_comprasnet", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(funil_qualificacao_service, "atualizar_estagio_pos_fase2", lambda *_args: ("DOCUMENTADA", ["indisponibilidade_fonte:contrato_cedido"]))
+
+    response = make_client().post(
+        "/api/v1/internal/funil/reavaliar",
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert response.status_code == 200
+    assert "PNCP fora" in response.json()["operacoes"][0]["erro"]
+
+
 def test_missing_internal_token_returns_401(monkeypatch):
     monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
 

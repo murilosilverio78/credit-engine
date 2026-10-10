@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from math import floor
 from typing import Any
 
 from app.core.database import supabase
@@ -10,7 +11,10 @@ from app.workers.tasks.score_engine import gates_deterministicos
 
 SANCTION_COMPONENTS = ("ceis", "cnep", "cepim", "acordos_leniencia")
 UNAVAILABLE_SOURCE_PREFIX = "indisponibilidade_fonte:"
-TECHNICAL_REASONS = frozenset({"situacao_cadastral_nao_verificada"})
+TECHNICAL_REASONS = frozenset({
+    "situacao_cadastral_nao_verificada",
+    "indisponibilidade_fonte:contrato_cedido",
+})
 
 
 def classificar_motivos(motivos: list[str]) -> dict[str, list[str]]:
@@ -112,7 +116,13 @@ def _load_snapshots(operation_id: str) -> tuple[dict[str, Any], dict[str, str]]:
 def _load_operation(operation_id: str) -> dict[str, Any]:
     result = (
         supabase.table("operations")
-        .select("id,valor_enquadrado,prazo_final_meses,prazo_dias")
+        .select(
+            "id,valor_enquadrado,valor_enquadrado_pre_capacidade,"
+            "capacidade_contrato,capacidade_memoria,flags_funil,"
+            "valor_global_contrato,contrato_vigencia_inicio,"
+            "contrato_vigencia_fim,contrato_dedicacao_exclusiva,"
+            "prazo_final_meses,prazo_dias"
+        )
         .eq("id", operation_id)
         .maybe_single()
         .execute()
@@ -149,10 +159,9 @@ def _prazo_dias(operation: dict[str, Any], snapshots: dict[str, Any]) -> int:
     return _as_int(operation.get("prazo_dias"))
 
 
-def _received_history(snapshots: dict[str, Any]) -> tuple[int, int, float]:
+def _received_history(snapshots: dict[str, Any]) -> tuple[int, int]:
     recursos = snapshots.get("recursos_recebidos") or {}
     orgaos = recursos.get("orgaos_pagadores") or []
-    total = _as_float(recursos.get("valor_total_recebido"))
     start = _parse_month(recursos.get("periodo_inicio"))
     end = _parse_month(recursos.get("periodo_fim"))
     if not start or not end:
@@ -167,19 +176,88 @@ def _received_history(snapshots: dict[str, Any]) -> tuple[int, int, float]:
             last = meses[-1]
             start = _parse_date(f"{first[:4]}-{first[4:6]}-01")
             end = _parse_date(f"{last[:4]}-{last[4:6]}-01")
-    return _months_between(start, end), len(set(orgaos)), total
+    return _months_between(start, end), len(set(orgaos))
 
 
-def avaliar_qualificacao_funil(operation_id: str) -> tuple[bool, list[str]]:
-    operation = _load_operation(operation_id)
-    snapshots, statuses = _load_snapshots(operation_id)
+def _contrato_cedido(
+    operation: dict[str, Any], snapshots: dict[str, Any], statuses: dict[str, str]
+) -> dict[str, Any] | None:
+    if statuses.get("contratos_pncp") != "completed":
+        return None
+    pncp = snapshots.get("contratos_pncp")
+    if not isinstance(pncp, dict) or pncp.get("contrato_cedido_match") == "NAO_ENCONTRADO":
+        return None
+    cedido = pncp.get("contrato_cedido")
+    if not isinstance(cedido, dict):
+        return None
+    contract = {
+        "valor_global": cedido.get("valor_global") or operation.get("valor_global_contrato"),
+        "vigencia_inicio": cedido.get("data_inicio_vigencia") or operation.get("contrato_vigencia_inicio"),
+        "vigencia_fim": cedido.get("data_fim_vigencia") or operation.get("contrato_vigencia_fim"),
+        "dedicacao_exclusiva": (
+            cedido.get("dedicacao_exclusiva")
+            if cedido.get("dedicacao_exclusiva") is not None
+            else operation.get("contrato_dedicacao_exclusiva")
+        ),
+    }
+    if not contract["valor_global"] or not contract["vigencia_inicio"] or not contract["vigencia_fim"]:
+        return None
+    return contract
+
+
+def _capacidade_do_contrato(
+    operation: dict[str, Any], snapshots: dict[str, Any], statuses: dict[str, str], params: dict[str, Any]
+) -> dict[str, Any] | None:
+    contract = _contrato_cedido(operation, snapshots, statuses)
+    if not contract:
+        return None
+    from app.services.capacidade_contrato_service import calcular_capacidade_contrato
+
+    try:
+        result = calcular_capacidade_contrato(
+            contract["valor_global"],
+            contract["vigencia_inicio"],
+            contract["vigencia_fim"],
+            contract["dedicacao_exclusiva"],
+            params,
+        )
+    except ValueError:
+        return None
+    base = _as_float(
+        operation.get("valor_enquadrado_pre_capacidade")
+        if operation.get("valor_enquadrado_pre_capacidade") not in (None, "")
+        else operation.get("valor_enquadrado")
+    )
+    capacity = _as_float(result["capacidade"])
+    framed = floor(min(base, capacity) / 1000) * 1000
+    return {
+        **result,
+        "base": base,
+        "valor_enquadrado": framed,
+        "reduziu": framed < base,
+        "reenquadrado": framed < _as_float(operation.get("valor_enquadrado")),
+    }
+
+
+def _flags_salto_escala(snapshots: dict[str, Any], params: dict[str, Any]) -> list[str]:
+    pncp = snapshots.get("contratos_pncp") or {}
+    recursos = snapshots.get("recursos_recebidos") or {}
+    contratado = _as_float(pncp.get("faturamento_contratado_12m"))
+    recebido = _as_float(recursos.get("faturamento_verificado_12m"))
+    threshold = _as_float(params.get("alerta_salto_escala")) or 1.5
+    if contratado <= 0:
+        return []
+    if recebido <= 0:
+        return ["salto_escala:sem_historico"]
+    ratio = contratado / recebido
+    return [f"salto_escala:{ratio:.1f}"] if ratio > threshold else []
+
+
+def _avaliar_com_dados(
+    operation: dict[str, Any], snapshots: dict[str, Any], statuses: dict[str, str], params: dict[str, Any]
+) -> list[str]:
     motivos: list[str] = []
-
-    if not operation:
-        return False, ["operacao_nao_encontrada"]
-
-    deterministic = gates_deterministicos(snapshots)
-    motivos.extend(deterministic)
+    motivos.extend(gates_deterministicos(snapshots))
 
     cadastro = snapshots.get("brasil_api") or {}
     situacao = (
@@ -194,8 +272,11 @@ def avaliar_qualificacao_funil(operation_id: str) -> tuple[bool, list[str]]:
         if statuses.get(component) != "completed":
             motivos.append(f"{UNAVAILABLE_SOURCE_PREFIX}{component}")
 
-    if statuses.get("contratos_pncp") != "completed":
-        motivos.append(f"{UNAVAILABLE_SOURCE_PREFIX}contratos_pncp")
+    capacidade = _capacidade_do_contrato(operation, snapshots, statuses, params)
+    if not capacidade:
+        motivos.append("indisponibilidade_fonte:contrato_cedido")
+    elif capacidade["valor_enquadrado"] < _as_float(params.get("ticket_minimo")):
+        motivos.append(f"capacidade_insuficiente:{capacidade['capacidade']:.0f}")
 
     if (
         statuses.get("contratos_comprasnet") != "completed"
@@ -205,7 +286,6 @@ def avaliar_qualificacao_funil(operation_id: str) -> tuple[bool, list[str]]:
     elif not _contract_found(snapshots):
         motivos.append("contrato_comprasnet_nao_encontrado")
 
-    params = get_eligibility_config()
     prazo_minimo = _as_int(params.get("prazo_minimo_dias")) or 60
     prazo = _prazo_dias(operation, snapshots)
     if prazo < prazo_minimo:
@@ -213,23 +293,72 @@ def avaliar_qualificacao_funil(operation_id: str) -> tuple[bool, list[str]]:
 
     hist_min = _as_int(params.get("funil_hist_min_meses")) or 6
     orgaos_min = _as_int(params.get("funil_orgaos_min")) or 2
-    cobertura_min = _as_float(params.get("funil_cobertura_min")) or 2.0
-    hist_meses, n_orgaos, recebido_total = _received_history(snapshots)
+    hist_meses, n_orgaos = _received_history(snapshots)
     if hist_meses < hist_min:
         motivos.append(f"historico_recebimentos_insuficiente:{hist_meses}m")
     if n_orgaos < orgaos_min:
         motivos.append(f"orgaos_pagadores_insuficientes:{n_orgaos}")
 
-    valor_enquadrado = _as_float(operation.get("valor_enquadrado"))
-    cobertura = recebido_total / valor_enquadrado if valor_enquadrado > 0 else 0.0
-    if cobertura < cobertura_min:
-        motivos.append(f"cobertura_insuficiente:{cobertura:.2f}")
+    return motivos
+
+
+def avaliar_qualificacao_funil(operation_id: str) -> tuple[bool, list[str]]:
+    operation = _load_operation(operation_id)
+    if not operation:
+        return False, ["operacao_nao_encontrada"]
+    snapshots, statuses = _load_snapshots(operation_id)
+    motivos = _avaliar_com_dados(
+        operation, snapshots, statuses, get_eligibility_config()
+    )
 
     return not motivos, motivos
 
 
 def atualizar_estagio_pos_fase2(cotacao_id: str, operation_id: str) -> tuple[str, list[str]]:
-    qualificada, motivos = avaliar_qualificacao_funil(operation_id)
+    operation = _load_operation(operation_id)
+    snapshots, statuses = _load_snapshots(operation_id)
+    params = get_eligibility_config()
+    capacidade = _capacidade_do_contrato(operation, snapshots, statuses, params)
+    flags = _flags_salto_escala(snapshots, params)
+    previous_flags = [
+        flag for flag in (operation.get("flags_funil") or [])
+        if not str(flag).startswith("salto_escala:")
+    ]
+    operation_updates: dict[str, Any] = {"flags_funil": [*previous_flags, *flags]}
+    if capacidade:
+        valor_anterior = operation.get("valor_enquadrado")
+        operation_updates.update({
+            "capacidade_contrato": capacidade["capacidade"],
+            "capacidade_memoria": capacidade["memoria"],
+        })
+        if capacidade["reduziu"]:
+            # A memória usa sempre a base original; só escrevemos/auditamos o
+            # valor quando ele realmente muda nesta reavaliação.
+            if capacidade["reenquadrado"]:
+                operation_updates["valor_enquadrado"] = capacidade["valor_enquadrado"]
+            if operation.get("valor_enquadrado_pre_capacidade") in (None, ""):
+                operation_updates["valor_enquadrado_pre_capacidade"] = capacidade["base"]
+        supabase.table("operations").update(operation_updates).eq("id", operation_id).execute()
+        operation = {**operation, **operation_updates}
+        if capacidade["reenquadrado"]:
+            supabase.table("cotacoes_broadfactor").update({
+                "valor_enquadrado": capacidade["valor_enquadrado"],
+            }).eq("cotacao_id", cotacao_id).execute()
+            from app.services.audit_service import AuditService
+
+            AuditService().log(
+                operation_id=operation_id,
+                action="operation_status_changed",
+                actor_type="system",
+                previous_value={"valor_enquadrado": valor_anterior},
+                new_value={"valor_enquadrado": capacidade["valor_enquadrado"]},
+                payload={"contexto": "reavaliacao_capacidade", "memoria": capacidade["memoria"]},
+            )
+    else:
+        supabase.table("operations").update(operation_updates).eq("id", operation_id).execute()
+
+    motivos = _avaliar_com_dados(operation, snapshots, statuses, params)
+    qualificada = not motivos
     estagio = "QUALIFICADA" if qualificada else "DOCUMENTADA"
     data = {
         "estagio": estagio,

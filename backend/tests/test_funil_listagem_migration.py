@@ -13,6 +13,7 @@ MIGRATION = (
 PENDING_MIGRATION = MIGRATION.with_name("040_funil_pendencias.sql")
 CERTIFICATES_MIGRATION = MIGRATION.with_name("041_funil_pendencias_certidoes.sql")
 BALANCE_CATALOG_MIGRATION = MIGRATION.with_name("042_funil_catalogo_balanco.sql")
+CAPACIDADE_MIGRATION = MIGRATION.with_name("050_capacidade_contrato_cedido.sql")
 
 
 def test_applied_migration_038_matches_origin_main_exactly():
@@ -119,3 +120,24 @@ def test_cnpj_search_only_accepts_numeric_terms_with_at_least_three_digits():
     assert _cnpj_search_term("12.345.678/0001-90") == "12345678000190"
     assert sql.count("p_busca !~ '[[:alpha:]]'") == 2
     assert sql.count("LENGTH(REGEXP_REPLACE(p_busca, '\\D', '', 'g')) >= 3") == 2
+
+
+def test_capacity_migration_replaces_nine_parameter_listing_without_defaults():
+    sql = " ".join(CAPACIDADE_MIGRATION.read_text(encoding="utf-8").split())
+    signature = "listar_funil_operacoes(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER, INTEGER, TEXT)"
+
+    assert f"DROP FUNCTION IF EXISTS {signature};" in sql
+    assert "CREATE FUNCTION listar_funil_operacoes(" in sql
+    assert "p_operation_status TEXT" in sql
+    assert "DEFAULT" not in sql
+    for column in (
+        "valor_enquadrado_pre_capacidade",
+        "capacidade_contrato",
+        "capacidade_memoria",
+        "flags_funil",
+    ):
+        assert column in sql
+    assert "2147483647, 0" in sql
+    assert "ORDER BY estagio_atualizado_em DESC NULLS LAST, cotacao_id" in sql
+    assert f"REVOKE ALL ON FUNCTION {signature}" in sql
+    assert f"GRANT EXECUTE ON FUNCTION {signature}" in sql

@@ -52,6 +52,10 @@ class PolicyShadowRequest(BaseModel):
         return value
 
 
+class ReavaliarFunilRequest(BaseModel):
+    operation_ids: list[UUID] | None = None
+
+
 def verify_internal_token(
     x_internal_token: Annotated[
         str | None,
@@ -221,6 +225,132 @@ async def trigger_broadfactor_ingestion(
             "limit": limit,
         },
     )
+
+
+def _operacoes_para_reavaliar_funil(operation_ids: list[str] | None) -> list[dict]:
+    """Selects only production terminal rejections affected by old coverage."""
+    from app.core.database import supabase
+
+    if operation_ids is None:
+        quotes = (
+            supabase.table("cotacoes_broadfactor")
+            .select("operation_id,estagio_motivo")
+            .eq("ambiente", "PRODUCAO")
+            .execute()
+            .data
+            or []
+        )
+        operation_ids = [
+            str(row["operation_id"])
+            for row in quotes
+            if row.get("operation_id")
+            and "cobertura_insuficiente" in str(row.get("estagio_motivo") or "")
+        ]
+    if not operation_ids:
+        return []
+    rows = (
+        supabase.table("operations")
+        .select("id,status,cotacao_id,ambiente")
+        .in_("id", operation_ids)
+        .eq("ambiente", "PRODUCAO")
+        .execute()
+        .data
+        or []
+    )
+    return rows
+
+
+@router.post("/funil/reavaliar")
+async def reavaliar_funil(
+    request: ReavaliarFunilRequest | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    """Reapplies the funnel after collecting the PNCP contract and Comprasnet."""
+    from app.core.database import supabase
+    from app.services.audit_service import AuditService
+    from app.services.funil_qualificacao_service import (
+        atualizar_estagio_pos_fase2,
+        decidir_status_pos_fase2,
+    )
+    from app.workers.tasks.contratos_comprasnet import run_contratos_comprasnet
+    from app.workers.tasks.contratos_pncp import run_contratos_pncp
+
+    requested_ids = (
+        [str(item) for item in request.operation_ids]
+        if request and request.operation_ids is not None
+        else None
+    )
+    operations = await asyncio.to_thread(_operacoes_para_reavaliar_funil, requested_ids)
+    if any(row.get("status") in {"processing", "running"} for row in operations):
+        raise HTTPException(status_code=409, detail="Há análise em andamento para uma operação solicitada")
+    operations = [row for row in operations if row.get("status") == "reprovada_triagem"]
+
+    results: list[dict] = []
+    for operation in operations:
+        operation_id = str(operation["id"])
+        previous_status = operation.get("status")
+        source_errors: list[str] = []
+        for runner in (run_contratos_pncp, run_contratos_comprasnet):
+            try:
+                await asyncio.to_thread(runner, operation_id, use_cache=True)
+            except Exception as exc:
+                source_errors.append(f"{runner.__name__}: {exc}")
+        try:
+            _stage, motivos = await asyncio.to_thread(
+                atualizar_estagio_pos_fase2,
+                str(operation.get("cotacao_id") or ""),
+                operation_id,
+            )
+            outcome = decidir_status_pos_fase2(motivos)
+            next_status = outcome["status"]
+            supabase.table("operations").update({
+                "status": next_status,
+                "pendencia_coleta": outcome["pendencia_coleta"],
+            }).eq("id", operation_id).execute()
+            if next_status != previous_status:
+                AuditService().log(
+                    operation_id=operation_id,
+                    action="operation_status_changed",
+                    actor_type="system",
+                    previous_value={"status": previous_status},
+                    new_value={"status": next_status},
+                    payload={
+                        "contexto": "reavaliacao_capacidade",
+                        "motivos": motivos,
+                        "motivos_classificados": outcome["motivos_classificados"],
+                    },
+                )
+            refreshed = (
+                supabase.table("operations")
+                .select("valor_enquadrado,capacidade_contrato,flags_funil")
+                .eq("id", operation_id)
+                .maybe_single()
+                .execute()
+                .data
+                or {}
+            )
+            results.append({
+                "operation_id": operation_id,
+                "status_anterior": previous_status,
+                "status_novo": next_status,
+                "valor_enquadrado": refreshed.get("valor_enquadrado"),
+                "capacidade_contrato": refreshed.get("capacidade_contrato"),
+                "motivos": motivos,
+                "flags": refreshed.get("flags_funil") or [],
+                "erro": "; ".join(source_errors) if source_errors else None,
+            })
+        except Exception as exc:
+            results.append({
+                "operation_id": operation_id,
+                "status_anterior": previous_status,
+                "status_novo": previous_status,
+                "valor_enquadrado": None,
+                "capacidade_contrato": None,
+                "motivos": [],
+                "flags": [],
+                "erro": str(exc),
+            })
+    return {"operacoes": results}
 
 
 @router.post("/operations/{operation_id}/recoletar-cadastro")
