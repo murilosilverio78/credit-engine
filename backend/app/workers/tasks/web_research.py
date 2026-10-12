@@ -199,6 +199,18 @@ def _extract_json_object(text: str) -> str:
         raise ValueError(f"Could not repair truncated JSON: {e}") from e
 
 
+def _mark_degraded_without_company_name(result: dict, razao_social: str) -> dict:
+    """Marca pesquisa sem identificação para que não entre no cache de cliente."""
+    if str(razao_social or "").strip():
+        return result
+
+    degraded = dict(result)
+    degraded["degradado"] = True
+    degraded["motivo"] = "sem_razao_social"
+    degraded["degradacao_motivo"] = "sem_razao_social"
+    return degraded
+
+
 def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
     from app.core.config import settings
     from app.core.database import supabase
@@ -276,34 +288,43 @@ Retorne apenas o JSON estruturado conforme instruído."""
 
     try:
         clean = _extract_json_object(result_text)
-        return fix_dict_encoding(json.loads(clean))
+        result = fix_dict_encoding(json.loads(clean))
     except Exception:
         if text_blocks:
             try:
                 clean = _extract_json_object(text_blocks[-1])
-                return fix_dict_encoding(json.loads(clean))
+                result = fix_dict_encoding(json.loads(clean))
             except Exception:
-                pass
-        return fix_dict_encoding({
-            "score_reputacao": 50,
-            "nivel_risco": "indeterminado",
-            "nivel": "Atencao",
-            "raciocinio_reputacao": "Nao foi possivel interpretar o JSON retornado pela pesquisa de reputacao.",
-            "fatores_reputacao": [],
-            "flags_reputacao": ["reputacao_parse_falhou"],
-            "noticias_negativas": False,
-            "processos_relevantes": False,
-            "reclamacoes_graves": False,
-            "problemas_governo": False,
-            "resumo": "Fallback aplicado porque a resposta do LLM nao continha JSON parseavel isolado.",
-            "alertas": [],
-            "fontes_consultadas": [],
-            "raw_response": result_text,
-        })
+                result = None
+        else:
+            result = None
+        if result is None:
+            result = fix_dict_encoding({
+                "score_reputacao": 50,
+                "nivel_risco": "indeterminado",
+                "nivel": "Atencao",
+                "raciocinio_reputacao": "Nao foi possivel interpretar o JSON retornado pela pesquisa de reputacao.",
+                "fatores_reputacao": [],
+                "flags_reputacao": ["reputacao_parse_falhou"],
+                "noticias_negativas": False,
+                "processos_relevantes": False,
+                "reclamacoes_graves": False,
+                "problemas_governo": False,
+                "resumo": "Fallback aplicado porque a resposta do LLM nao continha JSON parseavel isolado.",
+                "alertas": [],
+                "fontes_consultadas": [],
+                "raw_response": result_text,
+            })
+    return _mark_degraded_without_company_name(result, razao_social)
 
 
 _task = BaseComponentTask()
 
 
-def run_web_research(operation_id: str):
-    return _task.execute(operation_id, component="web_research", handler=_fetch)
+def run_web_research(operation_id: str, *, use_cache: bool = True):
+    return _task.execute(
+        operation_id,
+        component="web_research",
+        handler=_fetch,
+        use_cache=use_cache,
+    )

@@ -170,6 +170,26 @@ def test_executar_componente_cria_snapshot_ausente(monkeypatch):
     }]
 
 
+def test_executar_componente_permite_web_research_sem_cache(monkeypatch):
+    from app.workers.tasks import web_research
+
+    db, _calls, operation = _setup_component_execution(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        web_research,
+        "run_web_research",
+        lambda operation_id, *, use_cache: calls.append((operation_id, use_cache)),
+    )
+
+    response = make_client().post(
+        f"/api/v1/internal/operations/{operation['id']}/componentes/web_research/executar?use_cache=false",
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert response.status_code == 200
+    assert calls == [(operation["id"], False)]
+
+
 def test_executar_componente_retorna_failed_de_fonte_sem_erro_500(monkeypatch):
     db, _calls, operation = _setup_component_execution(monkeypatch)
     from app.workers.tasks import contratos_pncp

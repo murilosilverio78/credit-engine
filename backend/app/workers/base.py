@@ -5,6 +5,7 @@ Gerencia: snapshot lifecycle, cache, auditoria, erro handling.
 import time
 from datetime import datetime, timezone
 from typing import Callable, TypeVar
+from unicodedata import combining, normalize
 from uuid import uuid4
 
 import httpx
@@ -15,6 +16,40 @@ logger = structlog.get_logger()
 
 T = TypeVar("T")
 SNAPSHOT_WRITE_RETRY_DELAYS = (0.2, 0.5)
+
+
+def _normalized_text(value: object) -> str:
+    """Normaliza texto livre para reconhecer resultados legados degradados."""
+    return "".join(
+        char
+        for char in normalize("NFD", str(value or "").lower())
+        if not combining(char)
+    )
+
+
+def _is_degraded_web_research_result(result: object) -> bool:
+    """Identifica pesquisa sem identificação que não pode ser reutilizada."""
+    if not isinstance(result, dict):
+        return False
+    if result.get("degradado") is True:
+        return True
+    if result.get("degradacao_motivo") == "sem_razao_social":
+        return True
+    if result.get("motivo") == "sem_razao_social":
+        return True
+
+    text_values = [result.get("resumo")]
+    alertas = result.get("alertas")
+    if isinstance(alertas, list):
+        text_values.extend(alertas)
+    return any(
+        "razao social" in _normalized_text(value)
+        and any(
+            marker in _normalized_text(value)
+            for marker in ("nao informada", "nao foi informada", "ausente", "sem razao")
+        )
+        for value in text_values
+    )
 
 
 def _is_transient_connection_error(exc: BaseException) -> bool:
@@ -256,6 +291,13 @@ class BaseComponentTask:
 
         # Verifica cache
         cached = cache_svc.get(cnpj, component) if use_cache else None
+        if component == "web_research" and _is_degraded_web_research_result(cached):
+            logger.info(
+                "component.cache_degraded_ignored",
+                component=component,
+                cnpj=cnpj,
+            )
+            cached = None
         if cached:
             cached = fix_dict_encoding(cached)
             logger.info("component.cache_hit", component=component, cnpj=cnpj)
@@ -313,20 +355,28 @@ class BaseComponentTask:
             )
 
             # Salva no cache
-            if use_cache and not (
+            cacheable_result = not (
                 isinstance(result, dict) and "erro" in result
-            ):
+            ) and not (
+                component == "web_research"
+                and _is_degraded_web_research_result(result)
+            )
+            if use_cache and cacheable_result:
                 cache_svc.set(cnpj, component, result)
 
-            _dual_write_cliente(
-                operation_id=operation_id,
-                component=component,
-                collection_key=collection_key,
-                collected_at=collected_at,
-                status="completed",
-                result=result,
-                duration_ms=duration_ms,
-            )
+            if not (
+                component == "web_research"
+                and _is_degraded_web_research_result(result)
+            ):
+                _dual_write_cliente(
+                    operation_id=operation_id,
+                    component=component,
+                    collection_key=collection_key,
+                    collected_at=collected_at,
+                    status="completed",
+                    result=result,
+                    duration_ms=duration_ms,
+                )
             _dual_write_findings(operation_id, component, result)
 
             audit_svc.log(

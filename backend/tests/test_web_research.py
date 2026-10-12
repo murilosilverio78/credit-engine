@@ -61,6 +61,19 @@ def test_parse_web_research_response_accepts_json_fence():
     assert result["alertas"] == []
 
 
+def test_resultado_sem_razao_social_e_marcado_como_degradado():
+    from app.workers.tasks.web_research import _mark_degraded_without_company_name
+
+    result = _mark_degraded_without_company_name(
+        {"resumo": "Não foi possível identificar a empresa."},
+        "",
+    )
+
+    assert result["degradado"] is True
+    assert result["motivo"] == "sem_razao_social"
+    assert result["degradacao_motivo"] == "sem_razao_social"
+
+
 @pytest.mark.network
 def test_web_research_anthropic_integration():
     api_key = os.getenv("ANTHROPIC_API_KEY")

@@ -317,6 +317,67 @@ def test_execute_nao_armazena_resultado_com_erro_no_cache(monkeypatch):
     assert cache_writes == []
 
 
+def test_execute_web_research_degradado_nao_grava_cache_nem_snapshot_cliente(monkeypatch):
+    from app.services.cache_service import CacheService
+
+    db = FakeSupabase(component="web_research")
+    monkeypatch.setattr(cliente_service, "supabase", db)
+    monkeypatch.setattr("app.core.database.supabase", db)
+    _patch_component_dependencies(monkeypatch)
+    cache_writes = []
+    monkeypatch.setattr(
+        CacheService,
+        "set",
+        lambda *_args, **_kwargs: cache_writes.append((_args, _kwargs)),
+    )
+
+    result = BaseComponentTask().execute(
+        "op-1",
+        "web_research",
+        lambda _cnpj: {
+            "degradado": True,
+            "motivo": "sem_razao_social",
+            "resumo": "Razão social não informada.",
+        },
+    )
+
+    assert result["status"] == "completed"
+    assert cache_writes == []
+    assert db.rpc_calls == []
+
+
+def test_execute_ignora_cache_legado_de_web_research_sem_razao_social(monkeypatch):
+    from app.services.cache_service import CacheService
+
+    db = FakeSupabase(component="web_research", scope="OPERACAO")
+    monkeypatch.setattr(cliente_service, "supabase", db)
+    monkeypatch.setattr("app.core.database.supabase", db)
+    _patch_component_dependencies(
+        monkeypatch,
+        cached={
+            "resumo": "Não foi possível identificar a empresa. Razão social não informada.",
+            "alertas": [],
+        },
+    )
+    cache_writes = []
+    monkeypatch.setattr(
+        CacheService,
+        "set",
+        lambda *_args, **_kwargs: cache_writes.append((_args, _kwargs)),
+    )
+    calls = []
+
+    result = BaseComponentTask().execute(
+        "op-1",
+        "web_research",
+        lambda _cnpj: calls.append(_cnpj) or {"resumo": "Pesquisa identificada"},
+    )
+
+    assert result["status"] == "completed"
+    assert calls == ["12345678000190"]
+    assert len(cache_writes) == 1
+
+
 def test_execute_relança_excecao_original_e_grava_error(monkeypatch):
     db = FakeSupabase()
     monkeypatch.setattr(cliente_service, "supabase", db)

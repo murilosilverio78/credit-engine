@@ -1071,7 +1071,7 @@ async def _complete_analysis(operation_id: str):
         "load_operation_for_completion",
         lambda: supabase.table("operations")
         .select(
-            "valor_solicitado,valor_enquadrado,valor_operacao_relatorio,prazo_dias,prazo_final_meses"
+            "valor_solicitado,valor_enquadrado,valor_operacao_relatorio,prazo_dias,prazo_final_meses,capacidade_memoria"
         )
         .eq("id", operation_id)
         .maybe_single()
@@ -1105,9 +1105,32 @@ async def _complete_analysis(operation_id: str):
         valor = _as_float(valor_solicitado)
         valor_origem = "valor_solicitado"
 
+    capacidade_memoria = operation.get("capacidade_memoria")
+    prazo_capacidade = (
+        _as_int(capacidade_memoria.get("n"))
+        if isinstance(capacidade_memoria, dict)
+        and capacidade_memoria.get("n") is not None
+        else None
+    )
     prazo_final_meses = operation.get("prazo_final_meses")
     prazo_dias = _as_int(operation.get("prazo_dias"))
-    if prazo_final_meses not in (None, ""):
+    if prazo_capacidade is not None:
+        try:
+            from app.services.eligibility_params_service import get_eligibility_config
+
+            prazo_padrao_meses = _as_int(
+                get_eligibility_config()["prazo_padrao_meses"]
+            )
+        except Exception as exc:
+            logger.error(
+                "pipeline.capacity_term_config_error",
+                operation_id=operation_id,
+                error=str(exc),
+            )
+            prazo_padrao_meses = 0
+        prazo_meses = min(max(prazo_capacidade, 0), prazo_padrao_meses)
+        prazo_origem = "capacidade_memoria"
+    elif prazo_final_meses not in (None, ""):
         prazo_meses = _as_int(prazo_final_meses)
         prazo_origem = "prazo_final_meses"
     elif prazo_dias > 0:

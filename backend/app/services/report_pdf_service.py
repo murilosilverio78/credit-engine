@@ -73,6 +73,26 @@ def pricing_value(operation: dict[str, Any]) -> Any:
     )
 
 
+def capacity_term(operation: dict[str, Any]) -> str | None:
+    """Termo firme calculado para a capacidade do contrato cedido."""
+    memoria = record(operation.get("capacidade_memoria"))
+    try:
+        installments = int(memoria.get("n"))
+    except (TypeError, ValueError):
+        return None
+    if installments <= 0:
+        return None
+
+    term = f"{grouped_number(installments, 0)} meses"
+    horizon = memoria.get("horizonte_firme")
+    if not horizon:
+        return term
+    contract_end = str(operation.get("contrato_vigencia_fim") or "")[:10]
+    horizon_date = str(horizon)[:10]
+    source = "fim do contrato" if contract_end and horizon_date == contract_end else "aniversário"
+    return f"{term} — até {format_date(horizon)} ({source})"
+
+
 def number(value: Any, digits: int = 1) -> str:
     try:
         number_value = float(value or 0)
@@ -358,16 +378,22 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
     balance = operation.get("saldo_vincendo")
     if balance is None:
         balance = operation.get("contrato_saldo")
+    capacity_based_term = capacity_term(operation)
+    term = capacity_based_term
     final_term = operation.get("prazo_final_meses")
-    if final_term is not None:
+    if term is None and final_term is not None:
         term = f"{grouped_number(final_term, 0)} meses"
-    elif operation.get("prazo_dias") is not None:
+    elif term is None and operation.get("prazo_dias") is not None:
         term = f"{grouped_number(as_float(operation.get('prazo_dias')) / 30, 1)} meses"
-    else:
+    elif term is None:
         term = "-"
-    if operation.get("fonte_prazo_vincendo") == "COMPRASNET" and term != "-":
+    if (
+        capacity_based_term is None
+        and operation.get("fonte_prazo_vincendo") == "COMPRASNET"
+        and term != "-"
+    ):
         term += " (Comprasnet)"
-    elif (
+    elif capacity_based_term is None and (
         operation.get("fonte_prazo_vincendo") == "DEFAULT"
         and comprasnet.get("status_consulta") != "ENCONTRADO"
         and term != "-"

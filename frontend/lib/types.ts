@@ -72,6 +72,7 @@ export interface Operation {
   prazo_vincendo_meses?: number | null;
   prazo_vincendo_indisponivel?: boolean | null;
   contrato_saldo?: number | null;
+  contrato_vigencia_fim?: string | null;
   uasg?: string | null;
   margem_disponivel?: number | null;
   origem_dados?: "API_BROADFACTOR" | "MANUAL" | null;

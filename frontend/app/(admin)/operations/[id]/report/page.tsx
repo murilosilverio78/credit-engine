@@ -237,7 +237,27 @@ function formatOptionalPercent(value: unknown, multiplier = 100) {
   })}%`;
 }
 
+function capacityTerm(operation: OperationDetails) {
+  const memory = asRecord(operation.capacidade_memoria);
+  const installments = numberValue(memory.n);
+  if (installments <= 0) {
+    return null;
+  }
+  const horizon = stringValue(memory.horizonte_firme);
+  if (!horizon) {
+    return `${installments.toLocaleString("pt-BR")} meses`;
+  }
+  const source = String(operation.contrato_vigencia_fim ?? "").slice(0, 10) === horizon.slice(0, 10)
+    ? "fim do contrato"
+    : "aniversário";
+  return `${installments.toLocaleString("pt-BR")} meses — até ${formatDate(horizon)} (${source})`;
+}
+
 function operationTerm(operation: OperationDetails) {
+  const capacity = capacityTerm(operation);
+  if (capacity) {
+    return capacity;
+  }
   if (operation.prazo_final_meses !== null && operation.prazo_final_meses !== undefined) {
     return `${numberValue(operation.prazo_final_meses).toLocaleString("pt-BR")} meses`;
   }
@@ -250,6 +270,9 @@ function operationTerm(operation: OperationDetails) {
 }
 
 function usesUnverifiedDefaultTerm(operation: OperationDetails) {
+  if (capacityTerm(operation)) {
+    return false;
+  }
   if (operation.fonte_prazo_vincendo !== "DEFAULT") {
     return false;
   }
@@ -424,7 +447,7 @@ function OperationConferencePanel({ operation }: { operation: OperationDetails }
         </Metric>
         <Metric label="Prazo final">
           <span className="text-sm">{operationTerm(operation)}</span>
-          {operation.fonte_prazo_vincendo === "COMPRASNET" ? (
+          {!capacityTerm(operation) && operation.fonte_prazo_vincendo === "COMPRASNET" ? (
             <span className="ml-1.5 rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-normal text-blue-700">
               Comprasnet
             </span>

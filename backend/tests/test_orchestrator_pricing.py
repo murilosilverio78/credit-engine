@@ -155,3 +155,52 @@ def test_completion_without_score_snapshot_is_recoverable(monkeypatch):
     assert database.completed_payload["rating"] is None
     assert database.completed_payload["taxa_sugerida"] is None
     assert database.completed_payload["pricing_skipped_reason"] == result["reason"]
+
+
+def test_completion_prices_capacity_term(monkeypatch):
+    database = PricingSupabase({
+        "valor_solicitado": 500_000,
+        "valor_enquadrado": 400_000,
+        "prazo_final_meses": 12,
+        "capacidade_memoria": {"n": 9},
+    })
+    calls = []
+    monkeypatch.setattr(orchestrator, "supabase", database)
+    monkeypatch.setattr(
+        "app.services.eligibility_params_service.get_eligibility_config",
+        lambda: {"prazo_padrao_meses": 12},
+    )
+    monkeypatch.setattr(
+        "app.services.pricing_engine.compute_taxa",
+        lambda _rating, _valor, prazo_meses, **_kwargs: calls.append(prazo_meses)
+        or {"taxa_sugerida_am": 0.025},
+    )
+
+    asyncio.run(orchestrator._complete_analysis("op-1"))
+
+    assert calls == [9]
+    assert database.completed_payload["taxa_sugerida"] == 0.025
+
+
+def test_completion_caps_capacity_term_at_default(monkeypatch):
+    database = PricingSupabase({
+        "valor_solicitado": 500_000,
+        "valor_enquadrado": 400_000,
+        "prazo_final_meses": 12,
+        "capacidade_memoria": {"n": 18},
+    })
+    calls = []
+    monkeypatch.setattr(orchestrator, "supabase", database)
+    monkeypatch.setattr(
+        "app.services.eligibility_params_service.get_eligibility_config",
+        lambda: {"prazo_padrao_meses": 12},
+    )
+    monkeypatch.setattr(
+        "app.services.pricing_engine.compute_taxa",
+        lambda _rating, _valor, prazo_meses, **_kwargs: calls.append(prazo_meses)
+        or {"taxa_sugerida_am": 0.025},
+    )
+
+    asyncio.run(orchestrator._complete_analysis("op-1"))
+
+    assert calls == [12]

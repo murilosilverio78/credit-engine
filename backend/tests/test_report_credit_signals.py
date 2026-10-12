@@ -115,3 +115,17 @@ def test_pdf_labels_default_term_when_contract_was_not_verified():
     result = cover_section(operation, snapshots, {})
 
     assert "12 meses (prazo padrão, contrato não verificado)" in result
+
+
+def test_pdf_uses_capacity_term_instead_of_unverified_default():
+    operation = {
+        "prazo_final_meses": 12,
+        "fonte_prazo_vincendo": "DEFAULT",
+        "contrato_vigencia_fim": "2027-07-20",
+        "capacidade_memoria": {"n": 9, "horizonte_firme": "2027-07-20"},
+    }
+
+    result = cover_section(operation, {}, {})
+
+    assert "9 meses — até 20/07/2027 (fim do contrato)" in result
+    assert "prazo padrão, contrato não verificado" not in result
