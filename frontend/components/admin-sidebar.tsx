@@ -145,7 +145,7 @@ export function AdminSidebar() {
     <aside className="fixed inset-y-0 left-0 flex w-[200px] flex-col border-r-[0.5px] border-border bg-background">
       <div className="border-b-[0.5px] border-border px-4 py-4">
         <p className="truncate text-[13px] font-medium text-foreground">
-          Credit Engine
+          Detetive da Vó
         </p>
         <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
           AntecipaGov
