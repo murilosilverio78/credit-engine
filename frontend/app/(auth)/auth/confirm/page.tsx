@@ -42,7 +42,7 @@ function ConfirmAccess() {
   return (
     <div className="flex min-h-dvh flex-col bg-muted/40">
       <header className="border-b-[0.5px] border-border bg-background px-5 py-3.5">
-        <p className="text-[13px] font-medium text-foreground">Detetive da Vó</p>
+        <p className="text-[13px] font-medium text-foreground">Credit Engine</p>
         <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
           AntecipaGov
         </p>

@@ -8,7 +8,7 @@ export default function AdminLayout({
 }: Readonly<{ children: ReactNode }>) {
   return (
     <AdminAuthGate>
-      <div className="min-h-dvh bg-purple-700">
+      <div className="min-h-dvh bg-background">
         <AdminSidebar />
         <main className="ml-[200px] min-h-dvh">{children}</main>
       </div>

@@ -7,7 +7,7 @@ import { Providers } from "@/app/providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Detetive da Vó",
+  title: "AntecipaGov Credit Engine",
   description: "Admin UI para analise de credito e revisao de alcadas.",
 };
 
