@@ -1,10 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 5 emits the potential Porte/Operacionalidade level, rather than the
-post-balance-penalty effective level. Re-emit v4 runs to apply this correction.
+Version 7 calibra confiança e pendências do especialista financeiro.
 """
 
-EMITTER_VERSION = "6"
+EMITTER_VERSION = "7"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {
