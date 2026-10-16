@@ -106,13 +106,21 @@ def test_vhg_payload_preserves_financial_provenance_and_confidence():
             "sha256": "a" * 64,
             "familia": "SPED_ECD",
             "status": "EXTRAIDO",
-            "payload": {"confianca_fonte": "ALTA", "dados": {"exercicios": [sped]}},
+            "payload": {
+                "confianca_fonte": "BAIXA",
+                "classificacao": {"tem_recibo_rfb": True},
+                "dados": {"exercicios": [sped]},
+            },
         },
         {
             "sha256": "b" * 64,
             "familia": "BALANCO_DRE",
             "status": "EXTRAIDO",
-            "payload": {"confianca_fonte": "MEDIA", "dados": {"exercicios": [contador]}},
+            "payload": {
+                "confianca_fonte": "BAIXA",
+                "classificacao": {"assinado_contador": True},
+                "dados": {"exercicios": [contador]},
+            },
         },
         {
             "sha256": "c" * 64,
@@ -120,6 +128,7 @@ def test_vhg_payload_preserves_financial_provenance_and_confidence():
             "status": "EXTRAIDO",
             "payload": {
                 "confianca_fonte": "MEDIA",
+                "classificacao": {"assinado_contador": True},
                 "dados": {
                     "meses": [{"valor": evidence(120, "MEDIA")}],
                     "total_declarado": evidence(120, "MEDIA"),
@@ -133,6 +142,7 @@ def test_vhg_payload_preserves_financial_provenance_and_confidence():
             "status": "EXTRAIDO",
             "payload": {
                 "confianca_fonte": "ALTA",
+                "classificacao": {"tem_recibo_rfb": True},
                 "dados": {
                     "nome": "Avalista VHG",
                     "cpf_final": "123",

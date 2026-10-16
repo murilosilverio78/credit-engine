@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 8 preserva proveniência e confiança dos insumos financeiros.
+Version 9 recalcula a confiança da fonte pela classificação extraída.
 """
 
-EMITTER_VERSION = "8"
+EMITTER_VERSION = "9"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

@@ -635,7 +635,7 @@ def _consolidate(
         p = row.get("payload") or {}
         d = _normalize_dates(p.get("dados") or {})
         f = row.get("familia")
-        c = p.get("confianca_fonte", "BAIXA")
+        c = _confidence(p.get("classificacao") or {})
         source = {"sha256": row.get("sha256"), "familia": f, "confianca": c}
         if f in {"SPED_ECD", "BALANCO_DRE", "BALANCETE", "BALANCO_ABERTURA"}:
             for x in d.get("exercicios", []):
