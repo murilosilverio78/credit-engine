@@ -15,6 +15,7 @@ from app.integrations.broadfactor.client import (  # noqa: E402
     _BROADFACTOR_TOKEN_CACHE,
     BroadfactorClient,
     BroadfactorError,
+    DocumentDownloadError,
     Outcome,
     QuotationInactiveError,
     Result,
@@ -133,6 +134,50 @@ def test_documents_raise_specific_error_for_inactive_quote(monkeypatch):
 
     with pytest.raises(QuotationInactiveError, match="QUOTATION_INACTIVE"):
         client.documentos_da_cotacao("C-1")
+
+
+def test_download_document_decodes_base64_and_keeps_metadata(monkeypatch):
+    client = BroadfactorClient("client", "secret", "http://broadfactor.test")
+    monkeypatch.setattr(
+        client,
+        "_req",
+        lambda *_args, **_kwargs: Result(
+            Outcome.OK,
+            data={"nome": "balanco.pdf", "tipo": "application/pdf", "arquivo": "cGRm"},
+        ),
+    )
+
+    document = client.baixar_documento("doc-1")
+
+    assert document.nome == "balanco.pdf"
+    assert document.mime == "application/pdf"
+    assert document.conteudo == b"pdf"
+
+
+def test_download_document_rejects_invalid_base64(monkeypatch):
+    client = BroadfactorClient("client", "secret", "http://broadfactor.test")
+    monkeypatch.setattr(
+        client,
+        "_req",
+        lambda *_args, **_kwargs: Result(Outcome.OK, data={"arquivo": "%%%"}),
+    )
+
+    with pytest.raises(DocumentDownloadError, match="documento_base64_invalido"):
+        client.baixar_documento("doc-1")
+
+
+def test_download_document_raises_for_inactive_quote(monkeypatch):
+    client = BroadfactorClient("client", "secret", "http://broadfactor.test")
+    monkeypatch.setattr(
+        client,
+        "_req",
+        lambda *_args, **_kwargs: Result(
+            Outcome.ERROR, status=409, message="QUOTATION_INACTIVE"
+        ),
+    )
+
+    with pytest.raises(QuotationInactiveError, match="QUOTATION_INACTIVE"):
+        client.baixar_documento("doc-1")
 
 
 def test_inactive_quote_message_is_read_from_serpro_envelope():

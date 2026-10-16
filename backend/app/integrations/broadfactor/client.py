@@ -169,6 +169,11 @@ class QuotationInactiveError(BroadfactorError):
     pass
 
 
+class DocumentDownloadError(BroadfactorError):
+    """O conteudo retornado para um documento Broadfactor nao e utilizavel."""
+    pass
+
+
 # --------------------------------------------------------------------------
 # Parsers defensivos
 # --------------------------------------------------------------------------
@@ -429,6 +434,13 @@ class DocumentoAnexo:
     arquivo: str
     id: str | None = None
     dono: str = "EMPRESA"  # 'EMPRESA' ou nome do socio
+
+
+@dataclass(frozen=True)
+class DocumentoBaixado:
+    nome: str | None
+    mime: str | None
+    conteudo: bytes
 
 
 @dataclass
@@ -895,6 +907,48 @@ class BroadfactorClient:
             )
             return None
 
+    def baixar_documento(self, documento_id: str) -> DocumentoBaixado:
+        """Baixa um anexo da cotacao sem expor seu conteudo em logs."""
+        res = self._req("GET", f"/empresa/documentos/baixar/{documento_id}")
+        if "QUOTATION_INACTIVE" in str(res.message or "").upper():
+            raise QuotationInactiveError(
+                "QUOTATION_INACTIVE",
+                status=res.status,
+                endpoint=res.endpoint,
+            )
+        if not res.ok or not isinstance(res.data, dict):
+            raise DocumentDownloadError(
+                "falha_download_documento",
+                status=res.status,
+                endpoint=res.endpoint,
+            )
+        encoded = res.data.get("arquivo")
+        if not isinstance(encoded, str) or not encoded.strip():
+            raise DocumentDownloadError(
+                "documento_base64_ausente",
+                status=res.status,
+                endpoint=res.endpoint,
+            )
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise DocumentDownloadError(
+                "documento_base64_invalido",
+                status=res.status,
+                endpoint=res.endpoint,
+            ) from exc
+        if not content:
+            raise DocumentDownloadError(
+                "documento_base64_ausente",
+                status=res.status,
+                endpoint=res.endpoint,
+            )
+        return DocumentoBaixado(
+            nome=str(res.data.get("nome") or "") or None,
+            mime=str(res.data.get("tipo") or "") or None,
+            conteudo=content,
+        )
+
     def documentos_da_cotacao(self, cid: str) -> list[DocumentoAnexo]:
         """Retorna somente o catalogo de documentos da empresa na cotacao."""
         fornecedor = Fornecedor(cotacao_id=cid)
@@ -1091,8 +1145,9 @@ class BroadfactorClient:
 
 
 __all__ = [
-    "BroadfactorClient", "BroadfactorError", "AuthError",
+    "BroadfactorClient", "BroadfactorError", "AuthError", "QuotationInactiveError",
     "Outcome", "Result", "Documento", "Cotacao", "EmpresaBasico", "Socio",
     "ContaBancaria", "Cnae", "Contato", "ArquivoContrato", "DocumentoAnexo",
+    "DocumentoBaixado", "DocumentDownloadError",
     "Recebimento", "ConcentracaoSacado", "Proposta", "Fornecedor", "parse_data",
 ]

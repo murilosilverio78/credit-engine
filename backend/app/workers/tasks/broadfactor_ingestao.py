@@ -265,6 +265,23 @@ def _documentos_info(documentos: list[DocumentoAnexo]) -> tuple[int, list[str]]:
     return len(documentos), tipos
 
 
+def _capturar_documentos(
+    cotacao_id: str,
+    cnpj: str,
+    operation_id: str | None,
+    client: BroadfactorClient,
+) -> dict[str, int]:
+    """Preserva anexos financeiros sem interferir no funil da cotacao."""
+    from app.services.documentos_captura_service import capturar_documentos_cotacao
+
+    return capturar_documentos_cotacao(
+        cotacao_id,
+        cnpj,
+        operation_id,
+        broadfactor_client=client,
+    )
+
+
 def _listing_is_safe_for_closure(supabase: Any, quote_count: int) -> bool:
     """Reject empty or anomalously small Broadfactor listings before closure."""
     if quote_count == 0:
@@ -710,6 +727,24 @@ async def _run_broadfactor_ingestao(
                         tipos_documento=tipos_documento,
                         estagio_max=estagio_max,
                     )
+
+                if estagio in {"DOCUMENTADA", "QUALIFICADA"}:
+                    try:
+                        await asyncio.to_thread(
+                            _capturar_documentos,
+                            cotacao.id,
+                            cotacao.documento.numero,
+                            operation_id,
+                            client,
+                        )
+                    except Exception as capture_exc:
+                        # A preservacao e best-effort: nunca bloqueia ou muda
+                        # o estagio da cotacao ja confirmado pela ingestao.
+                        logger.warning(
+                            "broadfactor_ingestao.document_capture_failed",
+                            cotacao_id=cotacao.id,
+                            error_type=capture_exc.__class__.__name__,
+                        )
 
             if estagio not in {"DOCUMENTADA", "QUALIFICADA"}:
                 continue

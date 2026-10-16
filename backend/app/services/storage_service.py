@@ -4,6 +4,7 @@ from functools import lru_cache
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 import structlog
 
 from app.core.config import settings
@@ -88,6 +89,36 @@ class StorageService:
             size=len(content),
         )
         return storage_key
+
+    def upload_document_at_key(
+        self,
+        storage_key: str,
+        content: bytes,
+        mime_type: str,
+    ) -> bool:
+        """Armazena em chave deterministica; retorna False se o objeto ja existe."""
+        client = get_r2_client()
+
+        def _put_if_missing() -> bool:
+            try:
+                client.head_object(Bucket=settings.R2_BUCKET_NAME, Key=storage_key)
+                return False
+            except ClientError as exc:
+                status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+                code = str(exc.response.get("Error", {}).get("Code") or "")
+                if status != 404 and code not in {"404", "NoSuchKey", "NotFound"}:
+                    raise
+            client.put_object(
+                Bucket=settings.R2_BUCKET_NAME,
+                Key=storage_key,
+                Body=content,
+                ContentType=mime_type or "application/octet-stream",
+            )
+            return True
+
+        uploaded = _put_if_missing()
+        logger.info("storage.document_key_ready", storage_key=storage_key, uploaded=uploaded)
+        return uploaded
 
     async def get_presigned_url(self, storage_key: str, expires_in: int = 3600) -> str:
         """Gera URL pré-assinada para download seguro (expira em 1h por padrão)."""

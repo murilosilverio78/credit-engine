@@ -56,6 +56,10 @@ class ReavaliarFunilRequest(BaseModel):
     operation_ids: list[UUID] | None = None
 
 
+class CapturarDocumentosRequest(BaseModel):
+    cotacao_ids: list[str] | None = None
+
+
 def verify_internal_token(
     x_internal_token: Annotated[
         str | None,
@@ -225,6 +229,60 @@ async def trigger_broadfactor_ingestion(
             "limit": limit,
         },
     )
+
+
+@router.post("/documentos/capturar")
+async def capturar_documentos(
+    request: CapturarDocumentosRequest | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    """Captura anexos financeiros em sequencia, sem alterar o funil."""
+    from app.core.database import supabase
+    from app.services.documentos_captura_service import capturar_documentos_cotacao
+
+    query = supabase.table("cotacoes_broadfactor").select(
+        "cotacao_id,cnpj,operation_id,estagio"
+    )
+    cotacao_ids = request.cotacao_ids if request else None
+    if cotacao_ids is None:
+        query = query.in_("estagio", ["DOCUMENTADA", "QUALIFICADA"])
+    else:
+        query = query.in_("cotacao_id", cotacao_ids)
+    result = query.execute()
+    rows = result.data or []
+    items = []
+    totals = {
+        "capturados": 0,
+        "reaproveitados": 0,
+        "falhas": 0,
+        "indisponiveis": 0,
+        "ignorados": 0,
+    }
+    for row in rows:
+        cotacao_id = str(row.get("cotacao_id") or "")
+        try:
+            resumo = await asyncio.to_thread(
+                capturar_documentos_cotacao,
+                cotacao_id,
+                str(row.get("cnpj") or ""),
+                str(row["operation_id"]) if row.get("operation_id") else None,
+            )
+            for key in totals:
+                totals[key] += int(resumo.get(key) or 0)
+            items.append({"cotacao_id": cotacao_id, **resumo})
+        except Exception as exc:
+            # Uma cotacao nao pode impedir a preservacao das demais.
+            items.append({
+                "cotacao_id": cotacao_id,
+                "capturados": 0,
+                "reaproveitados": 0,
+                "falhas": 1,
+                "indisponiveis": 0,
+                "ignorados": 0,
+                "erro": f"{exc.__class__.__name__}: falha_na_captura",
+            })
+            totals["falhas"] += 1
+    return {"cotacoes": items, "totais": totals}
 
 
 def _operacoes_para_reavaliar_funil(operation_ids: list[str] | None) -> list[dict]:

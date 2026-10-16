@@ -17,6 +17,70 @@ def make_client() -> TestClient:
     return TestClient(app)
 
 
+def test_capture_documents_endpoint_without_body_uses_documented_quotes(monkeypatch):
+    from app.core import database
+    from app.services import documentos_captura_service
+
+    db = Postgrest({
+        "cotacoes_broadfactor": [
+            {"cotacao_id": "C-1", "cnpj": "03012610000101", "operation_id": None, "estagio": "DOCUMENTADA"},
+            {"cotacao_id": "C-2", "cnpj": "03012610000101", "operation_id": None, "estagio": "QUALIFICADA"},
+            {"cotacao_id": "C-3", "cnpj": "03012610000101", "operation_id": None, "estagio": "ENQUADRADA"},
+        ],
+    })
+    monkeypatch.setattr(database, "supabase", db)
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    calls = []
+
+    def fake_capture(cotacao_id, cnpj, operation_id=None):
+        calls.append((cotacao_id, cnpj, operation_id))
+        if cotacao_id == "C-2":
+            raise RuntimeError("storage unavailable")
+        return {"capturados": 1, "reaproveitados": 0, "falhas": 0, "indisponiveis": 0, "ignorados": 0}
+
+    monkeypatch.setattr(documentos_captura_service, "capturar_documentos_cotacao", fake_capture)
+
+    response = make_client().post("/api/v1/internal/documentos/capturar", headers={"X-Internal-Token": "configured-token"})
+
+    assert response.status_code == 200
+    assert [call[0] for call in calls] == ["C-1", "C-2"]
+    assert response.json()["totais"] == {
+        "capturados": 1,
+        "reaproveitados": 0,
+        "falhas": 1,
+        "indisponiveis": 0,
+        "ignorados": 0,
+    }
+
+
+def test_capture_documents_endpoint_filters_explicit_quote_ids(monkeypatch):
+    from app.core import database
+    from app.services import documentos_captura_service
+
+    db = Postgrest({
+        "cotacoes_broadfactor": [
+            {"cotacao_id": "C-1", "cnpj": "03012610000101", "operation_id": None, "estagio": "DOCUMENTADA"},
+            {"cotacao_id": "C-2", "cnpj": "03012610000101", "operation_id": None, "estagio": "ENQUADRADA"},
+        ],
+    })
+    monkeypatch.setattr(database, "supabase", db)
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    monkeypatch.setattr(
+        documentos_captura_service,
+        "capturar_documentos_cotacao",
+        lambda *_args: {"capturados": 0, "reaproveitados": 1, "falhas": 0, "indisponiveis": 0, "ignorados": 0},
+    )
+
+    response = make_client().post(
+        "/api/v1/internal/documentos/capturar",
+        headers={"X-Internal-Token": "configured-token"},
+        json={"cotacao_ids": ["C-2"]},
+    )
+
+    assert response.status_code == 200
+    assert [item["cotacao_id"] for item in response.json()["cotacoes"]] == ["C-2"]
+
+
 def _setup_recoleta(monkeypatch, operation, motivos=None):
     from app.core import database
     from app.services import audit_service, funil_qualificacao_service

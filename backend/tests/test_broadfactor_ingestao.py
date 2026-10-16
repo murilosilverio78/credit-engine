@@ -152,6 +152,28 @@ def document() -> DocumentoAnexo:
 
 
 @pytest.mark.asyncio
+async def test_document_capture_failure_does_not_interrupt_ingestion(monkeypatch):
+    financial = DocumentoAnexo(tipo="FATURAMENTO", arquivo="faturamento.pdf", id="doc-1")
+    database, created, analyses = install_funnel(
+        monkeypatch, [quote("C-capture")], documentos={"C-capture": [financial]}
+    )
+    calls = []
+
+    def failed_capture(*args):
+        calls.append(args)
+        raise RuntimeError("storage unavailable")
+
+    monkeypatch.setattr(broadfactor_ingestao, "_capturar_documentos", failed_capture)
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert calls and calls[0][0] == "C-capture"
+    assert database.quotes["C-capture"]["estagio"] == "DOCUMENTADA"
+    assert result["criadas"] == 1
+    assert created and analyses
+
+
+@pytest.mark.asyncio
 async def test_every_quote_is_persisted_and_only_eligible_quote_reaches_stage_two(monkeypatch):
     eligible = quote("C-eligible")
     rejected = quote("C-rejected", valor=5_000)
