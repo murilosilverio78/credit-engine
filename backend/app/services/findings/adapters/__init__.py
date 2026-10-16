@@ -5,6 +5,7 @@ from .documentos import emit_documentos
 from .porte import emit_porte
 from .reputacional import emit_reputacional
 from .sacado_orgao import emit_sacado_orgao
+from .financeiro import emit_financeiro
 
 ADAPTERS = {
     "cadastro_regularidade": emit_cadastro_regularidade,
@@ -12,4 +13,5 @@ ADAPTERS = {
     "documentos": emit_documentos,
     "reputacional": emit_reputacional,
     "porte": emit_porte,
+    "financeiro": emit_financeiro,
 }

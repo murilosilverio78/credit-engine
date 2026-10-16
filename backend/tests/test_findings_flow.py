@@ -1,4 +1,5 @@
 """Real shadow-emission flow through the component hooks and PostgREST fake."""
+
 import pytest
 
 from app.services.findings import emitter
@@ -10,11 +11,15 @@ from tests.fakes.postgrest import Postgrest, Rpc
 
 class FlowDb(Postgrest):
     def __init__(self, snapshots):
-        super().__init__({
-            "operations": [{"id": "op", "ambiente": "TESTE", "valor_enquadrado": 100}],
-            "component_snapshots": snapshots,
-            "cotacoes_broadfactor": [],
-        })
+        super().__init__(
+            {
+                "operations": [
+                    {"id": "op", "ambiente": "TESTE", "valor_enquadrado": 100}
+                ],
+                "component_snapshots": snapshots,
+                "cotacoes_broadfactor": [],
+            }
+        )
         self.runs: set[tuple[str, str]] = set()
         self.persisted_findings = []
         self.rpc_inserted = []
@@ -49,9 +54,20 @@ def _catalog():
 
 def _cadastro_rows(status="completed"):
     return [
-        {"operation_id": "op", "component": component, "status": status,
-         "parsed_result": {} if status == "completed" else None}
-        for component in ("brasil_api", "pessoa_juridica", "ceis", "cnep", "cepim", "acordos_leniencia")
+        {
+            "operation_id": "op",
+            "component": component,
+            "status": status,
+            "parsed_result": {} if status == "completed" else None,
+        }
+        for component in (
+            "brasil_api",
+            "pessoa_juridica",
+            "ceis",
+            "cnep",
+            "cepim",
+            "acordos_leniencia",
+        )
     ]
 
 
@@ -89,7 +105,10 @@ def test_cadastro_hooks_wait_for_all_terminal_then_deduplicate(monkeypatch):
     base._dual_write_findings("op", rows[-1]["component"], rows[-1]["parsed_result"])
     assert len(db.rpc_calls) == 2
     assert db.persisted_findings == before
-    assert db.rpc_calls[-1][1]["p_run"]["entrada_hash"] == db.rpc_calls[0][1]["p_run"]["entrada_hash"]
+    assert (
+        db.rpc_calls[-1][1]["p_run"]["entrada_hash"]
+        == db.rpc_calls[0][1]["p_run"]["entrada_hash"]
+    )
 
 
 def test_failed_source_emits_partial_with_unverified_finding(monkeypatch):
@@ -108,7 +127,9 @@ def test_failed_source_emits_partial_with_unverified_finding(monkeypatch):
     base._dual_write_findings("op", "ceis")
 
     assert db.rpc_calls[0][1]["p_run"]["status"] == "PARCIAL"
-    sancao = next(item for item in db.persisted_findings if item["codigo"] == "sancao_ativa")
+    sancao = next(
+        item for item in db.persisted_findings if item["codigo"] == "sancao_ativa"
+    )
     assert sancao["estado"] == "NAO_VERIFICADO"
 
 
@@ -132,56 +153,133 @@ def test_nonfinal_failed_source_waits_for_remaining_terminal_inputs(monkeypatch)
 
 
 def test_optional_certificate_change_creates_a_new_auditable_run(monkeypatch):
-    rows = _cadastro_rows() + [{
-        "operation_id": "op", "component": "cnd_federal", "status": "pending", "parsed_result": None,
-    }]
+    rows = _cadastro_rows() + [
+        {
+            "operation_id": "op",
+            "component": "cnd_federal",
+            "status": "pending",
+            "parsed_result": None,
+        }
+    ]
     db = FlowDb(rows)
     _enable_real_hook(monkeypatch, db)
 
     base._dual_write_findings("op", "brasil_api", {})
-    rows[-1].update(status="completed", parsed_result={"valida": True, "data_validade": "2030-01-01"})
+    rows[-1].update(
+        status="completed",
+        parsed_result={"valida": True, "data_validade": "2030-01-01"},
+    )
     base._dual_write_findings("op", "cnd_federal", rows[-1]["parsed_result"])
 
     assert len(db.rpc_calls) == 2
-    assert db.rpc_calls[0][1]["p_run"]["entrada_hash"] != db.rpc_calls[1][1]["p_run"]["entrada_hash"]
+    assert (
+        db.rpc_calls[0][1]["p_run"]["entrada_hash"]
+        != db.rpc_calls[1][1]["p_run"]["entrada_hash"]
+    )
 
 
 def test_emitter_version_participates_in_idempotency_hash(monkeypatch):
-    db = FlowDb([{
-        "operation_id": "op", "component": "contrato_extracao", "status": "completed",
-        "parsed_result": {"regime_conta_vinculada": "CONTA_DEPOSITO_VINCULADA", "flags": []},
-    }])
-    monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: {
-        "conta_vinculada_regime:1": {"codigo": "conta_vinculada_regime", "versao": 1, "escopo": "CONTRATO", "tipo_valor": "ENUM"}
-    })
+    db = FlowDb(
+        [
+            {
+                "operation_id": "op",
+                "component": "contrato_extracao",
+                "status": "completed",
+                "parsed_result": {
+                    "regime_conta_vinculada": "CONTA_DEPOSITO_VINCULADA",
+                    "flags": [],
+                },
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        emitter,
+        "get_catalog",
+        lambda **_kwargs: {
+            "conta_vinculada_regime:1": {
+                "codigo": "conta_vinculada_regime",
+                "versao": 1,
+                "escopo": "CONTRATO",
+                "tipo_valor": "ENUM",
+            }
+        },
+    )
 
     emitter.emit_findings("op", "documentos", database=db)
     emitter.emit_findings("op", "documentos", database=db)
-    monkeypatch.setattr(version, "EMITTER_VERSION", "6")
+    monkeypatch.setattr(version, "EMITTER_VERSION", "7")
     emitter.emit_findings("op", "documentos", database=db)
 
     assert db.rpc_inserted == [True, False, True]
-    assert db.rpc_calls[0][1]["p_run"]["entrada_hash"] == db.rpc_calls[1][1]["p_run"]["entrada_hash"]
-    assert db.rpc_calls[0][1]["p_run"]["entrada_hash"] != db.rpc_calls[2][1]["p_run"]["entrada_hash"]
-    assert db.rpc_calls[2][1]["p_run"]["versao_emissor"] == "6"
+    assert (
+        db.rpc_calls[0][1]["p_run"]["entrada_hash"]
+        == db.rpc_calls[1][1]["p_run"]["entrada_hash"]
+    )
+    assert (
+        db.rpc_calls[0][1]["p_run"]["entrada_hash"]
+        != db.rpc_calls[2][1]["p_run"]["entrada_hash"]
+    )
+    assert db.rpc_calls[2][1]["p_run"]["versao_emissor"] == "7"
 
 
 def test_hash_extras_are_limited_to_each_specialist(monkeypatch):
     rows = _cadastro_rows() + [
-        {"operation_id": "op", "component": "contratos", "status": "completed", "parsed_result": {}},
-        {"operation_id": "op", "component": "recursos_recebidos", "status": "completed", "parsed_result": {"faturamento_verificado_12m": 100}},
-        {"operation_id": "op", "component": "contratos_comprasnet", "status": "completed", "parsed_result": {}},
-        {"operation_id": "op", "component": "contrato_extracao", "status": "completed", "parsed_result": {"regime_conta_vinculada": "OK", "flags": []}},
-        {"operation_id": "op", "component": "web_research", "status": "completed", "parsed_result": {"nivel": "Adequado"}},
+        {
+            "operation_id": "op",
+            "component": "contratos",
+            "status": "completed",
+            "parsed_result": {},
+        },
+        {
+            "operation_id": "op",
+            "component": "recursos_recebidos",
+            "status": "completed",
+            "parsed_result": {"faturamento_verificado_12m": 100},
+        },
+        {
+            "operation_id": "op",
+            "component": "contratos_comprasnet",
+            "status": "completed",
+            "parsed_result": {},
+        },
+        {
+            "operation_id": "op",
+            "component": "contrato_extracao",
+            "status": "completed",
+            "parsed_result": {"regime_conta_vinculada": "OK", "flags": []},
+        },
+        {
+            "operation_id": "op",
+            "component": "web_research",
+            "status": "completed",
+            "parsed_result": {"nivel": "Adequado"},
+        },
     ]
     db = FlowDb(rows)
     catalog = _catalog() | {
-        "conta_vinculada_regime:1": {"codigo": "conta_vinculada_regime", "versao": 1, "escopo": "CONTRATO", "tipo_valor": "ENUM"},
-        "reputacao_mercado:1": {"codigo": "reputacao_mercado", "versao": 1, "escopo": "CEDENTE", "tipo_valor": "ENUM"},
-        "alertas_reputacionais:1": {"codigo": "alertas_reputacionais", "versao": 1, "escopo": "CEDENTE", "tipo_valor": "OBJETO"},
+        "conta_vinculada_regime:1": {
+            "codigo": "conta_vinculada_regime",
+            "versao": 1,
+            "escopo": "CONTRATO",
+            "tipo_valor": "ENUM",
+        },
+        "reputacao_mercado:1": {
+            "codigo": "reputacao_mercado",
+            "versao": 1,
+            "escopo": "CEDENTE",
+            "tipo_valor": "ENUM",
+        },
+        "alertas_reputacionais:1": {
+            "codigo": "alertas_reputacionais",
+            "versao": 1,
+            "escopo": "CEDENTE",
+            "tipo_valor": "OBJETO",
+        },
     }
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: catalog)
-    db.tables["cotacoes_broadfactor"] = [{"operation_id": "op", "tipos_documento": ["DRE"]}]
+    db.tables["cotacoes_broadfactor"] = [
+        {"operation_id": "op", "tipos_documento": ["DRE"]}
+    ]
 
     emitter.emit_findings("op", "sacado_orgao", database=db)
     db.tables["cotacoes_broadfactor"][0]["tipos_documento"] = ["PENULTIMO_BALANCO"]
@@ -198,15 +296,29 @@ def test_hash_extras_are_limited_to_each_specialist(monkeypatch):
 
 
 def test_porte_reprocessing_uses_new_override_not_old_snapshot(monkeypatch):
-    db = FlowDb([{
-        "operation_id": "op", "component": "score_engine", "status": "completed",
-        "parsed_result": {"dimensoes": {"porte_operacionalidade": {"nivel": "Fraco"}}},
-    }])
+    db = FlowDb(
+        [
+            {
+                "operation_id": "op",
+                "component": "score_engine",
+                "status": "completed",
+                "parsed_result": {
+                    "dimensoes": {"porte_operacionalidade": {"nivel": "Fraco"}}
+                },
+            }
+        ]
+    )
     _enable_real_hook(monkeypatch, db)
 
     emitter.emit_findings(
-        "op", "porte", database=db,
-        overrides={"score_engine": {"dimensoes": {"porte_operacionalidade": {"nivel": "Forte"}}}},
+        "op",
+        "porte",
+        database=db,
+        overrides={
+            "score_engine": {
+                "dimensoes": {"porte_operacionalidade": {"nivel": "Forte"}}
+            }
+        },
     )
 
     assert db.persisted_findings[0]["valor"] == "Forte"
@@ -214,67 +326,192 @@ def test_porte_reprocessing_uses_new_override_not_old_snapshot(monkeypatch):
 
 def test_operation_99e4_end_to_end_emits_22_expected_findings(monkeypatch):
     snapshots = [
-        {"operation_id": "op", "component": "brasil_api", "status": "completed", "parsed_result": {"situacao_cadastral": "ATIVA"}},
-        {"operation_id": "op", "component": "pessoa_juridica", "status": "completed", "parsed_result": {}},
-        *[{"operation_id": "op", "component": component, "status": "completed", "parsed_result": {}}
-          for component in ("ceis", "cnep", "cepim")],
-        {"operation_id": "op", "component": "acordos_leniencia", "status": "completed", "parsed_result": {"total_acordos": 0}},
-        *[{"operation_id": "op", "component": component, "status": "pending", "parsed_result": None}
-          for component in ("cnd_federal", "cndt_tst", "fgts")],
-        {"operation_id": "op", "component": "contratos", "status": "completed", "parsed_result": {
-            "contratos_ativos": 1, "total_contratos": 1, "orgaos_contratantes": ["Orgao A"],
-            "contratos_detalhe": [{"ativo": True, "data_inicio": "2020-01-01", "data_fim": "2027-01-01"}],
-        }},
-        {"operation_id": "op", "component": "recursos_recebidos", "status": "completed", "parsed_result": {
-            "concentracao": {"hhi": 0.4}, "meses_com_recebimento": 8,
-            "volatilidade": {"cv": 0.2, "anos_completos": 0}, "faturamento_verificado_12m": 1000,
-        }},
-        {"operation_id": "op", "component": "contratos_comprasnet", "status": "completed", "parsed_result": {
-            "performance_contratual": {"glosa_total": 0, "taxa_glosa": 0, "faturado_total": 1000},
-        }},
-        {"operation_id": "op", "component": "contrato_extracao", "status": "completed", "parsed_result": {
-            "regime_conta_vinculada": "CONTA_DEPOSITO_VINCULADA", "flags": [],
-        }},
-        {"operation_id": "op", "component": "web_research", "status": "completed", "parsed_result": {
-            "nivel": "Adequado", "alertas": [], "flags_reputacao": [],
-        }},
+        {
+            "operation_id": "op",
+            "component": "brasil_api",
+            "status": "completed",
+            "parsed_result": {"situacao_cadastral": "ATIVA"},
+        },
+        {
+            "operation_id": "op",
+            "component": "pessoa_juridica",
+            "status": "completed",
+            "parsed_result": {},
+        },
+        *[
+            {
+                "operation_id": "op",
+                "component": component,
+                "status": "completed",
+                "parsed_result": {},
+            }
+            for component in ("ceis", "cnep", "cepim")
+        ],
+        {
+            "operation_id": "op",
+            "component": "acordos_leniencia",
+            "status": "completed",
+            "parsed_result": {"total_acordos": 0},
+        },
+        *[
+            {
+                "operation_id": "op",
+                "component": component,
+                "status": "pending",
+                "parsed_result": None,
+            }
+            for component in ("cnd_federal", "cndt_tst", "fgts")
+        ],
+        {
+            "operation_id": "op",
+            "component": "contratos",
+            "status": "completed",
+            "parsed_result": {
+                "contratos_ativos": 1,
+                "total_contratos": 1,
+                "orgaos_contratantes": ["Orgao A"],
+                "contratos_detalhe": [
+                    {
+                        "ativo": True,
+                        "data_inicio": "2020-01-01",
+                        "data_fim": "2027-01-01",
+                    }
+                ],
+            },
+        },
+        {
+            "operation_id": "op",
+            "component": "recursos_recebidos",
+            "status": "completed",
+            "parsed_result": {
+                "concentracao": {"hhi": 0.4},
+                "meses_com_recebimento": 8,
+                "volatilidade": {"cv": 0.2, "anos_completos": 0},
+                "faturamento_verificado_12m": 1000,
+            },
+        },
+        {
+            "operation_id": "op",
+            "component": "contratos_comprasnet",
+            "status": "completed",
+            "parsed_result": {
+                "performance_contratual": {
+                    "glosa_total": 0,
+                    "taxa_glosa": 0,
+                    "faturado_total": 1000,
+                },
+            },
+        },
+        {
+            "operation_id": "op",
+            "component": "contrato_extracao",
+            "status": "completed",
+            "parsed_result": {
+                "regime_conta_vinculada": "CONTA_DEPOSITO_VINCULADA",
+                "flags": [],
+            },
+        },
+        {
+            "operation_id": "op",
+            "component": "web_research",
+            "status": "completed",
+            "parsed_result": {
+                "nivel": "Adequado",
+                "alertas": [],
+                "flags_reputacao": [],
+            },
+        },
     ]
     db = FlowDb(snapshots)
-    db.tables["cotacoes_broadfactor"] = [{"operation_id": "op", "tipos_documento": ["PENULTIMO_BALANCO"]}]
+    db.tables["cotacoes_broadfactor"] = [
+        {"operation_id": "op", "tipos_documento": ["PENULTIMO_BALANCO"]}
+    ]
     expected = {
-        "cadastro_inativo": ("NEGATIVO_CONFIRMADO", "ALTA"), "sancao_ativa": ("NEGATIVO_CONFIRMADO", "ALTA"),
-        "acordo_leniencia_ativo": ("NEGATIVO_CONFIRMADO", "ALTA"), "certidao_cnd_federal_pendente": ("CONFIRMADO", "ALTA"),
-        "certidao_cndt_pendente": ("CONFIRMADO", "ALTA"), "certidao_fgts_pendente": ("CONFIRMADO", "ALTA"),
-        "balanco_ausente": ("NEGATIVO_CONFIRMADO", "ALTA"), "balanco_catalogado_broadfactor": ("CONFIRMADO", "ALTA"),
-        "contratos_ativos_qtd": ("CONFIRMADO", "ALTA"), "contratos_total_qtd": ("CONFIRMADO", "ALTA"),
-        "orgaos_distintos_qtd": ("CONFIRMADO", "ALTA"), "maturidade_max_anos": ("CONFIRMADO", "ALTA"),
-        "hhi_recebimentos": ("CONFIRMADO", "ALTA"), "meses_com_recebimento": ("CONFIRMADO", "ALTA"),
-        "volatilidade_cv": ("CONFIRMADO", "ALTA"), "anos_completos_receita": ("CONFIRMADO", "ALTA"),
-        "cobertura_exposicao": ("CONFIRMADO", "ALTA"), "glosa_historica": ("CONFIRMADO", "ALTA"),
-            "conta_vinculada_regime": ("CONFIRMADO", "MEDIA"), "capacidade_operacional": ("CONFIRMADO", "MEDIA"),
-            "reputacao_mercado": ("CONFIRMADO", "MEDIA"), "alertas_reputacionais": ("CONFIRMADO", "MEDIA"),
-            "natureza_juridica_empresarial": ("CONFIRMADO", "ALTA"), "atividade_restrita": ("CONFIRMADO", "ALTA"),
-            "contratos_comprasnet_incluidos_qtd": ("CONFIRMADO", "ALTA"),
+        "cadastro_inativo": ("NEGATIVO_CONFIRMADO", "ALTA"),
+        "sancao_ativa": ("NEGATIVO_CONFIRMADO", "ALTA"),
+        "acordo_leniencia_ativo": ("NEGATIVO_CONFIRMADO", "ALTA"),
+        "certidao_cnd_federal_pendente": ("CONFIRMADO", "ALTA"),
+        "certidao_cndt_pendente": ("CONFIRMADO", "ALTA"),
+        "certidao_fgts_pendente": ("CONFIRMADO", "ALTA"),
+        "balanco_ausente": ("NEGATIVO_CONFIRMADO", "ALTA"),
+        "balanco_catalogado_broadfactor": ("CONFIRMADO", "ALTA"),
+        "contratos_ativos_qtd": ("CONFIRMADO", "ALTA"),
+        "contratos_total_qtd": ("CONFIRMADO", "ALTA"),
+        "orgaos_distintos_qtd": ("CONFIRMADO", "ALTA"),
+        "maturidade_max_anos": ("CONFIRMADO", "ALTA"),
+        "hhi_recebimentos": ("CONFIRMADO", "ALTA"),
+        "meses_com_recebimento": ("CONFIRMADO", "ALTA"),
+        "volatilidade_cv": ("CONFIRMADO", "ALTA"),
+        "anos_completos_receita": ("CONFIRMADO", "ALTA"),
+        "cobertura_exposicao": ("CONFIRMADO", "ALTA"),
+        "glosa_historica": ("CONFIRMADO", "ALTA"),
+        "conta_vinculada_regime": ("CONFIRMADO", "MEDIA"),
+        "capacidade_operacional": ("CONFIRMADO", "MEDIA"),
+        "reputacao_mercado": ("CONFIRMADO", "MEDIA"),
+        "alertas_reputacionais": ("CONFIRMADO", "MEDIA"),
+        "natureza_juridica_empresarial": ("CONFIRMADO", "ALTA"),
+        "atividade_restrita": ("CONFIRMADO", "ALTA"),
+        "contratos_comprasnet_incluidos_qtd": ("CONFIRMADO", "ALTA"),
     }
-    catalog = {f"{code}:1": {"codigo": code, "versao": 1, "escopo": next_scope, "tipo_valor": value_type}
-               for code, (next_scope, value_type) in {
-                   "cadastro_inativo": ("CEDENTE", "BOOLEANO"), "sancao_ativa": ("CEDENTE", "OBJETO"), "acordo_leniencia_ativo": ("CEDENTE", "BOOLEANO"),
-                   "certidao_cnd_federal_pendente": ("CEDENTE", "OBJETO"), "certidao_cndt_pendente": ("CEDENTE", "OBJETO"), "certidao_fgts_pendente": ("CEDENTE", "OBJETO"),
-                   "balanco_ausente": ("CEDENTE", "BOOLEANO"), "balanco_catalogado_broadfactor": ("CEDENTE", "OBJETO"),
-                   "contratos_ativos_qtd": ("CEDENTE", "NUMERO"), "contratos_total_qtd": ("CEDENTE", "NUMERO"), "orgaos_distintos_qtd": ("SACADO", "NUMERO"), "maturidade_max_anos": ("CONTRATO", "NUMERO"),
-                   "hhi_recebimentos": ("SACADO", "NUMERO"), "meses_com_recebimento": ("CEDENTE", "NUMERO"), "volatilidade_cv": ("CEDENTE", "NUMERO"), "anos_completos_receita": ("CEDENTE", "NUMERO"),
-                       "cobertura_exposicao": ("OPERACAO", "NUMERO"), "glosa_historica": ("CONTRATO", "OBJETO"), "conta_vinculada_regime": ("CONTRATO", "ENUM"),
-                       "capacidade_operacional": ("CEDENTE", "ENUM"), "reputacao_mercado": ("CEDENTE", "ENUM"), "alertas_reputacionais": ("CEDENTE", "OBJETO"),
-                       "natureza_juridica_empresarial": ("CEDENTE", "BOOLEANO"), "atividade_restrita": ("CEDENTE", "BOOLEANO"),
-                       "contratos_comprasnet_incluidos_qtd": ("CONTRATO", "NUMERO"),
-                   }.items()}
+    catalog = {
+        f"{code}:1": {
+            "codigo": code,
+            "versao": 1,
+            "escopo": next_scope,
+            "tipo_valor": value_type,
+        }
+        for code, (next_scope, value_type) in {
+            "cadastro_inativo": ("CEDENTE", "BOOLEANO"),
+            "sancao_ativa": ("CEDENTE", "OBJETO"),
+            "acordo_leniencia_ativo": ("CEDENTE", "BOOLEANO"),
+            "certidao_cnd_federal_pendente": ("CEDENTE", "OBJETO"),
+            "certidao_cndt_pendente": ("CEDENTE", "OBJETO"),
+            "certidao_fgts_pendente": ("CEDENTE", "OBJETO"),
+            "balanco_ausente": ("CEDENTE", "BOOLEANO"),
+            "balanco_catalogado_broadfactor": ("CEDENTE", "OBJETO"),
+            "contratos_ativos_qtd": ("CEDENTE", "NUMERO"),
+            "contratos_total_qtd": ("CEDENTE", "NUMERO"),
+            "orgaos_distintos_qtd": ("SACADO", "NUMERO"),
+            "maturidade_max_anos": ("CONTRATO", "NUMERO"),
+            "hhi_recebimentos": ("SACADO", "NUMERO"),
+            "meses_com_recebimento": ("CEDENTE", "NUMERO"),
+            "volatilidade_cv": ("CEDENTE", "NUMERO"),
+            "anos_completos_receita": ("CEDENTE", "NUMERO"),
+            "cobertura_exposicao": ("OPERACAO", "NUMERO"),
+            "glosa_historica": ("CONTRATO", "OBJETO"),
+            "conta_vinculada_regime": ("CONTRATO", "ENUM"),
+            "capacidade_operacional": ("CEDENTE", "ENUM"),
+            "reputacao_mercado": ("CEDENTE", "ENUM"),
+            "alertas_reputacionais": ("CEDENTE", "OBJETO"),
+            "natureza_juridica_empresarial": ("CEDENTE", "BOOLEANO"),
+            "atividade_restrita": ("CEDENTE", "BOOLEANO"),
+            "contratos_comprasnet_incluidos_qtd": ("CONTRATO", "NUMERO"),
+        }.items()
+    }
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: catalog)
 
-    for specialist in ("cadastro_regularidade", "sacado_orgao", "documentos", "reputacional"):
+    for specialist in (
+        "cadastro_regularidade",
+        "sacado_orgao",
+        "documentos",
+        "reputacional",
+    ):
         emitter.emit_findings("op", specialist, database=db)
-    emitter.emit_findings("op", "porte", database=db, overrides={"score_engine": {"dimensoes": {"porte_operacionalidade": {"nivel": "Adequado"}}}})
+    emitter.emit_findings(
+        "op",
+        "porte",
+        database=db,
+        overrides={
+            "score_engine": {
+                "dimensoes": {"porte_operacionalidade": {"nivel": "Adequado"}}
+            }
+        },
+    )
 
-    actual = {item["codigo"]: (item["estado"], item["confianca"]) for item in db.persisted_findings}
+    actual = {
+        item["codigo"]: (item["estado"], item["confianca"])
+        for item in db.persisted_findings
+    }
     assert len(actual) == 25
     assert actual == expected
 

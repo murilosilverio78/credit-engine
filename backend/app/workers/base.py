@@ -2,6 +2,7 @@
 BaseComponentTask: classe base para todos os workers de consulta.
 Gerencia: snapshot lifecycle, cache, auditoria, erro handling.
 """
+
 import time
 from datetime import datetime, timezone
 from typing import Callable, TypeVar
@@ -16,7 +17,7 @@ logger = structlog.get_logger()
 
 T = TypeVar("T")
 SNAPSHOT_WRITE_RETRY_DELAYS = (0.2, 0.5)
-NO_FINDINGS_COMPONENTS = {"documentos_financeiros"}
+NO_FINDINGS_COMPONENTS: set[str] = set()
 
 
 def _normalized_text(value: object) -> str:
@@ -78,9 +79,8 @@ def _execute_snapshot_write(
         try:
             return write()
         except Exception as exc:
-            should_retry = (
-                _is_transient_connection_error(exc)
-                and attempt < len(SNAPSHOT_WRITE_RETRY_DELAYS)
+            should_retry = _is_transient_connection_error(exc) and attempt < len(
+                SNAPSHOT_WRITE_RETRY_DELAYS
             )
             if not should_retry:
                 raise
@@ -195,23 +195,44 @@ def _dual_write_findings(
     """Shadow-write findings without ever changing the component outcome."""
     try:
         from app.core.config import settings
+
         if not settings.FINDINGS_EMIT_ENABLED:
             return
         from app.services.findings.dispatch import dispatch_emission
+
         specialists = {
-            "brasil_api": "cadastro_regularidade", "pessoa_juridica": "cadastro_regularidade",
-            "ceis": "cadastro_regularidade", "cnep": "cadastro_regularidade",
-            "cepim": "cadastro_regularidade", "acordos_leniencia": "cadastro_regularidade",
-            "cnd_federal": "cadastro_regularidade", "cndt_tst": "cadastro_regularidade",
-            "fgts": "cadastro_regularidade", "contratos": "sacado_orgao",
-            "recursos_recebidos": "sacado_orgao", "contratos_comprasnet": "sacado_orgao",
-            "contrato_extracao": "documentos", "web_research": "reputacional",
+            "brasil_api": "cadastro_regularidade",
+            "pessoa_juridica": "cadastro_regularidade",
+            "ceis": "cadastro_regularidade",
+            "cnep": "cadastro_regularidade",
+            "cepim": "cadastro_regularidade",
+            "acordos_leniencia": "cadastro_regularidade",
+            "cnd_federal": "cadastro_regularidade",
+            "cndt_tst": "cadastro_regularidade",
+            "fgts": "cadastro_regularidade",
+            "contratos": "sacado_orgao",
+            "recursos_recebidos": "sacado_orgao",
+            "contratos_comprasnet": "sacado_orgao",
+            "contrato_extracao": "documentos",
+            "web_research": "reputacional",
         }
         especialista = specialists.get(component)
         if especialista:
             dispatch_emission(operation_id, especialista)
+        if component in {
+            "documentos_financeiros",
+            "recursos_recebidos",
+            "contratos_pncp",
+            "brasil_api",
+        }:
+            dispatch_emission(operation_id, "financeiro")
     except Exception as exc:
-        logger.warning("findings.component_dual_write_failed", operation_id=operation_id, component=component, error=str(exc))
+        logger.warning(
+            "findings.component_dual_write_failed",
+            operation_id=operation_id,
+            component=component,
+            error=str(exc),
+        )
 
 
 class BaseComponentTask:
@@ -224,6 +245,7 @@ class BaseComponentTask:
     - Verifica cache antes de executar
     - Registra no audit trail
     """
+
     def execute(
         self,
         operation_id: str,
@@ -317,7 +339,11 @@ class BaseComponentTask:
                     from_cache=True,
                 ),
             )
-            return {"operation_id": operation_id, "component": component, "cached": True}
+            return {
+                "operation_id": operation_id,
+                "component": component,
+                "cached": True,
+            }
 
         collection_key = str(uuid4())
 
@@ -328,11 +354,14 @@ class BaseComponentTask:
             "mark_running",
             lambda: snap_svc.mark_running(operation_id, component),
         )
-        audit_svc.log(operation_id, "component_started", payload={"component": component})
+        audit_svc.log(
+            operation_id, "component_started", payload={"component": component}
+        )
 
         start = time.time()
         try:
             import inspect
+
             sig = inspect.signature(handler)
             if "operation_id" in sig.parameters:
                 result = handler(cnpj, operation_id=operation_id)
@@ -360,15 +389,13 @@ class BaseComponentTask:
             cacheable_result = not (
                 isinstance(result, dict) and "erro" in result
             ) and not (
-                component == "web_research"
-                and _is_degraded_web_research_result(result)
+                component == "web_research" and _is_degraded_web_research_result(result)
             )
             if use_cache and cacheable_result:
                 cache_svc.set(cnpj, component, result)
 
             if not (
-                component == "web_research"
-                and _is_degraded_web_research_result(result)
+                component == "web_research" and _is_degraded_web_research_result(result)
             ):
                 _dual_write_cliente(
                     operation_id=operation_id,
@@ -395,7 +422,11 @@ class BaseComponentTask:
                 duration_ms=duration_ms,
             )
 
-            return {"operation_id": operation_id, "component": component, "status": "completed"}
+            return {
+                "operation_id": operation_id,
+                "component": component,
+                "status": "completed",
+            }
 
         except Exception as exc:
             collected_at = datetime.now(timezone.utc)

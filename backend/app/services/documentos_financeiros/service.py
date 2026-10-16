@@ -816,9 +816,11 @@ def _consolidate(
         check(
             "balanco_fecha",
             None
-            if None in (ativo, pc, pnc, pl)
-            else abs(ativo - (pc + pnc + pl)) <= max(ativo, 1) * 0.01,
-            "ativo = passivo + PL",
+            if None in (ativo, pc, pl)
+            else abs(ativo - (pc + (pnc or 0) + pl)) <= max(ativo, 1) * 0.01,
+            "PNC inexistente"
+            if pnc is None and None not in (ativo, pc, pl)
+            else "ativo = passivo + PL",
         ),
         check(
             "soma_faturamento",

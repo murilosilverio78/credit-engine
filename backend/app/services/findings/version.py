@@ -4,7 +4,7 @@ Version 5 emits the potential Porte/Operacionalidade level, rather than the
 post-balance-penalty effective level. Re-emit v4 runs to apply this correction.
 """
 
-EMITTER_VERSION = "5"
+EMITTER_VERSION = "6"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {
@@ -13,4 +13,5 @@ HASH_EXTRAS = {
     "documentos": (),
     "reputacional": (),
     "porte": ("overrides",),
+    "financeiro": ("valor_enquadrado", "contrato_operacao"),
 }
