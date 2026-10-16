@@ -178,7 +178,9 @@ def _block_category(value: Any) -> str:
 
 
 def _effects_explain(
-    divergencias: list[dict[str, Any]], effects: list[dict[str, Any]]
+    divergencias: list[dict[str, Any]],
+    effects: list[dict[str, Any]],
+    limite_multiplicadores: list[dict[str, Any]] | None = None,
 ) -> bool:
     """Only explicitly declared parity fields can justify a divergence.
 
@@ -191,6 +193,22 @@ def _effects_explain(
         for effect in effects
         for field in (effect.get("campos_paridade") or [])
     }
+    for divergence in divergencias:
+        if divergence.get("campo") != "limite_aprovado_rs":
+            continue
+        factors = limite_multiplicadores or []
+        if not factors:
+            continue
+        try:
+            base = float(divergence.get("valor_oficial"))
+            actual = float(divergence.get("valor_politica"))
+            expected = base
+            for factor in factors:
+                expected *= float(factor.get("fator"))
+        except (TypeError, ValueError):
+            continue
+        if abs(actual - expected) <= max(abs(expected), 1.0) * 0.005:
+            explained.add("limite_aprovado_rs")
     return bool(fields) and fields <= explained
 
 
@@ -363,7 +381,11 @@ def avaliar_sombra(
         classe = "SEM_DADOS"
     elif not parity_divergencias:
         classe = "IGUAL"
-    elif _effects_explain(parity_divergencias, result.efeitos_novos):
+    elif _effects_explain(
+        parity_divergencias,
+        result.efeitos_novos,
+        getattr(result, "limite_multiplicadores", []),
+    ):
         classe = "ESPERADA"
     else:
         classe = "INESPERADA"

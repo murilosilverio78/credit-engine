@@ -207,7 +207,7 @@ def test_emitter_version_participates_in_idempotency_hash(monkeypatch):
 
     emitter.emit_findings("op", "documentos", database=db)
     emitter.emit_findings("op", "documentos", database=db)
-    monkeypatch.setattr(version, "EMITTER_VERSION", "14")
+    monkeypatch.setattr(version, "EMITTER_VERSION", "15")
     emitter.emit_findings("op", "documentos", database=db)
 
     assert db.rpc_inserted == [True, False, True]
@@ -219,7 +219,7 @@ def test_emitter_version_participates_in_idempotency_hash(monkeypatch):
         db.rpc_calls[0][1]["p_run"]["entrada_hash"]
         != db.rpc_calls[2][1]["p_run"]["entrada_hash"]
     )
-    assert db.rpc_calls[2][1]["p_run"]["versao_emissor"] == "14"
+    assert db.rpc_calls[2][1]["p_run"]["versao_emissor"] == "15"
 
 
 def test_hash_extras_are_limited_to_each_specialist(monkeypatch):

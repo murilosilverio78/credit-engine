@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 13 reconhece resultado de balancete ainda não incorporado ao PL.
+Version 14 detalha a proveniência de sanções para revisão de veto.
 """
 
-EMITTER_VERSION = "13"
+EMITTER_VERSION = "14"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

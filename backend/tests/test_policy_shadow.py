@@ -39,8 +39,12 @@ def _complete_parity_runs():
     }
 
 
-def _shadow_result(values):
-    return type("Result", (), {"as_dict": lambda self: values, "efeitos_novos": []})()
+def _shadow_result(values, *, limite_multiplicadores=None):
+    return type("Result", (), {
+        "as_dict": lambda self: values,
+        "efeitos_novos": [],
+        "limite_multiplicadores": limite_multiplicadores or [],
+    })()
 
 
 def test_shadow_classifies_missing_runs_and_dry_run_does_not_persist(monkeypatch):
@@ -201,6 +205,25 @@ def test_shadow_effect_with_explicit_parity_field_explains_divergence(monkeypatc
         "as_dict": lambda self: {field: (60 if field == "score" else None) for field in shadow._FIELDS},
         "efeitos_novos": [{"codigo": "efeito_futuro", "campos_paridade": ["score"]}],
     })())
+
+    assert shadow.avaliar_sombra("op", database=_Db())["classe_geral"] == "ESPERADA"
+
+
+def test_shadow_marks_limit_multiplier_projection_as_expected(monkeypatch):
+    values = {field: None for field in shadow._FIELDS}
+    values.update({"bloqueios": [], "limite_aprovado_rs": 385_000})
+    monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": {}, "regras": []})
+    monkeypatch.setattr(shadow, "montar_entrada", lambda *_args, **_kwargs: EntradaPolitica({}, {}, _complete_parity_runs(), set()))
+    monkeypatch.setattr(shadow, "_official", lambda *_args: ({"limite_aprovado_rs": 550_000}, date(2026, 1, 1)))
+    monkeypatch.setattr(shadow, "_set_pct_max_contrato", lambda *_args: None)
+    monkeypatch.setattr(
+        shadow,
+        "avaliar",
+        lambda *_args: _shadow_result(
+            values,
+            limite_multiplicadores=[{"codigo": "rating_d", "fator": 0.7}],
+        ),
+    )
 
     assert shadow.avaliar_sombra("op", database=_Db())["classe_geral"] == "ESPERADA"
 
