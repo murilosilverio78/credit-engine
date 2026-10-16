@@ -19,7 +19,7 @@ from app.services.pdf_texto import (
 )
 
 logger = structlog.get_logger()
-SCHEMA_VERSAO, MAX_ATTEMPTS, GLOBAL_TIMEOUT_SECONDS = 1, 3, 840
+SCHEMA_VERSAO, MAX_ATTEMPTS, GLOBAL_TIMEOUT_SECONDS = 2, 3, 840
 FAMILIAS = (
     "SPED_ECD",
     "BALANCO_DRE",
@@ -221,6 +221,7 @@ def _extraction_tool(familia: str) -> dict[str, Any]:
                     "veiculos",
                     "participacoes_societarias",
                     "aplicacoes_depositos",
+                    "especie",
                     "outros",
                 )
             },
@@ -229,6 +230,7 @@ def _extraction_tool(familia: str) -> dict[str, Any]:
                 "veiculos",
                 "participacoes_societarias",
                 "aplicacoes_depositos",
+                "especie",
                 "outros",
             ),
         )
@@ -447,6 +449,7 @@ def _extract_one(
                 client,
                 _extraction_tool(family),
                 "Extraia somente o schema. Datas devem ser ISO (AAAA-MM-DD; competencia AAAA-MM). "
+                "IRPF: grupo 06 codigo 10 ou dinheiro em especie vai em especie, nunca em aplicacoes_depositos. "
                 "IRPF nunca inclui endereco, banco, dependentes, pagamentos ou CPF completo.\n"
                 + text[:120000],
             )

@@ -1,6 +1,7 @@
 """Contratos puros do extrator financeiro; nao usam documentos reais."""
 
 from app.services.documentos_financeiros.service import (
+    SCHEMA_VERSAO,
     _consolidate,
     _manifest,
     _num,
@@ -87,6 +88,24 @@ def test_irpf_whitelist_descarta_campos_proibidos_devolvidos_pelo_modelo():
     assert extracted["dados"]["cpf_final"] == "909"
     assert "campo_extra" not in extracted
     assert "endereco" not in extracted["dados"]
+
+
+def test_schema_v2_separa_dinheiro_em_especie_de_aplicacoes():
+    extracted = _whitelist(
+        "IRPF",
+        {
+            "familia": "IRPF",
+            "dados": {
+                "bens_por_grupo": {
+                    "especie": {"valor": 368500, "trecho": "06 10 DINHEIRO EM ESPECIE"},
+                    "aplicacoes_depositos": {"valor": 0},
+                }
+            },
+        },
+    )
+    assert SCHEMA_VERSAO == 2
+    assert extracted["dados"]["bens_por_grupo"]["especie"]["valor"] == 368500
+    assert extracted["dados"]["bens_por_grupo"]["aplicacoes_depositos"]["valor"] == 0
 
 
 def test_consolidacao_escolhe_sped_e_calcula_indicadores():
