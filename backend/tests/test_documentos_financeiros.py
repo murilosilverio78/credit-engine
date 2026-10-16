@@ -3,6 +3,7 @@
 from app.services.documentos_financeiros.service import (
     _consolidate,
     _manifest,
+    _num,
     _pages,
     _safe_payload,
     _single,
@@ -184,3 +185,119 @@ def test_recencia_prioriza_anual_recente_e_faturamento_mais_recente():
     }
     assert not forbidden.intersection(item["codigo"] for item in result["verificacoes"])
     assert not forbidden.intersection(result["indicadores"])
+
+
+def test_data_brasileira_ordena_demonstracao_e_ausente_nao_vira_zero():
+    evidence = lambda value, **extra: {"valor": value, **extra}
+    old = {
+        "data_base": evidence("31/12/2024"),
+        "natureza": "anual",
+        "ativo_total": evidence(100),
+        "passivo_circulante": evidence(10),
+        "passivo_nao_circulante": evidence(10),
+        "patrimonio_liquido": evidence(80),
+    }
+    current = {**old, "data_base": evidence("31/12/2025")}
+    rows = [
+        {
+            "sha256": "a" * 64,
+            "familia": "SPED_ECD",
+            "status": "EXTRAIDO",
+            "payload": {"dados": {"exercicios": [old]}},
+        },
+        {
+            "sha256": "b" * 64,
+            "familia": "SPED_ECD",
+            "status": "EXTRAIDO",
+            "payload": {"dados": {"exercicios": [current]}},
+        },
+    ]
+    result = _consolidate(rows, "manifest")
+    assert result["demonstracoes"][0]["data_base"]["valor"] == "2025-12-31"
+    assert _num(evidence(0, ausente_no_documento=True)) is None
+
+
+def test_parcela_faltante_e_alavancagem_declarada():
+    evidence = lambda value, **extra: {"valor": value, **extra}
+    balance = {
+        "data_base": evidence("2025-12-31"),
+        "natureza": "anual",
+        "ativo_total": evidence(200),
+        "passivo_circulante": evidence(50),
+        "passivo_nao_circulante": evidence(50),
+        "patrimonio_liquido": evidence(100),
+    }
+    debt = {
+        "data_base": evidence("Setembro/2025"),
+        "total_declarado": evidence(300),
+        "credores": [
+            {
+                "saldo_devedor": evidence(300),
+                "parcela_mensal": evidence(0, ausente_no_documento=True),
+                "cessao_recebiveis": False,
+            }
+        ],
+    }
+    rows = [
+        {
+            "sha256": "a" * 64,
+            "familia": "SPED_ECD",
+            "status": "EXTRAIDO",
+            "payload": {"dados": {"exercicios": [balance]}},
+        },
+        {
+            "sha256": "b" * 64,
+            "familia": "ENDIVIDAMENTO_DECLARADO",
+            "status": "EXTRAIDO",
+            "payload": {"dados": debt},
+        },
+    ]
+    result = _consolidate(rows, "manifest")
+    assert result["indicadores"]["servico_divida_sobre_faturamento"] == {
+        "valor": None,
+        "motivo": "parcelas_nao_informadas",
+    }
+    assert result["indicadores"]["alavancagem_declarada"]["valor"] == 3
+    assert result["endividamento"]["data_base"]["valor"] == "2025-09-01"
+
+
+def test_divergencia_capital_social_e_participacao_irpf():
+    evidence = lambda value: {"valor": value}
+    balance = {
+        "data_base": evidence("2025-12-31"),
+        "natureza": "anual",
+        "capital_social": evidence(100),
+        "ativo_total": evidence(100),
+        "passivo_circulante": evidence(10),
+        "passivo_nao_circulante": evidence(10),
+        "patrimonio_liquido": evidence(80),
+    }
+    rows = [
+        {
+            "sha256": "a" * 64,
+            "familia": "SPED_ECD",
+            "status": "EXTRAIDO",
+            "payload": {"dados": {"exercicios": [balance]}},
+        },
+        {
+            "sha256": "b" * 64,
+            "familia": "CONTRATO_SOCIAL",
+            "status": "EXTRAIDO",
+            "payload": {
+                "dados": {
+                    "data_ultima_alteracao": evidence("2025-01-01"),
+                    "capital_social": evidence(130),
+                }
+            },
+        },
+        {
+            "sha256": "c" * 64,
+            "familia": "IRPF",
+            "status": "EXTRAIDO",
+            "payload": {"dados": {"participacoes": [{"valor": evidence(50)}]}},
+        },
+    ]
+    result = _consolidate(rows, "manifest")
+    assert {item["campo"] for item in result["divergencias"]}.issuperset(
+        {"capital_social", "participacao_socio_capital_social"}
+    )

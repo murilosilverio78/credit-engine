@@ -446,7 +446,8 @@ def _extract_one(
             raw, custo_b = _call(
                 client,
                 _extraction_tool(family),
-                "Extraia somente o schema. IRPF nunca inclui endereco, banco, dependentes, pagamentos ou CPF completo.\n"
+                "Extraia somente o schema. Datas devem ser ISO (AAAA-MM-DD; competencia AAAA-MM). "
+                "IRPF nunca inclui endereco, banco, dependentes, pagamentos ou CPF completo.\n"
                 + text[:120000],
             )
             good = _whitelist(family, raw)
@@ -506,6 +507,9 @@ def _extract_one(
 
 
 def _num(v: Any) -> float | None:
+    """Converte evidencia numerica sem transformar ausencia em zero."""
+    if isinstance(v, dict) and v.get("ausente_no_documento") is True:
+        return None
     v = v.get("valor") if isinstance(v, dict) else v
     try:
         return float(v)
@@ -525,11 +529,77 @@ def _metric(n: float | None, d: float | None, motivo: str) -> dict[str, Any]:
 
 
 def _as_date(value: Any) -> date | None:
+    """Aceita datas ISO, brasileiras e mes/ano em portugues."""
+    if isinstance(value, dict) and value.get("ausente_no_documento") is True:
+        return None
     value = value.get("valor") if isinstance(value, dict) else value
+    text = str(value or "").strip().lower()
+    months = {
+        "janeiro": 1,
+        "fevereiro": 2,
+        "marco": 3,
+        "março": 3,
+        "abril": 4,
+        "maio": 5,
+        "junho": 6,
+        "julho": 7,
+        "agosto": 8,
+        "setembro": 9,
+        "outubro": 10,
+        "novembro": 11,
+        "dezembro": 12,
+    }
+    for name, month in months.items():
+        match = re.fullmatch(rf"{name}\s*/\s*(\d{{4}})", text)
+        if match:
+            return date(int(match.group(1)), month, 1)
+    for pattern in (r"(\d{2})/(\d{2})/(\d{4})", r"(\d{4})-(\d{2})-(\d{2})"):
+        match = re.fullmatch(pattern, text)
+        if match:
+            groups = [int(group) for group in match.groups()]
+            return (
+                date(groups[2], groups[1], groups[0]) if "/" in text else date(*groups)
+            )
+    match = re.fullmatch(r"(\d{2})/(\d{4})", text)
+    if match:
+        return date(int(match.group(2)), int(match.group(1)), 1)
+    match = re.fullmatch(r"(\d{4})-(\d{2})", text)
+    if match:
+        return date(int(match.group(1)), int(match.group(2)), 1)
     try:
-        return date.fromisoformat(str(value)[:10])
+        return date.fromisoformat(text[:10])
     except (TypeError, ValueError):
         return None
+
+
+DATE_FIELDS = {
+    "data_base",
+    "data_emissao",
+    "competencia",
+    "data_ultima_alteracao",
+    "vencimento_final",
+}
+
+
+def _normalize_dates(value: Any, field: str | None = None) -> Any:
+    """Normaliza evidencias de data sem alterar sua proveniencia."""
+    if isinstance(value, list):
+        return [_normalize_dates(item, field) for item in value]
+    if not isinstance(value, dict):
+        return value
+    normalized = {key: _normalize_dates(item, key) for key, item in value.items()}
+    if field in DATE_FIELDS and "valor" in normalized:
+        parsed = _as_date(normalized)
+        if parsed:
+            normalized["valor"] = (
+                parsed.isoformat()[:7] if field == "competencia" else parsed.isoformat()
+            )
+    return normalized
+
+
+def _strict_sum(values: list[float | None]) -> float | None:
+    """Soma somente se todos os valores requeridos foram informados."""
+    return None if any(value is None for value in values) else sum(values)
 
 
 def _consolidate(
@@ -546,7 +616,7 @@ def _consolidate(
         if row.get("status") != "EXTRAIDO":
             continue
         p = row.get("payload") or {}
-        d = p.get("dados") or {}
+        d = _normalize_dates(p.get("dados") or {})
         f = row.get("familia")
         c = p.get("confianca_fonte", "BAIXA")
         if f in {"SPED_ECD", "BALANCO_DRE", "BALANCETE", "BALANCO_ABERTURA"}:
@@ -626,7 +696,7 @@ def _consolidate(
     )
     fat = revenue[0][0] if revenue else {}
     meses = fat.get("meses") or []
-    soma = sum(_num(item.get("valor")) or 0 for item in meses)
+    soma = _strict_sum([_num(item.get("valor")) for item in meses]) if meses else None
     declarado = _num(fat.get("total_declarado"))
     cessoes = [
         item
@@ -639,14 +709,21 @@ def _consolidate(
             "nome": x.get("nome"),
             "cpf_final": x.get("cpf_final"),
             "ano": _num(x.get("ano_exercicio")),
-            "renda": (_num(x.get("rendimentos_tributaveis")) or 0)
-            + (_num(x.get("rendimentos_isentos")) or 0),
+            "renda": _strict_sum(
+                [
+                    _num(x.get("rendimentos_tributaveis")),
+                    _num(x.get("rendimentos_isentos")),
+                ]
+            ),
             "bens": _num(x.get("bens_direitos_total_atual")),
             "dividas": _num(x.get("dividas_onus_atual")),
             "patrimonio_liquido_declarado": (
-                _num(x.get("bens_direitos_total_atual")) or 0
-            )
-            - (_num(x.get("dividas_onus_atual")) or 0),
+                _num(x.get("bens_direitos_total_atual"))
+                - _num(x.get("dividas_onus_atual"))
+                if _num(x.get("bens_direitos_total_atual")) is not None
+                and _num(x.get("dividas_onus_atual")) is not None
+                else None
+            ),
             "participacoes": x.get("participacoes") or [],
         }
         for x in irpf
@@ -655,6 +732,42 @@ def _consolidate(
         (item for item in demos if item.get("natureza") == "anual"),
         demos[0] if demos else {},
     )
+    societario = socials[0] if socials else None
+    capital_balanco = _num(cur.get("capital_social"))
+    capital_societario = _num((societario or {}).get("capital_social"))
+    if (
+        capital_balanco not in (None, 0)
+        and capital_societario is not None
+        and abs(capital_balanco - capital_societario) / abs(capital_balanco) > 0.05
+    ):
+        diverg.append(
+            {
+                "campo": "capital_social",
+                "fonte_a": "balanco",
+                "valor_a": capital_balanco,
+                "fonte_b": "contrato_social",
+                "valor_b": capital_societario,
+            }
+        )
+    for avalista in aval:
+        for participacao in avalista["participacoes"]:
+            participacao_valor = _num(participacao.get("valor"))
+            if (
+                capital_societario not in (None, 0)
+                and participacao_valor is not None
+                and abs(participacao_valor - capital_societario)
+                / abs(capital_societario)
+                > 0.05
+            ):
+                diverg.append(
+                    {
+                        "campo": "participacao_socio_capital_social",
+                        "fonte_a": "irpf",
+                        "valor_a": participacao_valor,
+                        "fonte_b": "contrato_social",
+                        "valor_b": capital_societario,
+                    }
+                )
     ativo, pc, pnc, pl = map(
         _num,
         [
@@ -664,11 +777,14 @@ def _consolidate(
             cur.get("patrimonio_liquido"),
         ],
     )
-    parcela = sum(
-        _num(item.get("parcela_mensal")) or 0
-        for debt in debts
-        for item in debt["dados"].get("credores", [])
+    creditors = [item for debt in debts for item in debt["dados"].get("credores", [])]
+    debt_values = [_num(item.get("parcela_mensal")) for item in creditors]
+    missing_installments = any(
+        (_num(item.get("saldo_devedor")) or 0) > 0
+        and _num(item.get("parcela_mensal")) is None
+        for item in creditors
     )
+    parcela = None if missing_installments else _strict_sum(debt_values)
 
     def check(code, v, detail):
         return {
@@ -707,13 +823,39 @@ def _consolidate(
         check(
             "soma_faturamento",
             None
-            if declarado is None
+            if declarado is None or soma is None
             else abs(soma - declarado) <= max(declarado, 1) * 0.01,
             "soma mensal versus declarado",
         ),
         check("balanco_atual", balanco_atual, "balanco ate 18 meses"),
         check("faturamento_atual", faturamento_atual, "faturamento ate 3 meses"),
     ]
+    scr = next((item["dados"] for item in debts if item["familia"] == "SCR"), None)
+    declared = next(
+        (
+            item["dados"]
+            for item in debts
+            if item["familia"] == "ENDIVIDAMENTO_DECLARADO"
+        ),
+        None,
+    )
+    if scr:
+        declared_total = _strict_sum(
+            [
+                _num(scr.get("carteira_a_vencer")),
+                _num(scr.get("vencido")),
+                _num(scr.get("prejuizo")),
+            ]
+        )
+        declared_base = scr.get("data_base")
+    else:
+        declared_total = _num((declared or {}).get("total_declarado"))
+        declared_base = (declared or {}).get("data_base")
+    balance_debt = (
+        _strict_sum([_num(cur.get("emprestimos_cp")), _num(cur.get("emprestimos_lp"))])
+        if cur
+        else None
+    )
     inds = {
         "liquidez_corrente": _metric(
             _num(cur.get("ativo_circulante")),
@@ -721,12 +863,12 @@ def _consolidate(
             "ativo_circulante_ou_passivo_circulante_ausente",
         ),
         "alavancagem": _metric(
-            (_num(cur.get("emprestimos_cp")) or 0)
-            + (_num(cur.get("emprestimos_lp")) or 0)
-            if cur
-            else None,
+            balance_debt,
             pl,
             "emprestimos_ou_PL_ausente",
+        ),
+        "alavancagem_declarada": _metric(
+            declared_total, pl, "endividamento_declarado_ou_PL_ausente"
         ),
         "margem_liquida": _metric(
             _num(cur.get("resultado_liquido")),
@@ -734,7 +876,11 @@ def _consolidate(
             "resultado_ou_receita_ausente",
         ),
         "servico_divida_sobre_faturamento": _metric(
-            parcela, soma / 12 if soma else None, "parcelas_ou_faturamento_ausente"
+            parcela,
+            soma / 12 if soma else None,
+            "parcelas_nao_informadas"
+            if missing_installments
+            else "parcelas_ou_faturamento_ausente",
         ),
     }
     return {
@@ -758,9 +904,14 @@ def _consolidate(
         }
         if fat
         else None,
-        "endividamento": {"fontes": debts, "cessoes_recebiveis": cessoes},
+        "endividamento": {
+            "fontes": debts,
+            "cessoes_recebiveis": cessoes,
+            "total_declarado": declared_total,
+            "data_base": declared_base,
+        },
         "avalistas": aval,
-        "societario": socials[0] if socials else None,
+        "societario": societario,
         "verificacoes": checks,
         "indicadores": inds,
     }
