@@ -531,6 +531,16 @@ def _metric(n: float | None, d: float | None, motivo: str) -> dict[str, Any]:
     }
 
 
+def _minimum_evidence_confidence(*values: Any) -> str:
+    """Returns the least confidence declared by the calculation inputs."""
+    confidences = [
+        value.get("confianca") if isinstance(value, dict) else value
+        for value in values
+        if value is not None
+    ]
+    return min(confidences, key=_rank) if confidences else "BAIXA"
+
+
 def _as_date(value: Any) -> date | None:
     """Aceita datas ISO, brasileiras e mes/ano em portugues."""
     if isinstance(value, dict) and value.get("ausente_no_documento") is True:
@@ -630,11 +640,11 @@ def _consolidate(
         elif f == "FATURAMENTO":
             revenue.append((d, c))
         elif f in {"SCR", "ENDIVIDAMENTO_DECLARADO"}:
-            debts.append({"familia": f, "dados": d})
+            debts.append({"familia": f, "dados": d, "confianca_fonte": c})
         elif f == "IRPF":
-            irpf.append(d)
+            irpf.append({"dados": d, "confianca_fonte": c})
         elif f == "CONTRATO_SOCIAL":
-            socials.append(d)
+            socials.append({"dados": d, "confianca_fonte": c})
     demos = []
     diverg = []
     preference = {
@@ -694,10 +704,10 @@ def _consolidate(
         reverse=True,
     )
     socials.sort(
-        key=lambda item: _as_date(item.get("data_ultima_alteracao")) or date.min,
+        key=lambda item: _as_date(item["dados"].get("data_ultima_alteracao")) or date.min,
         reverse=True,
     )
-    fat = revenue[0][0] if revenue else {}
+    fat, faturamento_confianca = revenue[0] if revenue else ({}, "BAIXA")
     meses = fat.get("meses") or []
     soma = _strict_sum([_num(item.get("valor")) for item in meses]) if meses else None
     declarado = _num(fat.get("total_declarado"))
@@ -711,6 +721,7 @@ def _consolidate(
         {
             "nome": x.get("nome"),
             "cpf_final": x.get("cpf_final"),
+            "confianca_fonte": source.get("confianca_fonte", "BAIXA"),
             "ano": _num(x.get("ano_exercicio")),
             "renda": _strict_sum(
                 [
@@ -740,13 +751,18 @@ def _consolidate(
                 for item in (x.get("participacoes") or [])
             ],
         }
-        for x in irpf
+        for source in irpf
+        for x in [source["dados"]]
     ]
     cur = next(
         (item for item in demos if item.get("natureza") == "anual"),
         demos[0] if demos else {},
     )
-    societario = socials[0] if socials else None
+    societario = (
+        {**socials[0]["dados"], "confianca_fonte": socials[0]["confianca_fonte"]}
+        if socials
+        else None
+    )
     capital_balanco = _num(cur.get("capital_social"))
     capital_societario = _num((societario or {}).get("capital_social"))
     if (
@@ -800,7 +816,7 @@ def _consolidate(
     )
     parcela = None if missing_installments else _strict_sum(debt_values)
 
-    def check(code, v, detail):
+    def check(code, v, detail, confidence="BAIXA"):
         return {
             "codigo": code,
             "resultado": "OK"
@@ -809,6 +825,7 @@ def _consolidate(
             if v is False
             else "NAO_VERIFICADO",
             "detalhe": detail,
+            "confianca": confidence,
         }
 
     base = _as_date(cur.get("data_base"))
@@ -835,6 +852,13 @@ def _consolidate(
             "PNC inexistente"
             if pnc is None and None not in (ativo, pc, pl)
             else "ativo = passivo + PL",
+            _minimum_evidence_confidence(
+                cur.get("confianca"),
+                cur.get("ativo_total"),
+                cur.get("passivo_circulante"),
+                cur.get("passivo_nao_circulante"),
+                cur.get("patrimonio_liquido"),
+            ),
         ),
         check(
             "soma_faturamento",
@@ -842,9 +866,24 @@ def _consolidate(
             if declarado is None or soma is None
             else abs(soma - declarado) <= max(declarado, 1) * 0.01,
             "soma mensal versus declarado",
+            _minimum_evidence_confidence(
+                faturamento_confianca,
+                fat.get("total_declarado"),
+                *[month.get("valor") for month in meses],
+            ),
         ),
-        check("balanco_atual", balanco_atual, "balanco ate 18 meses"),
-        check("faturamento_atual", faturamento_atual, "faturamento ate 3 meses"),
+        check(
+            "balanco_atual",
+            balanco_atual,
+            "balanco ate 18 meses",
+            _minimum_evidence_confidence(cur.get("confianca"), cur.get("data_base")),
+        ),
+        check(
+            "faturamento_atual",
+            faturamento_atual,
+            "faturamento ate 3 meses",
+            _minimum_evidence_confidence(faturamento_confianca, fat.get("data_emissao")),
+        ),
     ]
     scr = next((item["dados"] for item in debts if item["familia"] == "SCR"), None)
     declared = next(
@@ -899,6 +938,33 @@ def _consolidate(
             else "parcelas_ou_faturamento_ausente",
         ),
     }
+    debt_confidence = _minimum_evidence_confidence(
+        *(item.get("confianca_fonte") for item in debts)
+    )
+    inds["liquidez_corrente"]["confianca"] = _minimum_evidence_confidence(
+        cur.get("confianca"),
+        cur.get("ativo_circulante"),
+        cur.get("passivo_circulante"),
+    )
+    inds["alavancagem"]["confianca"] = _minimum_evidence_confidence(
+        cur.get("confianca"),
+        cur.get("emprestimos_cp"),
+        cur.get("emprestimos_lp"),
+        cur.get("patrimonio_liquido"),
+    )
+    inds["alavancagem_declarada"]["confianca"] = _minimum_evidence_confidence(
+        debt_confidence,
+        cur.get("confianca"),
+        cur.get("patrimonio_liquido"),
+    )
+    inds["margem_liquida"]["confianca"] = _minimum_evidence_confidence(
+        cur.get("confianca"),
+        cur.get("resultado_liquido"),
+        cur.get("receita_liquida"),
+    )
+    inds["servico_divida_sobre_faturamento"]["confianca"] = (
+        _minimum_evidence_confidence(debt_confidence, faturamento_confianca)
+    )
     return {
         "schema_versao": SCHEMA_VERSAO,
         "manifest_documentos": manifest,
@@ -908,6 +974,7 @@ def _consolidate(
                 "familia": r.get("familia"),
                 "status": r.get("status"),
                 "ano_referencia": r.get("ano_referencia"),
+                "confianca_fonte": (r.get("payload") or {}).get("confianca_fonte"),
             }
             for r in rows
         ],
@@ -917,6 +984,12 @@ def _consolidate(
             "meses": meses,
             "soma_calculada": soma,
             "total_declarado": fat.get("total_declarado"),
+            "confianca_fonte": faturamento_confianca,
+            "confianca": _minimum_evidence_confidence(
+                faturamento_confianca,
+                fat.get("total_declarado"),
+                *[month.get("valor") for month in meses],
+            ),
         }
         if fat
         else None,

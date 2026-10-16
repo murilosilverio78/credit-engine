@@ -16,6 +16,54 @@ def _confidence(value: Any, fallback: Confianca = Confianca.BAIXA) -> Confianca:
     return Confianca(value) if value in Confianca.__members__ else fallback
 
 
+def _minimum_confidence(*values: Any) -> Confianca:
+    """Returns the least certain available evidence confidence."""
+    confidences = [_confidence(value) for value in values if value is not None]
+    return min(confidences, key=lambda item: _rank(item)) if confidences else Confianca.BAIXA
+
+
+def _rank(value: Confianca) -> int:
+    return {Confianca.ALTA: 3, Confianca.MEDIA: 2, Confianca.BAIXA: 1}[value]
+
+
+def _field_confidence(field: Any, fallback: Confianca) -> Confianca:
+    return _confidence(field.get("confianca"), fallback) if isinstance(field, dict) else fallback
+
+
+def _source_confidence(payload: dict[str, Any], family: str | None) -> Confianca:
+    if not family:
+        return Confianca.BAIXA
+    confidences = [
+        item.get("confianca_fonte")
+        for item in payload.get("documentos", [])
+        if item.get("familia") == family
+    ]
+    confidences.extend(
+        item.get("confianca")
+        for item in payload.get("demonstracoes", [])
+        if item.get("fonte") == family
+    )
+    if family == "FATURAMENTO":
+        confidences.append((payload.get("faturamento_12m") or {}).get("confianca_fonte"))
+    if family == "CONTRATO_SOCIAL":
+        confidences.append((payload.get("societario") or {}).get("confianca_fonte"))
+    return _minimum_confidence(*confidences)
+
+
+def _resolved_confidence(
+    payload: dict[str, Any],
+    family: str | None,
+    field: Any,
+    state: Estado,
+) -> Confianca:
+    """Applies the financial evidence-confidence policy to one finding."""
+    if state == Estado.NAO_VERIFICADO:
+        return Confianca.BAIXA
+    source = _source_confidence(payload, family)
+    reading = _field_confidence(field, source)
+    return _minimum_confidence(source, reading) if state == Estado.NEGATIVO_CONFIRMADO else reading
+
+
 def _evidence(
     payload: dict[str, Any],
     family: str | None = None,
@@ -48,12 +96,21 @@ def _emit(
     *,
     fingerprint: str,
     state: Estado = Estado.CONFIRMADO,
-    confidence: Confianca = Confianca.MEDIA,
+    confidence: Confianca | None = None,
     family: str | None = None,
     field: dict[str, Any] | None = None,
     entity: str | None = None,
     pendencia: dict | None = None,
 ):
+    if state == Estado.NAO_VERIFICADO:
+        pendencia = pendencia or {"motivo": "insumos_nao_disponiveis"}
+    resolved_confidence = (
+        Confianca.BAIXA
+        if state == Estado.NAO_VERIFICADO
+        else confidence
+        if confidence is not None
+        else _resolved_confidence(payload, family, field, state)
+    )
     candidate = finding(
         codigo,
         escopo,
@@ -62,7 +119,7 @@ def _emit(
         path=codigo,
         fingerprint=fingerprint,
         state=state,
-        confidence=confidence,
+        confidence=resolved_confidence,
         entity=entity,
         pendencia=pendencia,
     )
@@ -147,6 +204,7 @@ def emit_financeiro(
             else None,
         )
     )
+    current = (payload.get("demonstracoes") or [{}])[0]
     checks = {item.get("codigo"): item for item in payload.get("verificacoes", [])}
     for code, finding_code in (("balanco_fecha", "balanco_inconsistente"),):
         item = checks.get(code, {})
@@ -167,6 +225,11 @@ def emit_financeiro(
                 payload,
                 fingerprint=fingerprint,
                 state=state,
+                family=current.get("fonte"),
+                field=item,
+                pendencia={"motivo": "balanco_nao_verificavel"}
+                if state == Estado.NAO_VERIFICADO
+                else None,
             )
         )
     stale = [
@@ -202,7 +265,8 @@ def emit_financeiro(
                 payload,
                 fingerprint=fingerprint,
                 state=state,
-                pendencia={"motivo": item.get("motivo")}
+                confidence=_confidence(item.get("confianca")),
+                pendencia={"motivo": item.get("motivo") or "indicador_nao_calculavel"}
                 if state == Estado.NAO_VERIFICADO
                 else None,
             )
@@ -219,6 +283,11 @@ def emit_financeiro(
             state=Estado.CONFIRMADO
             if revenue_value is not None
             else Estado.NAO_VERIFICADO,
+            family="FATURAMENTO",
+            field=revenue,
+            pendencia={"motivo": "faturamento_nao_informado"}
+            if revenue_value is None
+            else None,
         )
     )
     for divergence in payload.get("divergencias") or []:
@@ -270,9 +339,13 @@ def emit_financeiro(
             else Estado.NEGATIVO_CONFIRMADO
             if recent is not None and variation is not None
             else Estado.NAO_VERIFICADO,
+            family="CONTRATO_SOCIAL",
+            field=societario.get("capital_social"),
+            pendencia={"motivo": "capital_social_ou_data_alteracao_ausente"}
+            if recent is None or variation is None
+            else None,
         )
     )
-    current = (payload.get("demonstracoes") or [{}])[0]
     pl = _num(current.get("patrimonio_liquido"))
     output.append(
         _emit(
@@ -288,6 +361,9 @@ def emit_financeiro(
             else Estado.NAO_VERIFICADO,
             family=current.get("fonte"),
             field=current.get("patrimonio_liquido"),
+            pendencia={"motivo": "patrimonio_liquido_ausente"}
+            if pl is None
+            else None,
         )
     )
     try:
@@ -302,7 +378,11 @@ def emit_financeiro(
     keys.add(_contract_key(cedido.get("numero_contrato_empenho")))
     keys.discard(None)
     same, other = [], []
-    for debt in (payload.get("endividamento") or {}).get("fontes", []):
+    debt_sources = (payload.get("endividamento") or {}).get("fontes", [])
+    debt_confidence = _minimum_confidence(
+        *(debt.get("confianca_fonte") for debt in debt_sources)
+    )
+    for debt in debt_sources:
         for creditor in debt.get("dados", {}).get("credores", []):
             if creditor.get("cessao_recebiveis"):
                 reference = creditor.get("contrato_cedido_referencia")
@@ -326,11 +406,11 @@ def emit_financeiro(
             else Estado.NEGATIVO_CONFIRMADO
             if {"SCR", "ENDIVIDAMENTO_DECLARADO"}.intersection(families)
             else Estado.NAO_VERIFICADO,
-            confidence=Confianca.ALTA
-            if same and not any(item.get("ambigua") for item in same)
-            else Confianca.MEDIA,
+            confidence=debt_confidence,
             pendencia={"motivo": "confirmar contratos cedidos"}
             if any(item.get("ambigua") for item in same)
+            else {"motivo": "endividamento_nao_extraido"}
+            if not {"SCR", "ENDIVIDAMENTO_DECLARADO"}.intersection(families)
             else None,
         )
     )
@@ -342,7 +422,7 @@ def emit_financeiro(
             payload,
             fingerprint=fingerprint,
             state=Estado.CONFIRMADO if other else Estado.NEGATIVO_CONFIRMADO,
-            confidence=Confianca.MEDIA,
+            confidence=debt_confidence,
         )
     )
     recursos = snapshots.get("recursos_recebidos") or {}
@@ -365,6 +445,11 @@ def emit_financeiro(
             else Estado.NEGATIVO_CONFIRMADO
             if revenue_value is not None and received is not None
             else Estado.NAO_VERIFICADO,
+            family="FATURAMENTO",
+            field=revenue,
+            pendencia={"motivo": "faturamento_ou_recursos_recebidos_nao_concluido"}
+            if revenue_value is None or received is None
+            else None,
         )
     )
     output.append(
@@ -379,6 +464,11 @@ def emit_financeiro(
             state=Estado.CONFIRMADO
             if received is not None and revenue_value
             else Estado.NAO_VERIFICADO,
+            family="FATURAMENTO",
+            field=revenue,
+            pendencia={"motivo": "faturamento_ou_recursos_recebidos_nao_concluido"}
+            if revenue_value is None or received is None
+            else None,
         )
     )
     output.append(
@@ -393,6 +483,13 @@ def emit_financeiro(
             state=Estado.CONFIRMADO
             if contracted is not None and revenue_value
             else Estado.NAO_VERIFICADO,
+            family="FATURAMENTO",
+            field=revenue,
+            pendencia={"motivo": "contratos_pncp_nao_concluido"}
+            if contracted is None
+            else {"motivo": "faturamento_nao_informado"}
+            if revenue_value is None
+            else None,
         )
     )
     brasil = snapshots.get("brasil_api") or {}
@@ -433,6 +530,9 @@ def emit_financeiro(
             fingerprint=fingerprint,
             state=simple_state,
             confidence=Confianca.MEDIA,
+            pendencia={"motivo": "brasil_api_nao_concluido"}
+            if simple_state == Estado.NAO_VERIFICADO
+            else None,
         )
     )
     avalistas = payload.get("avalistas") or []
@@ -481,9 +581,15 @@ def emit_financeiro(
                 "pl_ajustado": adjusted_value,
                 "especie": especie,
                 "quotas_cedente": quotas_self,
+                "nome": item.get("nome"),
+                "cpf_final": item.get("cpf_final"),
+                "confianca_fonte": item.get("confianca_fonte"),
             }
         )
     coverage = sum(item["pl_ajustado"] for item in adjusted)
+    aval_confidence = _minimum_confidence(
+        *(item.get("confianca_fonte") for item in adjusted)
+    )
     output.append(
         _emit(
             "aval_cobertura",
@@ -501,10 +607,15 @@ def emit_financeiro(
             state=Estado.CONFIRMADO
             if operation_value and avalistas
             else Estado.NAO_VERIFICADO,
+            confidence=aval_confidence,
+            pendencia={"motivo": "avalistas_ou_valor_enquadrado_ausente"}
+            if not operation_value or not avalistas
+            else None,
         )
     )
     non_verifiable = [
         {
+            "nome": avalista.get("nome"),
             "cpf_final": avalista.get("cpf_final"),
             "pct_especie": avalista["especie"]
             / max(_num(avalista["pl_declarado"]) or 1, 1),
@@ -523,6 +634,10 @@ def emit_financeiro(
             payload,
             fingerprint=fingerprint,
             state=Estado.CONFIRMADO if avalistas else Estado.NAO_VERIFICADO,
+            confidence=aval_confidence,
+            pendencia={"motivo": "irpf_avalista_nao_extraido"}
+            if not avalistas
+            else None,
         )
     )
     socios = (payload.get("societario") or {}).get("socios") or []

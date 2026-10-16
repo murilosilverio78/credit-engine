@@ -275,6 +275,7 @@ def test_parcela_faltante_e_alavancagem_declarada():
     assert result["indicadores"]["servico_divida_sobre_faturamento"] == {
         "valor": None,
         "motivo": "parcelas_nao_informadas",
+        "confianca": "BAIXA",
     }
     assert result["indicadores"]["alavancagem_declarada"]["valor"] == 3
     assert result["endividamento"]["data_base"]["valor"] == "2025-09-01"
