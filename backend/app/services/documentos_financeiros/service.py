@@ -31,6 +31,7 @@ FAMILIAS = (
     "INDICES",
     "IRPF",
     "CONTRATO_SOCIAL",
+    "ECF",
     "OUTRO",
 )
 DERIVADAS = {"INDICES", "OUTRO"}
@@ -73,6 +74,7 @@ KEYWORDS = {
     "SCR": ("carteira a vencer", "vencido", "limite"),
     "IRPF": ("bens e direitos", "dívidas e ônus", "rendimentos"),
     "CONTRATO_SOCIAL": ("capital social", "sócio", "administração"),
+    "ECF": ("escrituracao contabil fiscal", "ecf", "recibo"),
 }
 
 
@@ -268,6 +270,8 @@ def _extraction_tool(familia: str) -> dict[str, Any]:
             "uf_sede": {"type": ["string", "null"]},
         }
         data = _obj(fields, tuple(fields))
+    elif familia == "ECF":
+        data = _obj({}, ())
     else:
         data = _obj({}, ())
     return {
@@ -349,7 +353,7 @@ def _whitelist(family: str, value: dict[str, Any]) -> dict[str, Any]:
 def _confidence(c: dict[str, Any]) -> str:
     return (
         "ALTA"
-        if c.get("familia") == "SPED_ECD" and c.get("tem_recibo_rfb")
+        if c.get("tem_recibo_rfb")
         else "MEDIA"
         if c.get("assinado_contador")
         else "BAIXA"
@@ -533,11 +537,11 @@ def _metric(n: float | None, d: float | None, motivo: str) -> dict[str, Any]:
 
 def _minimum_evidence_confidence(*values: Any) -> str:
     """Returns the least confidence declared by the calculation inputs."""
-    confidences = [
-        value.get("confianca") if isinstance(value, dict) else value
-        for value in values
-        if value is not None
-    ]
+    confidences = []
+    for value in values:
+        confidence = value.get("confianca") if isinstance(value, dict) else value
+        if confidence in {"ALTA", "MEDIA", "BAIXA"}:
+            confidences.append(confidence)
     return min(confidences, key=_rank) if confidences else "BAIXA"
 
 
@@ -620,8 +624,8 @@ def _consolidate(
 ) -> dict[str, Any]:
     """Consolida somente fatos extraidos dos documentos do cliente."""
     config = config or {}
-    exercises: dict[str, list[tuple[dict[str, Any], str, str]]] = {}
-    revenue: list[tuple[dict[str, Any], str]] = []
+    exercises: dict[str, list[tuple[dict[str, Any], str, str, dict[str, Any]]]] = {}
+    revenue: list[tuple[dict[str, Any], str, dict[str, Any]]] = []
     debts: list[dict[str, Any]] = []
     irpf: list[dict[str, Any]] = []
     socials: list[dict[str, Any]] = []
@@ -632,19 +636,20 @@ def _consolidate(
         d = _normalize_dates(p.get("dados") or {})
         f = row.get("familia")
         c = p.get("confianca_fonte", "BAIXA")
+        source = {"sha256": row.get("sha256"), "familia": f, "confianca": c}
         if f in {"SPED_ECD", "BALANCO_DRE", "BALANCETE", "BALANCO_ABERTURA"}:
             for x in d.get("exercicios", []):
                 exercises.setdefault(
                     str((x.get("data_base") or {}).get("valor")), []
-                ).append((x, f, c))
+                ).append((x, f, c, source))
         elif f == "FATURAMENTO":
-            revenue.append((d, c))
+            revenue.append((d, c, source))
         elif f in {"SCR", "ENDIVIDAMENTO_DECLARADO"}:
-            debts.append({"familia": f, "dados": d, "confianca_fonte": c})
+            debts.append({"familia": f, "dados": d, **source})
         elif f == "IRPF":
-            irpf.append({"dados": d, "confianca_fonte": c})
+            irpf.append({"dados": d, **source})
         elif f == "CONTRATO_SOCIAL":
-            socials.append({"dados": d, "confianca_fonte": c})
+            socials.append({"dados": d, **source})
     demos = []
     diverg = []
     preference = {
@@ -655,31 +660,41 @@ def _consolidate(
     }
     for year, items in exercises.items():
         items.sort(key=lambda x: (_rank(x[2]), preference[x[1]]), reverse=True)
-        x, f, c = items[0]
+        x, f, c, source = items[0]
         demos.append(
             {
                 "data_base": x.get("data_base"),
                 "natureza": x.get("natureza"),
                 "fonte": f,
                 "confianca": c,
+                "sha256": source.get("sha256"),
+                "familia": source.get("familia"),
                 **{k: x.get(k) for k in BALANCE},
             }
         )
         for k in BALANCE:
             vals = [
-                (source, _num(item.get(k)))
-                for item, source, _ in items
+                (family, _num(item.get(k)), _minimum_evidence_confidence(confidence, item.get(k)), meta)
+                for item, family, confidence, meta in items
                 if _num(item.get(k)) is not None
             ]
             if (
                 len(vals) > 1
-                and min(v for _, v in vals)
-                and (max(v for _, v in vals) - min(v for _, v in vals))
-                / min(v for _, v in vals)
+                and min(value for _, value, _, _ in vals)
+                and (max(value for _, value, _, _ in vals) - min(value for _, value, _, _ in vals))
+                / min(value for _, value, _, _ in vals)
                 > 0.05
             ):
                 diverg.append(
-                    {"exercicio": year, "campo": k, "fontes": [s for s, _ in vals]}
+                    {
+                        "exercicio": year,
+                        "campo": k,
+                        "fontes": [family for family, _, _, _ in vals],
+                        "sha256": [meta.get("sha256") for _, _, _, meta in vals],
+                        "confianca": _minimum_evidence_confidence(
+                            *(confidence for _, _, confidence, _ in vals)
+                        ),
+                    }
                 )
     demos.sort(
         key=lambda item: (
@@ -707,7 +722,7 @@ def _consolidate(
         key=lambda item: _as_date(item["dados"].get("data_ultima_alteracao")) or date.min,
         reverse=True,
     )
-    fat, faturamento_confianca = revenue[0] if revenue else ({}, "BAIXA")
+    fat, faturamento_confianca, faturamento_source = revenue[0] if revenue else ({}, "BAIXA", {})
     meses = fat.get("meses") or []
     soma = _strict_sum([_num(item.get("valor")) for item in meses]) if meses else None
     declarado = _num(fat.get("total_declarado"))
@@ -721,7 +736,13 @@ def _consolidate(
         {
             "nome": x.get("nome"),
             "cpf_final": x.get("cpf_final"),
-            "confianca_fonte": source.get("confianca_fonte", "BAIXA"),
+            "confianca": _minimum_evidence_confidence(
+                source.get("confianca"),
+                x.get("bens_direitos_total_atual"),
+                x.get("dividas_onus_atual"),
+            ),
+            "sha256": source.get("sha256"),
+            "familia": source.get("familia"),
             "ano": _num(x.get("ano_exercicio")),
             "renda": _strict_sum(
                 [
@@ -759,7 +780,7 @@ def _consolidate(
         demos[0] if demos else {},
     )
     societario = (
-        {**socials[0]["dados"], "confianca_fonte": socials[0]["confianca_fonte"]}
+        {**socials[0]["dados"], "confianca": socials[0]["confianca"]}
         if socials
         else None
     )
@@ -885,15 +906,17 @@ def _consolidate(
             _minimum_evidence_confidence(faturamento_confianca, fat.get("data_emissao")),
         ),
     ]
-    scr = next((item["dados"] for item in debts if item["familia"] == "SCR"), None)
-    declared = next(
+    scr_source = next((item for item in debts if item["familia"] == "SCR"), None)
+    declared_source = next(
         (
-            item["dados"]
+            item
             for item in debts
             if item["familia"] == "ENDIVIDAMENTO_DECLARADO"
         ),
         None,
     )
+    scr = (scr_source or {}).get("dados")
+    declared = (declared_source or {}).get("dados")
     if scr:
         declared_total = _strict_sum(
             [
@@ -938,9 +961,7 @@ def _consolidate(
             else "parcelas_ou_faturamento_ausente",
         ),
     }
-    debt_confidence = _minimum_evidence_confidence(
-        *(item.get("confianca_fonte") for item in debts)
-    )
+    debt_confidence = _minimum_evidence_confidence(*(item.get("confianca") for item in debts))
     inds["liquidez_corrente"]["confianca"] = _minimum_evidence_confidence(
         cur.get("confianca"),
         cur.get("ativo_circulante"),
@@ -965,6 +986,15 @@ def _consolidate(
     inds["servico_divida_sobre_faturamento"]["confianca"] = (
         _minimum_evidence_confidence(debt_confidence, faturamento_confianca)
     )
+    inds["liquidez_corrente"]["fonte"] = cur.get("fonte")
+    inds["alavancagem"]["fonte"] = cur.get("fonte")
+    inds["alavancagem_declarada"]["fonte"] = (
+        (scr_source or declared_source or {}).get("familia")
+    )
+    inds["margem_liquida"]["fonte"] = cur.get("fonte")
+    inds["servico_divida_sobre_faturamento"]["fonte"] = (
+        (scr_source or declared_source or {}).get("familia") or faturamento_source.get("familia")
+    )
     return {
         "schema_versao": SCHEMA_VERSAO,
         "manifest_documentos": manifest,
@@ -985,6 +1015,8 @@ def _consolidate(
             "soma_calculada": soma,
             "total_declarado": fat.get("total_declarado"),
             "confianca_fonte": faturamento_confianca,
+            "fonte": faturamento_source.get("familia"),
+            "sha256": faturamento_source.get("sha256"),
             "confianca": _minimum_evidence_confidence(
                 faturamento_confianca,
                 fat.get("total_declarado"),

@@ -46,7 +46,7 @@ def _source_confidence(payload: dict[str, Any], family: str | None) -> Confianca
     if family == "FATURAMENTO":
         confidences.append((payload.get("faturamento_12m") or {}).get("confianca_fonte"))
     if family == "CONTRATO_SOCIAL":
-        confidences.append((payload.get("societario") or {}).get("confianca_fonte"))
+        confidences.append((payload.get("societario") or {}).get("confianca"))
     return _minimum_confidence(*confidences)
 
 
@@ -298,6 +298,7 @@ def emit_financeiro(
                 divergence,
                 payload,
                 fingerprint=fingerprint,
+                confidence=_confidence(divergence.get("confianca")),
             )
         )
     societario = payload.get("societario") or {}
@@ -380,7 +381,7 @@ def emit_financeiro(
     same, other = [], []
     debt_sources = (payload.get("endividamento") or {}).get("fontes", [])
     debt_confidence = _minimum_confidence(
-        *(debt.get("confianca_fonte") for debt in debt_sources)
+        *(debt.get("confianca") or debt.get("confianca_fonte") for debt in debt_sources)
     )
     for debt in debt_sources:
         for creditor in debt.get("dados", {}).get("credores", []):
@@ -583,12 +584,12 @@ def emit_financeiro(
                 "quotas_cedente": quotas_self,
                 "nome": item.get("nome"),
                 "cpf_final": item.get("cpf_final"),
-                "confianca_fonte": item.get("confianca_fonte"),
+                "confianca": item.get("confianca") or item.get("confianca_fonte"),
             }
         )
     coverage = sum(item["pl_ajustado"] for item in adjusted)
     aval_confidence = _minimum_confidence(
-        *(item.get("confianca_fonte") for item in adjusted)
+        *(item.get("confianca") for item in adjusted)
     )
     output.append(
         _emit(

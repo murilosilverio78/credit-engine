@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 7 calibra confiança e pendências do especialista financeiro.
+Version 8 preserva proveniência e confiança dos insumos financeiros.
 """
 
-EMITTER_VERSION = "7"
+EMITTER_VERSION = "8"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

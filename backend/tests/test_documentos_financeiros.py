@@ -276,6 +276,7 @@ def test_parcela_faltante_e_alavancagem_declarada():
         "valor": None,
         "motivo": "parcelas_nao_informadas",
         "confianca": "BAIXA",
+        "fonte": "ENDIVIDAMENTO_DECLARADO",
     }
     assert result["indicadores"]["alavancagem_declarada"]["valor"] == 3
     assert result["endividamento"]["data_base"]["valor"] == "2025-09-01"
