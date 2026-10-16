@@ -384,8 +384,10 @@ def avaliar_sombra(
         "parametros_divergentes": [],
     }
     if aplicar:
-        database.table("policy_shadow_runs").insert(
-            {key: value for key, value in payload.items() if key != "policy_version"}
+        database.table("policy_shadow_runs").upsert(
+            {key: value for key, value in payload.items() if key != "policy_version"},
+            on_conflict="operation_id,policy_version_id,entrada_hash",
+            ignore_duplicates=True,
         ).execute()
     return payload
 

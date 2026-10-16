@@ -1,10 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 12 separa o bloco patrimonial da demonstração e exige insumos atuais
-para a decisão de política.
+Version 13 reconhece resultado de balancete ainda não incorporado ao PL.
 """
 
-EMITTER_VERSION = "12"
+EMITTER_VERSION = "13"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

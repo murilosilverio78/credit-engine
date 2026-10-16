@@ -14,6 +14,12 @@ class _InsertQuery:
         self.sink.append(payload)
         return self
 
+    def upsert(self, payload, *, on_conflict, ignore_duplicates):
+        keys = [key.strip() for key in on_conflict.split(",")]
+        if not any(all(item.get(key) == payload.get(key) for key in keys) for item in self.sink):
+            self.sink.append(payload)
+        return self
+
     def execute(self):
         return type("Response", (), {"data": []})()
 
@@ -47,6 +53,8 @@ def test_shadow_classifies_missing_runs_and_dry_run_does_not_persist(monkeypatch
     result = shadow.avaliar_sombra("op", database=db, aplicar=False)
     assert result["classe_geral"] == "SEM_DADOS"
     assert db.inserted == []
+    shadow.avaliar_sombra("op", database=db, aplicar=True)
+    assert len(db.inserted) == 1
     shadow.avaliar_sombra("op", database=db, aplicar=True)
     assert len(db.inserted) == 1
 

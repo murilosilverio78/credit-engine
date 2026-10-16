@@ -506,3 +506,40 @@ def test_mesmo_exercicio_mantem_bloco_patrimonial_em_uma_unica_fonte():
     assert demonstration["patrimonio_liquido"]["valor"] == 1_000_000
     assert demonstration["resultado_liquido"]["valor"] == 500_000
     assert result["verificacoes"][0]["resultado"] == "OK"
+
+
+def test_balancete_aberto_ajusta_pl_com_resultado_do_periodo():
+    def evidence(value):
+        return {"valor": value, "confianca": "ALTA"}
+
+    balancete = {
+        "data_base": evidence("2025-12-31"),
+        "natureza": "anual",
+        "ativo_total": evidence(15_967_242.97),
+        "passivo_circulante": evidence(2_279_482.71),
+        "passivo_nao_circulante": evidence(23_663.50),
+        "patrimonio_liquido": evidence(11_326_942.45),
+        "resultado_liquido": evidence(2_337_154.31),
+        "emprestimos_cp": evidence(1_366_409.676),
+        "emprestimos_lp": evidence(0),
+    }
+    result = _consolidate(
+        [
+            {
+                "sha256": "a" * 64,
+                "familia": "BALANCETE",
+                "status": "EXTRAIDO",
+                "payload": {"dados": {"exercicios": [balancete]}},
+            }
+        ],
+        "manifest",
+    )
+    demonstration = result["demonstracoes"][0]
+
+    assert demonstration["patrimonio_liquido"]["valor"] == 11_326_942.45
+    assert demonstration["patrimonio_liquido_ajustado"]["valor"] == 13_664_096.76
+    assert result["verificacoes"][0]["resultado"] == "OK"
+    assert result["verificacoes"][0]["detalhe"] == (
+        "resultado do período não incorporado ao PL"
+    )
+    assert result["indicadores"]["alavancagem"]["valor"] == 0.1

@@ -275,7 +275,7 @@ def _generic_effects(
     entrada: EntradaPolitica,
     rules: list[dict[str, Any]],
     trail: dict[str, list[dict[str, str | None]]],
-    rating: str,
+    rating: str | None,
     parametros: dict[str, Any],
     vetos: set[str] | None = None,
 ) -> dict[str, Any]:
@@ -390,6 +390,8 @@ def avaliar(
             vetos.append(str(found.codigo))
     missing_rating_specialists = _missing_rating_specialists(entrada)
     if missing_rating_specialists and not vetos:
+        generic = _generic_effects(entrada, regras, trail, None, parametros, set(vetos))
+        generic.pop("limite_fator")
         return ResultadoPolitica(
             None,
             None,
@@ -408,6 +410,7 @@ def avaliar(
             trail,
             status_decisao="DADOS_INSUFICIENTES",
             faltantes=missing_rating_specialists,
+            **generic,
         )
     idade = _finding(entrada, "idade_empresa_anos", trail, "saude_cadastral")
     capital = _finding(entrada, "capital_social_rs", trail, "saude_cadastral")
@@ -599,6 +602,8 @@ def avaliar(
     )
     score = round(max(0.0, round(merit_potential * factor, 1) - balance_penalty), 1)
     if vetos:
+        generic = _generic_effects(entrada, regras, trail, None, parametros, set(vetos))
+        generic.pop("limite_fator")
         gate_score = _number(parametros["score_bloqueio"])
         dimensions = {
             name: gate_score
@@ -631,6 +636,7 @@ def avaliar(
             trail,
             status_decisao="VETO",
             faltantes=missing_rating_specialists,
+            **generic,
         )
     rating = _rating(score, parametros["faixas_rating"])
     potential_rating = _rating(

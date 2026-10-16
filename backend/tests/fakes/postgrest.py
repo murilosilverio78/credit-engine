@@ -4,6 +4,7 @@ For tables captured from production, every literal column used by a query is
 validated before execution. Tables outside the fixture intentionally stay
 open, so focused tests may model temporary views without inventing schema.
 """
+
 from __future__ import annotations
 
 import json
@@ -105,8 +106,30 @@ class Query:
         self.rows.extend(value.copy() for value in values if isinstance(value, dict))
         return self
 
-    def upsert(self, payload: Any, **_kwargs: Any) -> "Query":
-        return self.insert(payload)
+    def upsert(self, payload: Any, **kwargs: Any) -> "Query":
+        self._validate_payload(payload)
+        values = payload if isinstance(payload, list) else [payload]
+        keys = [
+            key.strip()
+            for key in str(kwargs.get("on_conflict") or "").split(",")
+            if key.strip()
+        ]
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            existing = next(
+                (
+                    row
+                    for row in self.rows
+                    if keys and all(row.get(key) == value.get(key) for key in keys)
+                ),
+                None,
+            )
+            if existing is None:
+                self.rows.append(value.copy())
+            elif not kwargs.get("ignore_duplicates"):
+                existing.update(value)
+        return self
 
     def update(self, payload: dict[str, Any]) -> "Query":
         self._validate_payload(payload)
@@ -129,6 +152,7 @@ class Query:
                 if operator == "lt" and not (actual is not None and actual < value):
                     return False
             return True
+
         return [row for row in self.rows if matches(row)]
 
     def execute(self):
@@ -152,7 +176,11 @@ class Rpc:
 
 
 class Postgrest:
-    def __init__(self, tables: dict[str, list[dict[str, Any]]] | None = None, rpc_data: Any = None):
+    def __init__(
+        self,
+        tables: dict[str, list[dict[str, Any]]] | None = None,
+        rpc_data: Any = None,
+    ):
         self.tables = tables or {}
         self.rpc_data = rpc_data if rpc_data is not None else []
         self.rpc_calls: list[tuple[str, dict[str, Any] | None]] = []

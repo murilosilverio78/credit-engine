@@ -380,7 +380,15 @@ def emit_financeiro(
             else None,
         )
     )
-    pl = _num(current.get("patrimonio_liquido"))
+    pl_field = current.get("patrimonio_liquido_ajustado") or current.get(
+        "patrimonio_liquido"
+    )
+    pl_field_name = (
+        "patrimonio_liquido_ajustado"
+        if current.get("patrimonio_liquido_ajustado")
+        else "patrimonio_liquido"
+    )
+    pl = _num(pl_field)
     output.append(
         _emit(
             "patrimonio_liquido_negativo",
@@ -393,8 +401,8 @@ def emit_financeiro(
             else Estado.NEGATIVO_CONFIRMADO
             if pl is not None
             else Estado.NAO_VERIFICADO,
-            family=_demonstration_source(current, "patrimonio_liquido"),
-            field=current.get("patrimonio_liquido"),
+            family=_demonstration_source(current, pl_field_name),
+            field=pl_field,
             pendencia={"motivo": "patrimonio_liquido_ausente"} if pl is None else None,
         )
     )
@@ -411,8 +419,8 @@ def emit_financeiro(
             state=Estado.CONFIRMADO
             if valor_enquadrado is not None and pl not in (None, 0)
             else Estado.NAO_VERIFICADO,
-            family=_demonstration_source(current, "patrimonio_liquido"),
-            field=current.get("patrimonio_liquido"),
+            family=_demonstration_source(current, pl_field_name),
+            field=pl_field,
             pendencia={"motivo": "valor_enquadrado_ou_patrimonio_liquido_ausente"}
             if valor_enquadrado is None or pl in (None, 0)
             else None,

@@ -161,3 +161,55 @@ def test_generic_v2_respects_confidence_absence_and_veto_precedence():
     assert result.bloqueios == ["cessao_previa_mesmo_contrato"]
     assert result.condicoes_precedentes == []
     assert result.alcada_minima == 1
+
+
+def test_veto_e_dados_insuficientes_preservam_efeitos_documentais():
+    effects = [
+        _rule(
+            "documento_pendente",
+            "cp",
+            None,
+            {"estados": ["CONFIRMADO"], "mensagem": "Enviar documento"},
+            "CONDICAO",
+        ),
+        _rule(
+            "exposicao",
+            "alcada",
+            2,
+            {"estados": ["CONFIRMADO"]},
+        ),
+        _rule(
+            "documento_pendente",
+            "info",
+            None,
+            {"estados": ["CONFIRMADO"]},
+            "INFORMATIVO",
+        ),
+    ]
+    findings = {
+        "documento_pendente": _finding("documento_pendente", {"tipo": "IRPF"}),
+        "exposicao": _finding("exposicao", 3),
+    }
+    insufficient = avaliar(
+        EntradaPolitica({}, findings), _params(), effects, date(2026, 1, 1)
+    )
+    veto = avaliar(
+        EntradaPolitica({}, {**findings, "bloqueio": _finding("bloqueio", True)}),
+        _params(),
+        [
+            _rule("bloqueio", None, None, {"estados": ["CONFIRMADO"]}, "VETO"),
+            *effects,
+        ],
+        date(2026, 1, 1),
+    )
+
+    for result in (insufficient, veto):
+        assert result.condicoes_precedentes[0]["codigo"] == "documento_pendente"
+        assert result.alcada_minima == 2
+        assert result.informativos == [
+            {"codigo": "documento_pendente", "valor": {"tipo": "IRPF"}}
+        ]
+    assert insufficient.status_decisao == "DADOS_INSUFICIENTES"
+    assert insufficient.rating is None and insufficient.limite_aprovado_rs is None
+    assert veto.status_decisao == "VETO"
+    assert veto.rating == "E" and veto.limite_aprovado_rs == 0

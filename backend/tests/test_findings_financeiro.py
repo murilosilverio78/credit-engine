@@ -76,6 +76,24 @@ def test_financial_findings_use_evidence_confidence_and_identify_avalista():
     )
 
 
+def test_exposicao_sobre_pl_prefere_pl_ajustado_do_balancete():
+    payload = _financeiro_payload()
+    payload["demonstracoes"][0]["patrimonio_liquido_ajustado"] = {
+        "valor": 125,
+        "confianca": "ALTA",
+    }
+    findings = {
+        item.codigo: item
+        for item in emit_financeiro(
+            {"documentos_financeiros": payload, "contratos_pncp": {}},
+            fingerprint="pl-ajustado",
+            operation={"valor_enquadrado": 100, "cnpj": "12345678000100"},
+        )
+    }
+
+    assert findings["exposicao_sobre_pl"].valor == 0.8
+
+
 def test_vhg_payload_preserves_financial_provenance_and_confidence():
     def evidence(value, confidence):
         return {"valor": value, "confianca": confidence}

@@ -1082,6 +1082,37 @@ def _consolidate(
             cur.get("patrimonio_liquido"),
         ],
     )
+    resultado_periodo = _num(cur.get("resultado_liquido"))
+    balanco_fecha = (
+        None
+        if None in (ativo, pc, pl)
+        else abs(ativo - (pc + (pnc or 0) + pl)) <= max(ativo, 1) * 0.01
+    )
+    pl_para_indicadores = pl
+    pl_evidencia = cur.get("patrimonio_liquido")
+    if (
+        balanco_fecha is False
+        and resultado_periodo is not None
+        and abs(ativo - (pc + (pnc or 0) + pl + resultado_periodo))
+        <= max(ativo, 1) * 0.01
+    ):
+        pl_para_indicadores = pl + resultado_periodo
+        pl_evidencia = {
+            "valor": pl_para_indicadores,
+            "confianca": _minimum_evidence_confidence(
+                cur.get("confianca"),
+                cur.get("patrimonio_liquido"),
+                cur.get("resultado_liquido"),
+            ),
+            "fonte": _demonstration_source(cur, "patrimonio_liquido"),
+            "sha256": cur.get("sha256"),
+        }
+        cur["patrimonio_liquido_ajustado"] = pl_evidencia
+        if isinstance(cur.get("fonte"), dict):
+            cur["fonte"]["patrimonio_liquido_ajustado"] = _demonstration_source(
+                cur, "patrimonio_liquido"
+            )
+        balanco_fecha = True
     creditors = [item for debt in debts for item in debt["dados"].get("credores", [])]
     debt_values = [_num(item.get("parcela_mensal")) for item in creditors]
     missing_installments = any(
@@ -1121,10 +1152,10 @@ def _consolidate(
     checks = [
         check(
             "balanco_fecha",
-            None
-            if None in (ativo, pc, pl)
-            else abs(ativo - (pc + (pnc or 0) + pl)) <= max(ativo, 1) * 0.01,
-            "PNC inexistente"
+            balanco_fecha,
+            "resultado do período não incorporado ao PL"
+            if "patrimonio_liquido_ajustado" in cur
+            else "PNC inexistente"
             if pnc is None and None not in (ativo, pc, pl)
             else "ativo = passivo + PL",
             _minimum_evidence_confidence(
@@ -1132,7 +1163,7 @@ def _consolidate(
                 cur.get("ativo_total"),
                 cur.get("passivo_circulante"),
                 cur.get("passivo_nao_circulante"),
-                cur.get("patrimonio_liquido"),
+                pl_evidencia,
             ),
         ),
         check(
@@ -1194,11 +1225,13 @@ def _consolidate(
         ),
         "alavancagem": _metric(
             balance_debt,
-            pl,
+            pl_para_indicadores,
             "emprestimos_ou_PL_ausente",
         ),
         "alavancagem_declarada": _metric(
-            declared_total, pl, "endividamento_declarado_ou_PL_ausente"
+            declared_total,
+            pl_para_indicadores,
+            "endividamento_declarado_ou_PL_ausente",
         ),
         "margem_liquida": _metric(
             _num(cur.get("resultado_liquido")),
@@ -1225,12 +1258,12 @@ def _consolidate(
         cur.get("confianca"),
         cur.get("emprestimos_cp"),
         cur.get("emprestimos_lp"),
-        cur.get("patrimonio_liquido"),
+        pl_evidencia,
     )
     inds["alavancagem_declarada"]["confianca"] = _minimum_evidence_confidence(
         debt_confidence,
         cur.get("confianca"),
-        cur.get("patrimonio_liquido"),
+        pl_evidencia,
     )
     inds["margem_liquida"]["confianca"] = _minimum_evidence_confidence(
         cur.get("confianca"),
