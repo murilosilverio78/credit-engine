@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS documentos_extracoes (
   tokens_saida INTEGER,
   custo_usd NUMERIC(10,4),
   erro TEXT,
+  tentativas INTEGER NOT NULL DEFAULT 0 CHECK (tentativas >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -28,8 +29,8 @@ CREATE TABLE IF NOT EXISTS documentos_financeiros_config (
 INSERT INTO documentos_financeiros_config (singleton) VALUES (TRUE) ON CONFLICT (singleton) DO NOTHING;
 
 INSERT INTO component_config (component, enabled, timeout_seconds, max_retries, cache_ttl_hours, weight, description, data_scope)
-VALUES ('documentos_financeiros', TRUE, 180, 0, 24, NULL, 'Extracao estruturada de documentos financeiros do cliente', 'CLIENTE')
-ON CONFLICT (component) DO UPDATE SET data_scope = EXCLUDED.data_scope, cache_ttl_hours = EXCLUDED.cache_ttl_hours;
+VALUES ('documentos_financeiros', TRUE, 900, 0, 24, NULL, 'Extracao estruturada de documentos financeiros do cliente', 'CLIENTE')
+ON CONFLICT (component) DO UPDATE SET data_scope = EXCLUDED.data_scope, cache_ttl_hours = EXCLUDED.cache_ttl_hours, timeout_seconds = EXCLUDED.timeout_seconds;
 
 ALTER TABLE documentos_extracoes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE documentos_financeiros_config ENABLE ROW LEVEL SECURITY;

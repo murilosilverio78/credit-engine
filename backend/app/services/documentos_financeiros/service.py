@@ -1,159 +1,169 @@
-"""Pipeline de documentos financeiros, sem emitir achados nem alterar score.
-
-O payload persistido foi deliberadamente minimizado. Conteudo bruto, base64 e CPF
-completo nao atravessam esta camada nem entram em logs.
-"""
+"""Extracao financeira preserva dados minimizados e nao emite achados."""
 from __future__ import annotations
-
 import hashlib
-import json
 import re
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Any
-
 import anthropic
 import structlog
-
 from app.core.config import settings
 from app.core.database import supabase
 from app.services.pdf_texto import Deadline, OCRUnavailableError, extract_pdf_pages, normalize_document, ocr_pdf, render_page
 
 logger = structlog.get_logger()
-SCHEMA_VERSAO = 1
+SCHEMA_VERSAO, MAX_ATTEMPTS, GLOBAL_TIMEOUT_SECONDS = 1, 3, 840
 FAMILIAS = ("SPED_ECD", "BALANCO_DRE", "BALANCETE", "BALANCO_ABERTURA", "FATURAMENTO", "ENDIVIDAMENTO_DECLARADO", "SCR", "INDICES", "IRPF", "CONTRATO_SOCIAL", "OUTRO")
-FORBIDDEN_KEYS = {"tipo", "tipo_documento", "document_type"}
-DERIVADAS = {"INDICES", "OUTRO"}
+DERIVADAS = {"INDICES", "OUTRO"}; FORBIDDEN_KEYS = {"tipo", "tipo_documento", "document_type", "cpf"}
+BALANCE = ("ativo_circulante", "disponibilidades", "contas_receber", "ativo_nao_circulante", "ativo_total", "passivo_circulante", "emprestimos_cp", "fornecedores", "obrigacoes_trabalhistas", "obrigacoes_tributarias", "passivo_nao_circulante", "emprestimos_lp", "patrimonio_liquido", "capital_social", "receita_bruta", "deducoes", "receita_liquida", "custos", "despesas_operacionais", "despesas_financeiras", "resultado_liquido")
+KEYWORDS = {"SPED_ECD": ("ativo", "passivo", "patrimônio líquido", "demonstração do resultado"), "BALANCO_DRE": ("ativo", "passivo", "patrimônio líquido", "demonstração do resultado"), "BALANCETE": ("ativo", "passivo", "balancete"), "BALANCO_ABERTURA": ("ativo", "passivo", "abertura"), "FATURAMENTO": ("faturamento", "receita", "competência"), "ENDIVIDAMENTO_DECLARADO": ("saldo devedor", "parcela", "credor", "cessão"), "SCR": ("carteira a vencer", "vencido", "limite"), "IRPF": ("bens e direitos", "dívidas e ônus", "rendimentos"), "CONTRATO_SOCIAL": ("capital social", "sócio", "administração")}
 
-
-def _rows(result: Any) -> list[dict[str, Any]]:
-    return list(getattr(result, "data", None) or [])
-
-
-def _config() -> dict[str, Any]:
-    result = supabase.table("documentos_financeiros_config").select("*").limit(1).execute()
-    return (result.data or [{}])[0]
-
-
-def _evidence_schema() -> dict[str, Any]:
-    return {"type": "object", "properties": {"valor": {}, "unidade": {"type": ["string", "null"]}, "pagina": {"type": ["integer", "null"]}, "trecho": {"type": ["string", "null"], "maxLength": 200}, "confianca": {"type": "string", "enum": ["ALTA", "MEDIA", "BAIXA"]}, "ausente_no_documento": {"type": "boolean"}}, "required": ["valor", "unidade", "pagina", "trecho", "confianca", "ausente_no_documento"], "additionalProperties": False}
-
+def _rows(result: Any) -> list[dict[str, Any]]: return list(getattr(result, "data", None) or []) if result else []
+def _single(result: Any) -> dict[str, Any] | None: return getattr(result, "data", None) if result else None
+def _obj(properties: dict[str, Any], required: tuple[str, ...] | list[str]) -> dict[str, Any]: return {"type":"object","properties":properties,"required":list(required),"additionalProperties":False}
+def _ev() -> dict[str, Any]: return _obj({"valor":{"type":["number","string","null"]},"unidade":{"type":["string","null"]},"pagina":{"type":["integer","null"]},"trecho":{"type":["string","null"],"maxLength":200},"confianca":{"type":"string","enum":["ALTA","MEDIA","BAIXA"]},"ausente_no_documento":{"type":"boolean"}}, ("valor","unidade","pagina","trecho","confianca","ausente_no_documento"))
 
 def _classification_tool() -> dict[str, Any]:
-    return {"name": "classificar_documento_financeiro", "description": "Classifica exclusivamente pelo conteudo do documento.", "input_schema": {"type": "object", "properties": {"familia": {"type": "string", "enum": list(FAMILIAS)}, "ano_referencia": {"type": ["integer", "null"]}, "titular_tipo": {"type": "string", "enum": ["PJ", "PF", "NAO_IDENTIFICADO"]}, "tem_recibo_rfb": {"type": "boolean"}, "assinado_contador": {"type": "boolean"}, "crc": {"type": ["string", "null"]}, "paginas_relevantes": {"type": "array", "items": {"type": "integer"}}}, "required": ["familia", "ano_referencia", "titular_tipo", "tem_recibo_rfb", "assinado_contador", "crc", "paginas_relevantes"], "additionalProperties": False}}
-
+    p={"familia":{"type":"string","enum":list(FAMILIAS)},"ano_referencia":{"type":["integer","null"]},"titular_tipo":{"type":"string","enum":["PJ","PF","NAO_IDENTIFICADO"]},"tem_recibo_rfb":{"type":"boolean"},"assinado_contador":{"type":"boolean"},"crc":{"type":["string","null"]},"paginas_relevantes":{"type":"array","items":{"type":"integer"}}}
+    return {"name":"classificar_documento_financeiro","input_schema":_obj(p,tuple(p))}
 
 def _extraction_tool(familia: str) -> dict[str, Any]:
-    # O schema mantem a evidencia por campo e deixa listas financeiras abertas para
-    # acomodar demonstrativos sem inventar campos ausentes.
-    return {"name": "extrair_documento_financeiro", "description": "Extrai somente os campos permitidos, sempre com evidencia.", "input_schema": {"type": "object", "properties": {"familia": {"type": "string", "const": familia}, "campos": {"type": "object", "additionalProperties": _evidence_schema()}, "exercicios": {"type": "array", "items": {"type": "object"}}, "meses": {"type": "array", "items": {"type": "object"}}, "credores": {"type": "array", "items": {"type": "object"}}, "modalidades": {"type": "array", "items": {"type": "object"}}, "participacoes": {"type": "array", "items": {"type": "object"}}, "socios": {"type": "array", "items": {"type": "object"}}}, "required": ["familia", "campos", "exercicios", "meses", "credores", "modalidades", "participacoes", "socios"], "additionalProperties": False}}
+    e=_ev()
+    if familia in {"SPED_ECD","BALANCO_DRE","BALANCETE","BALANCO_ABERTURA"}:
+        ex=_obj({"data_base":e,"natureza":{"type":"string","enum":["anual","intermediario","abertura"]},**{x:e for x in BALANCE}}, ("data_base","natureza",*BALANCE)); data=_obj({"exercicios":{"type":"array","items":ex}},("exercicios",))
+    elif familia=="FATURAMENTO":
+        mes=_obj({"competencia":e,"valor":e},("competencia","valor")); data=_obj({"meses":{"type":"array","items":mes},"total_declarado":e,"assinado_contador":{"type":"boolean"},"data_emissao":e},("meses","total_declarado","assinado_contador","data_emissao"))
+    elif familia=="ENDIVIDAMENTO_DECLARADO":
+        c=_obj({"instituicao":{"type":["string","null"]},"modalidade":{"type":["string","null"]},"saldo_devedor":e,"parcela_mensal":e,"vencimento_final":e,"garantia":{"type":["string","null"]},"cessao_recebiveis":{"type":"boolean"},"contrato_cedido_referencia":{"type":["string","null"]}},("instituicao","modalidade","saldo_devedor","parcela_mensal","vencimento_final","garantia","cessao_recebiveis","contrato_cedido_referencia")); data=_obj({"data_base":e,"credores":{"type":"array","items":c},"total_declarado":e},("data_base","credores","total_declarado"))
+    elif familia=="SCR":
+        m=_obj({"modalidade":{"type":["string","null"]},"valor":e},("modalidade","valor")); data=_obj({"data_base":e,"carteira_a_vencer":e,"vencido":e,"prejuizo":e,"limites_credito":e,"coobrigacoes":e,"modalidades":{"type":"array","items":m},"instituicoes_count":e},("data_base","carteira_a_vencer","vencido","prejuizo","limites_credito","coobrigacoes","modalidades","instituicoes_count"))
+    elif familia=="IRPF":
+        part=_obj({"cnpj":{"type":["string","null"]},"valor":e},("cnpj","valor")); bens=_obj({x:e for x in ("imoveis","veiculos","participacoes_societarias","aplicacoes_depositos","outros")},("imoveis","veiculos","participacoes_societarias","aplicacoes_depositos","outros")); fields={"ano_exercicio":e,"nome":{"type":["string","null"],"maxLength":200},"cpf_final":{"type":["string","null"],"maxLength":3},"tem_recibo":{"type":"boolean"},"rendimentos_tributaveis":e,"rendimentos_isentos":e,"bens_direitos_total_atual":e,"bens_direitos_total_anterior":e,"bens_por_grupo":bens,"dividas_onus_atual":e,"dividas_onus_anterior":e,"participacoes":{"type":"array","items":part}}; data=_obj(fields,tuple(fields))
+    elif familia=="CONTRATO_SOCIAL":
+        socio=_obj({"nome":{"type":["string","null"],"maxLength":200},"administrador":{"type":"boolean"},"percentual_quotas":e},("nome","administrador","percentual_quotas")); fields={"data_ultima_alteracao":e,"numero_alteracao":{"type":["string","null"]},"capital_social":e,"capital_integralizado":e,"socios":{"type":"array","items":socio},"objeto_resumo":{"type":["string","null"],"maxLength":300},"uf_sede":{"type":["string","null"]}}; data=_obj(fields,tuple(fields))
+    else: data=_obj({},())
+    return {"name":f"extrair_{familia.lower()}","input_schema":_obj({"familia":{"type":"string","const":familia},"dados":data},("familia","dados"))}
 
-
-def _tool_result(response: Any) -> dict[str, Any]:
-    for block in getattr(response, "content", []):
-        if getattr(block, "type", None) == "tool_use" and isinstance(getattr(block, "input", None), dict):
-            return block.input
+def _tool_result(response: Any) -> dict[str,Any]:
+    for block in getattr(response,"content",[]):
+        if getattr(block,"type",None)=="tool_use" and isinstance(getattr(block,"input",None),dict): return block.input
     raise RuntimeError("llm_sem_saida_estruturada")
+def _usage(response: Any) -> tuple[int|None,int|None,float]:
+    u=getattr(response,"usage",None); a,b=getattr(u,"input_tokens",None),getattr(u,"output_tokens",None); return a,b,round((a or 0)*.000003+(b or 0)*.000015,4)
+def _call(client: anthropic.Anthropic, tool:dict[str,Any], prompt:str):
+    r=client.messages.create(model=settings.CLAUDE_MODEL_EXTRACTION,max_tokens=3500,temperature=0,tools=[tool],tool_choice={"type":"tool","name":tool["name"]},messages=[{"role":"user","content":prompt}]); return _tool_result(r),_usage(r)
 
+def _safe_payload(value: Any) -> Any:
+    if isinstance(value,dict):
+        out={}
+        for k,v in value.items():
+            if str(k).lower() in FORBIDDEN_KEYS: continue
+            out[str(k)] = re.sub(r"\D","",str(v or ""))[-3:] or None if k=="cpf_final" else _safe_payload(v)
+        return out
+    if isinstance(value,list): return [_safe_payload(x) for x in value]
+    return re.sub(r"\b\d{3}[.\s-]?\d{3}[.\s-]?\d{3}-?\d{2}\b","[CPF_REDACTED]",value)[:300] if isinstance(value,str) else value
+def _prune(value: Any, schema: dict[str, Any]) -> Any:
+    """Aplica o schema fechado tambem a objetos internos devolvidos pelo modelo."""
+    if schema.get("type") == "object" and isinstance(value, dict):
+        props = schema.get("properties", {})
+        return {key: _prune(item, props[key]) for key, item in value.items() if key in props}
+    if schema.get("type") == "array" and isinstance(value, list):
+        return [_prune(item, schema.get("items", {})) for item in value]
+    return value
+def _whitelist(family:str, value:dict[str,Any]) -> dict[str,Any]:
+    schema=_extraction_tool(family)["input_schema"]
+    return _safe_payload(_prune({**value,"familia":family},schema))
+def _confidence(c:dict[str,Any])->str: return "ALTA" if c.get("familia")=="SPED_ECD" and c.get("tem_recibo_rfb") else "MEDIA" if c.get("assinado_contador") else "BAIXA"
+def _pages(pages:list[str], family:str, maximum:int)->list[int]:
+    if len(pages)<=maximum:return list(range(1,len(pages)+1))
+    candidates=[i+1 for i,text in enumerate(pages) if any(term in text.lower() for term in KEYWORDS.get(family,()))]
+    return list(dict.fromkeys([*range(1,min(3,maximum)+1),*candidates]))[:maximum]
+def _existing(sha:str)->dict[str,Any]|None:
+    res=supabase.table("documentos_extracoes").select("*").eq("sha256",sha).eq("schema_versao",SCHEMA_VERSAO).maybe_single().execute(); return _single(res)
+def _persist(row:dict[str,Any])->dict[str,Any]:
+    rows=_rows(supabase.table("documentos_extracoes").upsert(row,on_conflict="sha256").execute()); return rows[0] if rows else row
 
-def _usage(response: Any) -> tuple[int | None, int | None, float]:
-    usage = getattr(response, "usage", None)
-    input_tokens = getattr(usage, "input_tokens", None)
-    output_tokens = getattr(usage, "output_tokens", None)
-    # Conservador e auditavel; preco exato e configuracao comercial pertencem ao provedor.
-    return input_tokens, output_tokens, round(((input_tokens or 0) * 0.000003) + ((output_tokens or 0) * 0.000015), 4)
-
-
-def _call_tool(client: anthropic.Anthropic, tool: dict[str, Any], prompt: str) -> tuple[dict[str, Any], tuple[int | None, int | None, float]]:
-    response = client.messages.create(model=settings.CLAUDE_MODEL_EXTRACTION, max_tokens=3500, temperature=0, tools=[tool], tool_choice={"type": "tool", "name": tool["name"]}, messages=[{"role": "user", "content": prompt}])
-    return _tool_result(response), _usage(response)
-
-
-def _safe_payload(payload: Any) -> Any:
-    if isinstance(payload, dict):
-        safe: dict[str, Any] = {}
-        for key, value in payload.items():
-            key_text = str(key)
-            lowered = key_text.lower()
-            if key_text in FORBIDDEN_KEYS or lowered == "cpf":
-                continue
-            if lowered == "cpf_final":
-                safe[key_text] = re.sub(r"\D", "", str(value or ""))[-3:] or None
-            else:
-                safe[key_text] = _safe_payload(value)
-        return safe
-    if isinstance(payload, list):
-        return [_safe_payload(item) for item in payload]
-    if isinstance(payload, str):
-        # Evita vazar CPF eventualmente devolvido pelo modelo fora do schema.
-        return re.sub(r"\b\d{3}[.\s-]?\d{3}[.\s-]?\d{3}-?\d{2}\b", "[CPF_REDACTED]", payload)[:300]
-    return payload
-
-
-def _source_confidence(classification: dict[str, Any]) -> str:
-    if classification.get("familia") == "SPED_ECD" and classification.get("tem_recibo_rfb"):
-        return "ALTA"
-    if classification.get("assinado_contador"):
-        return "MEDIA"
-    return "BAIXA"
-
-
-def _extract_one(document: dict[str, Any], client: anthropic.Anthropic, config: dict[str, Any]) -> dict[str, Any]:
-    sha = str(document["sha256"])
-    existing = supabase.table("documentos_extracoes").select("*").eq("sha256", sha).eq("schema_versao", SCHEMA_VERSAO).maybe_single().execute().data
-    if existing:
-        return existing
+def _extract_one(doc:dict[str,Any],client:anthropic.Anthropic,config:dict[str,Any],deadline:Deadline)->dict[str,Any]:
+    sha=str(doc["sha256"]); old=_existing(sha)
+    if old and old.get("status") in {"EXTRAIDO","PARCIAL","IGNORADO_DERIVADO"}: return old
+    attempts=int((old or {}).get("tentativas") or 0)
+    if attempts>=MAX_ATTEMPTS:return old or {"sha256":sha,"status":"FALHA","erro":"limite_tentativas"}
     try:
-        # Import tardio permite validar a consolidacao pura sem inicializar boto3.
+        deadline.remaining("proximo_documento")
         from app.services.storage_service import StorageService
-        content = StorageService().download_document_at_key(str(document["storage_key"]))
-        pdf, _source, _inner = normalize_document(content)
-        deadline = Deadline.start(150)
-        pages = extract_pdf_pages(pdf, deadline)
-        if len("".join(pages)) < 400:
-            pages, _total, _truncated = ocr_pdf(pdf, int(config.get("max_paginas_extracao", 40)), deadline)
-        first = "".join(render_page(i + 1, text) for i, text in enumerate(pages[:3]))
-        classification, cost_a = _call_tool(client, _classification_tool(), "Classifique o documento a seguir. Nao reproduza dados pessoais alem do necessario.\n" + first)
-        familia = classification["familia"]
-        if familia in DERIVADAS:
-            row = {"sha256": sha, "familia": familia, "schema_versao": SCHEMA_VERSAO, "status": "IGNORADO_DERIVADO", "ano_referencia": classification.get("ano_referencia"), "payload": {"familia": familia, "classificacao": _safe_payload(classification)}, "modelo": settings.CLAUDE_MODEL_EXTRACTION, "tokens_entrada": cost_a[0], "tokens_saida": cost_a[1], "custo_usd": cost_a[2], "erro": None}
+        pdf,_,_=normalize_document(StorageService().download_document_at_key(str(doc["storage_key"]))); pages=extract_pdf_pages(pdf,deadline)
+        if len("".join(pages))<400: pages,_,_=ocr_pdf(pdf,int(config.get("max_paginas_extracao",40)),deadline)
+        classificacao,custo_a=_call(client,_classification_tool(),"Classifique pelo conteudo; nao repita dados pessoais.\n"+"".join(render_page(i+1,t) for i,t in enumerate(pages[:3]))); family=str(classificacao.get("familia") or "OUTRO")
+        if family in DERIVADAS: row={"sha256":sha,"familia":family,"schema_versao":SCHEMA_VERSAO,"status":"IGNORADO_DERIVADO","ano_referencia":classificacao.get("ano_referencia"),"payload":{"familia":family,"classificacao":_safe_payload(classificacao)},"modelo":settings.CLAUDE_MODEL_EXTRACTION,"tokens_entrada":custo_a[0],"tokens_saida":custo_a[1],"custo_usd":custo_a[2],"erro":None,"tentativas":attempts+1}
         else:
-            page_numbers = classification.get("paginas_relevantes") or list(range(1, min(len(pages), int(config.get("max_paginas_extracao", 40))) + 1))
-            text = "".join(render_page(i, pages[i - 1]) for i in page_numbers if isinstance(i, int) and 0 < i <= len(pages))
-            extracted, cost_b = _call_tool(client, _extraction_tool(familia), "Extraia somente dados permitidos; nao extraia endereco, bancos, dependentes ou CPF completo.\n" + text[:120000])
-            payload = _safe_payload({"familia": familia, "classificacao": classification, "extracao": extracted, "confianca_fonte": _source_confidence(classification)})
-            row = {"sha256": sha, "familia": familia, "schema_versao": SCHEMA_VERSAO, "status": "EXTRAIDO", "ano_referencia": classification.get("ano_referencia"), "payload": payload, "modelo": settings.CLAUDE_MODEL_EXTRACTION, "tokens_entrada": (cost_a[0] or 0) + (cost_b[0] or 0), "tokens_saida": (cost_a[1] or 0) + (cost_b[1] or 0), "custo_usd": round(cost_a[2] + cost_b[2], 4), "erro": None}
-    except OCRUnavailableError:
-        row = {"sha256": sha, "familia": "OUTRO", "schema_versao": SCHEMA_VERSAO, "status": "ILEGIVEL", "payload": {}, "erro": "ocr_indisponivel"}
+            text="".join(render_page(i,pages[i-1]) for i in _pages(pages,family,int(config.get("max_paginas_extracao",40)))); raw,custo_b=_call(client,_extraction_tool(family),"Extraia somente o schema. IRPF nunca inclui endereco, banco, dependentes, pagamentos ou CPF completo.\n"+text[:120000]); good=_whitelist(family,raw); row={"sha256":sha,"familia":family,"schema_versao":SCHEMA_VERSAO,"status":"EXTRAIDO","ano_referencia":classificacao.get("ano_referencia"),"payload":{"familia":family,"classificacao":_safe_payload(classificacao),"dados":good.get("dados",{}),"confianca_fonte":_confidence(classificacao)},"modelo":settings.CLAUDE_MODEL_EXTRACTION,"tokens_entrada":(custo_a[0] or 0)+(custo_b[0] or 0),"tokens_saida":(custo_a[1] or 0)+(custo_b[1] or 0),"custo_usd":round(custo_a[2]+custo_b[2],4),"erro":None,"tentativas":attempts+1}
+    except TimeoutError:return {"sha256":sha,"familia":(old or {}).get("familia","OUTRO"),"status":"PARCIAL","erro":"prazo_global","tentativas":attempts}
+    except OCRUnavailableError: row={"sha256":sha,"familia":"OUTRO","schema_versao":SCHEMA_VERSAO,"status":"ILEGIVEL","payload":{},"erro":"ocr_indisponivel","tentativas":attempts+1}
     except Exception as exc:
-        logger.warning("documentos_financeiros.document_failed", sha256=sha, erro=exc.__class__.__name__)
-        row = {"sha256": sha, "familia": "OUTRO", "schema_versao": SCHEMA_VERSAO, "status": "FALHA", "payload": {}, "erro": exc.__class__.__name__[:120]}
-    return supabase.table("documentos_extracoes").upsert(row, on_conflict="sha256").execute().data[0]
+        logger.warning("documentos_financeiros.document_failed",sha256=sha,erro=exc.__class__.__name__); row={"sha256":sha,"familia":"OUTRO","schema_versao":SCHEMA_VERSAO,"status":"FALHA","payload":{},"erro":exc.__class__.__name__[:120],"tentativas":attempts+1}
+    return _persist(row)
 
+def _num(v:Any)->float|None:
+    v=v.get("valor") if isinstance(v,dict) else v
+    try:return float(v)
+    except (TypeError,ValueError):return None
+def _rank(c:str|None)->int:return {"ALTA":3,"MEDIA":2,"BAIXA":1}.get(c or "",0)
+def _metric(n:float|None,d:float|None,motivo:str)->dict[str,Any]:return {"valor":n/d if n is not None and d not in (None,0) else None,"motivo":None if n is not None and d not in (None,0) else motivo}
+def _as_date(value: Any) -> date | None:
+    value = value.get("valor") if isinstance(value, dict) else value
+    try: return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError): return None
 
-def _manifest(documents: list[dict[str, Any]]) -> str:
-    return hashlib.sha256("|".join(sorted(str(row["sha256"]) for row in documents if row.get("sha256"))).encode()).hexdigest()
+def _consolidate(rows:list[dict[str,Any]],manifest:str,context:dict[str,Any]|None=None,config:dict[str,Any]|None=None)->dict[str,Any]:
+    context=context or {}; exercises={}; revenue=[]; debts=[]; irpf=[]; socials=[]
+    for row in rows:
+        if row.get("status")!="EXTRAIDO":continue
+        p=row.get("payload") or {}; d=p.get("dados") or {}; f=row.get("familia"); c=p.get("confianca_fonte","BAIXA")
+        if f in {"SPED_ECD","BALANCO_DRE","BALANCETE","BALANCO_ABERTURA"}:
+            for x in d.get("exercicios",[]):exercises.setdefault(str((x.get("data_base") or {}).get("valor")),[]).append((x,f,c))
+        elif f=="FATURAMENTO":revenue.append((d,c))
+        elif f in {"SCR","ENDIVIDAMENTO_DECLARADO"}:debts.append({"familia":f,"dados":d})
+        elif f=="IRPF":irpf.append(d)
+        elif f=="CONTRATO_SOCIAL":socials.append(d)
+    demos=[]; diverg=[]; preference={"SPED_ECD":4,"BALANCO_DRE":3,"BALANCETE":2,"BALANCO_ABERTURA":1}
+    for year,items in exercises.items():
+        items.sort(key=lambda x:(_rank(x[2]),preference[x[1]]),reverse=True); x,f,c=items[0]; demos.append({"data_base":x.get("data_base"),"natureza":x.get("natureza"),"fonte":f,"confianca":c,**{k:x.get(k) for k in BALANCE}})
+        for k in BALANCE:
+            vals=[(source,_num(item.get(k))) for item,source,_ in items if _num(item.get(k)) is not None]
+            if len(vals)>1 and min(v for _,v in vals) and (max(v for _,v in vals)-min(v for _,v in vals))/min(v for _,v in vals)>.05:diverg.append({"exercicio":year,"campo":k,"fontes":[s for s,_ in vals]})
+    fat=revenue[0][0] if revenue else {}; meses=fat.get("meses") or []; soma=sum(_num(x.get("valor")) or 0 for x in meses); declarado=_num(fat.get("total_declarado")); cessoes=[x for debt in debts for x in debt["dados"].get("credores",[]) if x.get("cessao_recebiveis")]
+    aval=[{"nome":x.get("nome"),"cpf_final":x.get("cpf_final"),"ano":_num(x.get("ano_exercicio")),"renda":(_num(x.get("rendimentos_tributaveis")) or 0)+(_num(x.get("rendimentos_isentos")) or 0),"bens":_num(x.get("bens_direitos_total_atual")),"dividas":_num(x.get("dividas_onus_atual")),"patrimonio_liquido_declarado":(_num(x.get("bens_direitos_total_atual")) or 0)-(_num(x.get("dividas_onus_atual")) or 0),"participacoes":x.get("participacoes") or []} for x in irpf]
+    cur=demos[0] if demos else {}; ativo,pc,pnc,pl=map(_num,[cur.get("ativo_total"),cur.get("passivo_circulante"),cur.get("passivo_nao_circulante"),cur.get("patrimonio_liquido")]); rec=_num(context.get("faturamento_verificado_12m")); pncp=_num(context.get("faturamento_contratado_12m")); valor=_num(context.get("valor_operacao")); parcela=sum(_num(x.get("parcela_mensal")) or 0 for d in debts for x in d["dados"].get("credores",[]))
+    def check(code,v,detail):return {"codigo":code,"resultado":"OK" if v is True else "FALHA" if v is False else "NAO_VERIFICADO","detalhe":detail}
+    base = _as_date(cur.get("data_base")); emissao = _as_date(fat.get("data_emissao"))
+    today = date.today()
+    balanco_atual = None if base is None else (today.year - base.year) * 12 + today.month - base.month <= int((config or {}).get("balanco_validade_meses", 18))
+    faturamento_atual = None if emissao is None else (today.year - emissao.year) * 12 + today.month - emissao.month <= int((config or {}).get("faturamento_defasagem_meses", 3))
+    simples = context.get("regime_tributario") == "SIMPLES_NACIONAL"
+    checks=[check("balanco_fecha",None if None in (ativo,pc,pnc,pl) else abs(ativo-(pc+pnc+pl))<=max(ativo,1)*.01,"ativo = passivo + PL"),check("soma_faturamento",None if declarado is None else abs(soma-declarado)<=max(declarado,1)*.01,"soma mensal versus declarado"),check("balanco_atual",balanco_atual,"balanco ate 18 meses"),check("faturamento_atual",faturamento_atual,"faturamento ate 3 meses"),check("receita_maior_recebido_uniao",None if rec is None or not fat else soma>=rec,"receita 12m versus recebido Uniao"),check("simples_cessao_mao_obra",None if not simples else not bool(context.get("contrato_dedicacao_exclusiva")),"Simples Nacional versus cessao de mao de obra")]
+    inds={"liquidez_corrente":_metric(_num(cur.get("ativo_circulante")),pc,"ativo_circulante_ou_passivo_circulante_ausente"),"alavancagem":_metric((_num(cur.get("emprestimos_cp")) or 0)+(_num(cur.get("emprestimos_lp")) or 0) if cur else None,pl,"emprestimos_ou_PL_ausente"),"margem_liquida":_metric(_num(cur.get("resultado_liquido")),_num(cur.get("receita_liquida")),"resultado_ou_receita_ausente"),"servico_divida_sobre_faturamento":_metric(parcela,soma/12 if soma else None,"parcelas_ou_faturamento_ausente"),"salto_escala_real":_metric(pncp,soma,"pncp_ou_receita_ausente"),"dependencia_publica":_metric(rec,soma,"recebido_uniao_ou_receita_ausente"),"cobertura_aval":_metric(sum(a["patrimonio_liquido_declarado"] for a in aval),valor,"aval_ou_valor_operacao_ausente")}
+    return {"schema_versao":SCHEMA_VERSAO,"manifest_documentos":manifest,"documentos":[{"sha256":r.get("sha256"),"familia":r.get("familia"),"status":r.get("status"),"ano_referencia":r.get("ano_referencia")} for r in rows],"demonstracoes":demos,"divergencias":diverg,"faturamento_12m":{"meses":meses,"soma_calculada":soma,"total_declarado":fat.get("total_declarado")} if fat else None,"endividamento":{"fontes":debts,"cessoes_recebiveis":cessoes},"avalistas":aval,"societario":socials[-1] if socials else None,"verificacoes":checks,"indicadores":inds}
 
-
-def _consolidate(rows: list[dict[str, Any]], manifest: str) -> dict[str, Any]:
-    payloads = [row.get("payload") or {} for row in rows if row.get("status") == "EXTRAIDO"]
-    return {"schema_versao": SCHEMA_VERSAO, "manifest_documentos": manifest, "documentos": [{"sha256": row.get("sha256"), "familia": row.get("familia"), "status": row.get("status"), "ano_referencia": row.get("ano_referencia")} for row in rows], "demonstracoes": [], "divergencias": [], "faturamento_12m": None, "endividamento": {"fontes": [item for item in payloads if item.get("familia") in {"SCR", "ENDIVIDAMENTO_DECLARADO"}]}, "avalistas": [item for item in payloads if item.get("familia") == "IRPF"], "societario": next((item for item in payloads if item.get("familia") == "CONTRATO_SOCIAL"), None), "verificacoes": [], "indicadores": {"liquidez_corrente": None, "alavancagem": None, "margem_liquida": None, "servico_divida_sobre_faturamento": None, "salto_escala_real": None, "dependencia_publica": None, "cobertura_aval": None}}
-
-
-def extract_documentos_financeiros(cnpj: str, *, operation_id: str | None = None) -> dict[str, Any]:
-    documents = _rows(supabase.table("documentos_cliente").select("sha256,storage_key,dono_tipo").eq("cnpj", cnpj).eq("status", "CAPTURADO").not_.is_("sha256", "null").execute())
-    unique = {str(item["sha256"]): item for item in documents if item.get("storage_key")}
-    manifest = _manifest(list(unique.values()))
-    if not unique:
-        return _consolidate([], manifest)
-    config = _config(); max_cost = float(config.get("max_custo_usd_operacao", 1)); consumed = 0.0; extracted: list[dict[str, Any]] = []
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, timeout=180)
+def _manifest(docs:list[dict[str,Any]])->str:return hashlib.sha256("|".join(sorted(str(x["sha256"]) for x in docs if x.get("sha256"))).encode()).hexdigest()
+def _config()->dict[str,Any]:
+    rows=_rows(supabase.table("documentos_financeiros_config").select("*").limit(1).execute());return rows[0] if rows else {}
+def _context(operation_id:str|None)->dict[str,Any]:
+    if not operation_id:return {}
+    op=_single(supabase.table("operations").select("valor_solicitado,valor_enquadrado,regime_tributario,contrato_dedicacao_exclusiva").eq("id",operation_id).maybe_single().execute()) or {}; snaps=_rows(supabase.table("component_snapshots").select("component,parsed_result").eq("operation_id",operation_id).in_("component",["recursos_recebidos","contratos_pncp"]).execute()); by={x.get("component"):x.get("parsed_result") or {} for x in snaps};return {"valor_operacao":op.get("valor_enquadrado") or op.get("valor_solicitado"),"faturamento_verificado_12m":by.get("recursos_recebidos",{}).get("faturamento_verificado_12m"),"faturamento_contratado_12m":by.get("contratos_pncp",{}).get("faturamento_contratado_12m"),"regime_tributario":op.get("regime_tributario"),"contrato_dedicacao_exclusiva":op.get("contrato_dedicacao_exclusiva")}
+def extract_documentos_financeiros(cnpj:str,*,operation_id:str|None=None)->dict[str,Any]:
+    docs=_rows(supabase.table("documentos_cliente").select("sha256,storage_key,dono_tipo").eq("cnpj",cnpj).eq("status","CAPTURADO").not_.is_("sha256","null").execute()); unique={str(x["sha256"]):x for x in docs if x.get("storage_key")}; manifest=_manifest(list(unique.values())); config=_config()
+    if not unique:return _consolidate([],manifest,_context(operation_id),config)
+    deadline=Deadline.start(GLOBAL_TIMEOUT_SECONDS); used=0.; limit=float(config.get("max_custo_usd_operacao",1)); result=[]; client=anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY,timeout=180)
     try:
-        for document in unique.values():
-            if consumed >= max_cost:
-                extracted.append({"sha256": document["sha256"], "familia": "OUTRO", "status": "FALHA", "erro": "limite_custo"}); continue
-            row = _extract_one(document, client, config); consumed += float(row.get("custo_usd") or 0); extracted.append(row)
+        for doc in unique.values():
+            try:deadline.remaining("fila_documentos")
+            except TimeoutError:result.append({"sha256":doc["sha256"],"familia":"OUTRO","status":"PARCIAL","erro":"prazo_global"});continue
+            if used>=limit:result.append({"sha256":doc["sha256"],"familia":"OUTRO","status":"FALHA","erro":"limite_custo"});continue
+            row=_extract_one(doc,client,config,deadline);used+=float(row.get("custo_usd") or 0);result.append(row)
     finally:
-        close = getattr(client, "close", None)
-        if callable(close):
-            close()
-    return _consolidate(extracted, manifest)
+        close=getattr(client,"close",None)
+        if callable(close):close()
+    consolidated = _consolidate(result,manifest,_context(operation_id),config)
+    # BaseComponentTask nao guarda no cache resultados ainda retentaveis.
+    if any(row.get("status") in {"FALHA", "ILEGIVEL", "PARCIAL"} for row in result):
+        consolidated["erro"] = "documentos_pendentes"
+    return consolidated
