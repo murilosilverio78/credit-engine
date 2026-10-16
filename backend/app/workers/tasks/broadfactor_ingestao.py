@@ -346,7 +346,7 @@ def _transition_quote_operation(
     updated = _execute_with_retry(
         operation_id, "broadfactor_ingestao", "transition_quote_operation",
         lambda: supabase.table("operations").update(data).eq("id", operation_id)
-        .eq("status", previous_status).select("id").execute(),
+        .eq("status", previous_status).execute(),
     )
     if not updated.data:
         return False

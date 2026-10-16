@@ -1,10 +1,13 @@
 import os
 import sys
 import asyncio
+import json
 from datetime import date
 from types import ModuleType, SimpleNamespace
 
+import httpx
 import pytest
+from postgrest import SyncPostgrestClient
 
 
 for key in ("SECRET_KEY", "TWOCAPTCHA_API_KEY", "RESEND_API_KEY"):
@@ -27,6 +30,20 @@ PARAMS = {
     "prazo_padrao_meses": 12,
     "dias_minimos_expiracao": 5,
 }
+
+
+def real_postgrest_client(handler) -> SyncPostgrestClient:
+    """Builder real: catches unsupported chaining before any HTTP call."""
+    client = SyncPostgrestClient("http://postgrest.test")
+    previous_session = client.session
+    client.session = httpx.Client(
+        base_url=previous_session.base_url,
+        headers=previous_session.headers,
+        timeout=previous_session.timeout,
+        transport=httpx.MockTransport(handler),
+    )
+    previous_session.close()
+    return client
 
 
 def quote(cotacao_id: str, valor: float = 300_000) -> Cotacao:
@@ -392,6 +409,97 @@ def test_quote_closure_transitions_only_triage_terminal_status(monkeypatch):
     assert calls[0][1]["next_status"] == "cotacao_encerrada"
     assert calls[0][1]["previous_status"] == "reprovada_triagem"
     assert calls[0][1]["previous_pendencia_coleta"] is True
+
+
+def test_quote_transition_uses_real_postgrest_builder_and_sends_conditional_patch(monkeypatch):
+    from app.services.audit_service import AuditService
+
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=[{"id": "op-1"}], request=request)
+
+    client = real_postgrest_client(handler)
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_execute_with_retry",
+        lambda _id, _component, _action, request: request(),
+    )
+    monkeypatch.setattr(AuditService, "log", lambda *_args, **_kwargs: None)
+
+    transitioned = broadfactor_ingestao._transition_quote_operation(
+        client,
+        "op-1",
+        next_status="cotacao_encerrada",
+        previous_status="reprovada_triagem",
+        motivos=["cotacao_ausente_na_listagem"],
+        action_context="cotacao_encerrada",
+    )
+
+    assert transitioned is True
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.method == "PATCH"
+    assert request.url.path == "/operations"
+    assert dict(request.url.params) == {
+        "id": "eq.op-1",
+        "status": "eq.reprovada_triagem",
+    }
+    assert json.loads(request.content) == {
+        "status": "cotacao_encerrada",
+        "pendencia_coleta": False,
+    }
+    client.session.close()
+
+
+def test_close_quote_uses_real_postgrest_builder_for_operation_and_quote(monkeypatch):
+    from app.services.audit_service import AuditService
+
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={"status": "reprovada_triagem", "pendencia_coleta": True},
+                request=request,
+            )
+        if request.url.path == "/operations":
+            return httpx.Response(200, json=[{"id": "op-1"}], request=request)
+        return httpx.Response(200, json=[], request=request)
+
+    client = real_postgrest_client(handler)
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_execute_with_retry",
+        lambda _id, _component, _action, request: request(),
+    )
+    monkeypatch.setattr(AuditService, "log", lambda *_args, **_kwargs: None)
+
+    broadfactor_ingestao._close_quote(
+        client,
+        {
+            "cotacao_id": "C-1",
+            "operation_id": "op-1",
+            "estagio": "DOCUMENTADA",
+            "estagio_max": "DOCUMENTADA",
+        },
+        motivo="cotacao_expirada",
+    )
+
+    patches = [request for request in requests if request.method == "PATCH"]
+    assert [request.url.path for request in patches] == ["/operations", "/cotacoes_broadfactor"]
+    assert dict(patches[0].url.params) == {
+        "id": "eq.op-1",
+        "status": "eq.reprovada_triagem",
+    }
+    assert json.loads(patches[0].content)["status"] == "cotacao_encerrada"
+    assert dict(patches[1].url.params) == {"cotacao_id": "eq.C-1"}
+    assert json.loads(patches[1].content)["estagio"] == "ENCERRADA"
+    assert json.loads(patches[1].content)["estagio_motivo"] == "cotacao_expirada"
+    client.session.close()
 
 
 def test_quote_reappearance_restores_pre_closure_status(monkeypatch):
