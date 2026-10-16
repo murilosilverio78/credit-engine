@@ -207,7 +207,7 @@ def test_emitter_version_participates_in_idempotency_hash(monkeypatch):
 
     emitter.emit_findings("op", "documentos", database=db)
     emitter.emit_findings("op", "documentos", database=db)
-    monkeypatch.setattr(version, "EMITTER_VERSION", "7")
+    monkeypatch.setattr(version, "EMITTER_VERSION", "8")
     emitter.emit_findings("op", "documentos", database=db)
 
     assert db.rpc_inserted == [True, False, True]
