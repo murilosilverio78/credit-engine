@@ -219,7 +219,7 @@ def test_emitter_version_participates_in_idempotency_hash(monkeypatch):
         db.rpc_calls[0][1]["p_run"]["entrada_hash"]
         != db.rpc_calls[2][1]["p_run"]["entrada_hash"]
     )
-    assert db.rpc_calls[2][1]["p_run"]["versao_emissor"] == "7"
+    assert db.rpc_calls[2][1]["p_run"]["versao_emissor"] == "8"
 
 
 def test_hash_extras_are_limited_to_each_specialist(monkeypatch):
