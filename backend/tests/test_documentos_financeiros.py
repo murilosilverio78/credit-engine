@@ -452,3 +452,57 @@ def test_mes_ano_anual_vira_ultimo_dia_e_mesmo_exercicio_mescla_campos():
         "ativo_total": "SPED_ECD",
         "resultado_liquido": "BALANCO_DRE",
     }
+
+
+def test_mesmo_exercicio_mantem_bloco_patrimonial_em_uma_unica_fonte():
+    """Evita combinar ativo de uma demonstração com PL de outra."""
+
+    def evidence(value, confidence="ALTA"):
+        return {"valor": value, "confianca": confidence}
+
+    sped = {
+        "data_base": evidence("2025-12-31"),
+        "natureza": "anual",
+        "ativo_total": evidence(15_970_000),
+        "passivo_circulante": evidence(10_000_000),
+        "passivo_nao_circulante": evidence(4_970_000),
+        "patrimonio_liquido": evidence(1_000_000, "BAIXA"),
+    }
+    contador = {
+        "data_base": evidence("2025-12-31"),
+        "natureza": "anual",
+        "ativo_total": evidence(12_000_000),
+        "passivo_circulante": evidence(500_000),
+        "passivo_nao_circulante": evidence(170_000),
+        "patrimonio_liquido": evidence(11_330_000),
+        "resultado_liquido": evidence(500_000),
+    }
+    rows = [
+        {
+            "sha256": "a" * 64,
+            "familia": "SPED_ECD",
+            "status": "EXTRAIDO",
+            "payload": {
+                "classificacao": {"tem_recibo_rfb": True},
+                "dados": {"exercicios": [sped]},
+            },
+        },
+        {
+            "sha256": "b" * 64,
+            "familia": "BALANCO_DRE",
+            "status": "EXTRAIDO",
+            "payload": {
+                "classificacao": {"assinado_contador": True},
+                "dados": {"exercicios": [contador]},
+            },
+        },
+    ]
+
+    result = _consolidate(rows, "manifest")
+    demonstration = result["demonstracoes"][0]
+
+    assert demonstration["fonte_principal"] == "SPED_ECD"
+    assert demonstration["ativo_total"]["valor"] == 15_970_000
+    assert demonstration["patrimonio_liquido"]["valor"] == 1_000_000
+    assert demonstration["resultado_liquido"]["valor"] == 500_000
+    assert result["verificacoes"][0]["resultado"] == "OK"

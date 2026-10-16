@@ -6,6 +6,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+RATING_REQUIRED_SPECIALISTS = frozenset(
+    {"cadastro_regularidade", "sacado_orgao", "porte"}
+)
+
+
 @dataclass(frozen=True)
 class FindingValue:
     codigo: str
@@ -26,15 +31,15 @@ class EntradaPolitica:
 
 @dataclass
 class ResultadoPolitica:
-    score: float
-    rating: str
-    rating_potencial: str
-    merit: float
+    score: float | None
+    rating: str | None
+    rating_potencial: str | None
+    merit: float | None
     merit_potencial: float | None
-    fator_regularidade: float
-    fator_potencial: float
+    fator_regularidade: float | None
+    fator_potencial: float | None
     penalizacao_balanco: float | None
-    limite_aprovado_rs: float
+    limite_aprovado_rs: float | None
     limite_flags: list[str]
     bloqueios: list[str]
     ajuste_pd: dict[str, Any] | None
@@ -46,6 +51,8 @@ class ResultadoPolitica:
     limite_multiplicadores: list[dict[str, Any]] = field(default_factory=list)
     taxa_ajuste_pp: float = 0.0
     informativos: list[dict[str, Any]] = field(default_factory=list)
+    status_decisao: str = "DECISAO_CALCULADA"
+    faltantes: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -69,4 +76,6 @@ class ResultadoPolitica:
             "limite_multiplicadores": self.limite_multiplicadores,
             "taxa_ajuste_pp": self.taxa_ajuste_pp,
             "informativos": self.informativos,
+            "status_decisao": self.status_decisao,
+            "faltantes": self.faltantes,
         }

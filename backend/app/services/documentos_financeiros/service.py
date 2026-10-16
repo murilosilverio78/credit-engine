@@ -60,6 +60,31 @@ BALANCE = (
     "despesas_financeiras",
     "resultado_liquido",
 )
+PATRIMONIAL_FIELDS = (
+    "ativo_circulante",
+    "disponibilidades",
+    "contas_receber",
+    "ativo_nao_circulante",
+    "ativo_total",
+    "passivo_circulante",
+    "emprestimos_cp",
+    "fornecedores",
+    "obrigacoes_trabalhistas",
+    "obrigacoes_tributarias",
+    "passivo_nao_circulante",
+    "emprestimos_lp",
+    "patrimonio_liquido",
+    "capital_social",
+)
+RESULT_FIELDS = (
+    "receita_bruta",
+    "deducoes",
+    "receita_liquida",
+    "custos",
+    "despesas_operacionais",
+    "despesas_financeiras",
+    "resultado_liquido",
+)
 KEYWORDS = {
     "SPED_ECD": ("ativo", "passivo", "patrimônio líquido", "demonstração do resultado"),
     "BALANCO_DRE": (
@@ -832,10 +857,30 @@ def _consolidate(
     }
     for year, items in exercises.items():
         items.sort(key=lambda x: (_rank(x[2]), preference[x[1]]), reverse=True)
-        x, f, c, source = items[0]
+        patrimonial = next(
+            (
+                item
+                for item in items
+                if _num(item[0].get("ativo_total")) is not None
+                and _num(item[0].get("patrimonio_liquido")) is not None
+            ),
+            items[0],
+        )
+        x, f, c, source = patrimonial
         merged: dict[str, Any] = {}
         field_sources: dict[str, str] = {}
-        for field in BALANCE:
+        for field in PATRIMONIAL_FIELDS:
+            evidence = x.get(field)
+            if isinstance(evidence, dict):
+                evidence = {
+                    **evidence,
+                    "fonte": f,
+                    "sha256": source.get("sha256"),
+                }
+            merged[field] = evidence
+            if _num(evidence) is not None:
+                field_sources[field] = f
+        for field in RESULT_FIELDS:
             available = [item for item in items if _num(item[0].get(field)) is not None]
             if not available:
                 merged[field] = x.get(field)

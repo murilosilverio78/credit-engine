@@ -4,7 +4,7 @@ from datetime import date
 
 from app.services.policy.engine import avaliar
 from app.services.policy.types import EntradaPolitica, FindingValue
-from tests.test_policy_engine import _params
+from tests.test_policy_engine import _params, _rating_runs
 
 
 def _finding(code, value, state="CONFIRMADO", confidence="ALTA"):
@@ -91,7 +91,11 @@ def test_generic_v2_composes_effects_and_uses_maximum_authority():
     ]
     params = _params() | {"limite_fator_minimo": 0.4}
     result = avaliar(
-        EntradaPolitica({"valor_enquadrado": 1000, "valor_solicitado": 1000}, findings),
+        EntradaPolitica(
+            {"valor_enquadrado": 1000, "valor_solicitado": 1000},
+            findings,
+            _rating_runs(),
+        ),
         params,
         rules,
         date(2026, 1, 1),

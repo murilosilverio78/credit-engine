@@ -11,7 +11,11 @@ from datetime import date
 from typing import Any
 import unicodedata
 
-from app.services.policy.types import EntradaPolitica, ResultadoPolitica
+from app.services.policy.types import (
+    RATING_REQUIRED_SPECIALISTS,
+    EntradaPolitica,
+    ResultadoPolitica,
+)
 
 
 def _number(value: Any, default: float = 0.0) -> float:
@@ -364,6 +368,11 @@ def _band(value: float, bands: list[dict[str, Any]]) -> float:
     return _number(bands[-1]["nota"])
 
 
+def _missing_rating_specialists(entrada: EntradaPolitica) -> list[str]:
+    """List current-emitter specialists required before rating an operation."""
+    return sorted(RATING_REQUIRED_SPECIALISTS - set(entrada.runs_usados))
+
+
 def avaliar(
     entrada: EntradaPolitica,
     parametros: dict[str, Any],
@@ -379,6 +388,27 @@ def avaliar(
         found = _finding(entrada, str(rule.get("codigo")), trail, "vetos")
         if _matches_rule(found, rule.get("condicao") or {}):
             vetos.append(str(found.codigo))
+    missing_rating_specialists = _missing_rating_specialists(entrada)
+    if missing_rating_specialists and not vetos:
+        return ResultadoPolitica(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            [],
+            [],
+            None,
+            {},
+            [],
+            trail,
+            status_decisao="DADOS_INSUFICIENTES",
+            faltantes=missing_rating_specialists,
+        )
     idade = _finding(entrada, "idade_empresa_anos", trail, "saude_cadastral")
     capital = _finding(entrada, "capital_social_rs", trail, "saude_cadastral")
     porte = _finding(entrada, "porte_cadastral", trail, "saude_cadastral")
@@ -599,6 +629,8 @@ def avaliar(
             dimensions,
             [],
             trail,
+            status_decisao="VETO",
+            faltantes=missing_rating_specialists,
         )
     rating = _rating(score, parametros["faixas_rating"])
     potential_rating = _rating(
