@@ -1,9 +1,10 @@
 from app.services.findings import emitter
+from app.services.findings.adapters.common import finding
 from app.services.findings.adapters.documentos import emit_documentos
 from app.services.findings.adapters.porte import emit_porte
 from app.services.findings.adapters.reputacional import emit_reputacional
 from app.services.findings.hashing import entrada_hash
-from app.services.findings.schemas import Escopo, Estado
+from app.services.findings.schemas import Confianca, Escopo, Estado
 from tests.fakes.postgrest import Postgrest
 
 
@@ -37,12 +38,26 @@ def test_emitter_calls_rpc_once_and_swallows_rpc_failure(monkeypatch):
 def test_emitter_skips_unknown_code_and_unavailable_catalog(monkeypatch):
     db = Postgrest({"operations": [{"id": "op", "ambiente": "TESTE", "valor_enquadrado": 100}], "component_snapshots": [{"operation_id": "op", "component": "contrato_extracao", "status": "completed", "parsed_result": {"regime_conta_vinculada": "CONTA_DEPOSITO_VINCULADA", "flags": []}}], "cotacoes_broadfactor": []})
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: {})
-    emitter.emit_findings("op", "documentos", database=db)
-    assert db.rpc_calls[0][1]["p_achados"] == []
-    db.rpc_calls.clear()
+    result = emitter.emit_findings("op", "documentos", database=db)
+    assert result.desfecho == "sem_catalogo"
+    assert db.rpc_calls == []
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: None)
     emitter.emit_findings("op", "documentos", database=db)
     assert db.rpc_calls == []
+
+
+def test_emitter_persists_valid_candidates_when_unknown_codes_are_discarded(monkeypatch):
+    db = Postgrest({"operations": [{"id": "op", "ambiente": "TESTE", "valor_enquadrado": 100}], "component_snapshots": [{"operation_id": "op", "component": "contrato_extracao", "status": "completed", "parsed_result": {}}], "cotacoes_broadfactor": []})
+    valid = finding("conta_vinculada_regime", Escopo.CONTRATO, "CONTA_DEPOSITO_VINCULADA", component="contrato_extracao", path="regime_conta_vinculada", fingerprint="test", state=Estado.CONFIRMADO, confidence=Confianca.MEDIA)
+    unknown = valid.model_copy(update={"codigo": "codigo_ainda_sem_catalogo"})
+    monkeypatch.setitem(emitter.ADAPTERS, "documentos", lambda *_args, **_kwargs: [valid, unknown])
+    monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: {"conta_vinculada_regime:1": {"codigo": "conta_vinculada_regime", "versao": 1, "escopo": "CONTRATO", "tipo_valor": "ENUM"}})
+
+    result = emitter.emit_findings("op", "documentos", database=db)
+
+    assert result.desfecho == "emitido"
+    assert len(db.rpc_calls) == 1
+    assert [item["codigo"] for item in db.rpc_calls[0][1]["p_achados"]] == ["conta_vinculada_regime"]
 
 
 def test_cadastro_hash_includes_operation_documents_and_loads_empty_catalog_safely(monkeypatch):

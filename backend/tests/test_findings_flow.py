@@ -275,6 +275,12 @@ def test_hash_extras_are_limited_to_each_specialist(monkeypatch):
             "escopo": "CEDENTE",
             "tipo_valor": "OBJETO",
         },
+        "cobertura_exposicao:1": {
+            "codigo": "cobertura_exposicao",
+            "versao": 1,
+            "escopo": "OPERACAO",
+            "tipo_valor": "NUMERO",
+        },
     }
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: catalog)
     db.tables["cotacoes_broadfactor"] = [

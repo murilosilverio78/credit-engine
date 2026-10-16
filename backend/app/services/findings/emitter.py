@@ -250,9 +250,11 @@ def emit_findings(
             adapter_kwargs["database"] = db
         candidates = adapter(snapshots, **adapter_kwargs)
         achados = []
+        unknown_codes = 0
         for candidate in candidates:
             definition = catalog.get(f"{candidate.codigo}:{candidate.catalogo_versao}")
             if not definition:
+                unknown_codes += 1
                 logger.warning(
                     "findings.unknown_code_discarded",
                     operation_id=operation_id,
@@ -269,6 +271,14 @@ def emit_findings(
                 )
                 continue
             achados.append(candidate.model_dump(mode="json"))
+        if candidates and unknown_codes == len(candidates):
+            logger.warning(
+                "findings.emission_skipped_all_codes_unknown",
+                operation_id=operation_id,
+                especialista=especialista,
+                candidatos=len(candidates),
+            )
+            return EmissionResult("sem_catalogo")
         run_status = (
             "PARCIAL"
             if any(statuses.get(component) == "failed" for component in required)

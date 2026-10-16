@@ -46,6 +46,15 @@ def test_porte_uses_completed_snapshot_override(monkeypatch):
     assert porte[1]["p_achados"][0]["valor"] == "Adequado"
 
 
+def test_reemissao_includes_financeiro_after_documentos_financeiros_is_terminal():
+    db = _ready_db()
+    db.tables["component_snapshots"].append({"operation_id": "op", "component": "documentos_financeiros", "status": "completed", "parsed_result": {}})
+
+    result = reemitir_operacao("op", aplicar=False, database=db)
+
+    assert result["especialistas"]["financeiro"] == "pronto"
+
+
 def test_emitter_all_outcomes(monkeypatch):
     db = _ready_db()
     pending = _ready_db(); pending.tables["component_snapshots"][0]["status"] = "pending"
