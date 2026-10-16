@@ -16,6 +16,7 @@ logger = structlog.get_logger()
 
 T = TypeVar("T")
 SNAPSHOT_WRITE_RETRY_DELAYS = (0.2, 0.5)
+NO_FINDINGS_COMPONENTS = {"documentos_financeiros"}
 
 
 def _normalized_text(value: object) -> str:
@@ -264,7 +265,8 @@ class BaseComponentTask:
                     ),
                 )
                 try:
-                    _dual_write_findings(operation_id, component)
+                    if component not in NO_FINDINGS_COMPONENTS:
+                        _dual_write_findings(operation_id, component)
                 except Exception as findings_exc:
                     logger.warning(
                         "findings.failed_snapshot_dual_write_failed",
@@ -377,7 +379,8 @@ class BaseComponentTask:
                     result=result,
                     duration_ms=duration_ms,
                 )
-            _dual_write_findings(operation_id, component, result)
+            if component not in NO_FINDINGS_COMPONENTS:
+                _dual_write_findings(operation_id, component, result)
 
             audit_svc.log(
                 operation_id,
@@ -431,7 +434,8 @@ class BaseComponentTask:
                 ),
             )
             try:
-                _dual_write_findings(operation_id, component)
+                if component not in NO_FINDINGS_COMPONENTS:
+                    _dual_write_findings(operation_id, component)
             except Exception as findings_exc:
                 logger.warning(
                     "findings.failed_snapshot_dual_write_failed",

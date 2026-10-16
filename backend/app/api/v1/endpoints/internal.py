@@ -513,6 +513,7 @@ EXECUTABLE_COMPONENTS = frozenset(
         "brasil_api",
         "recursos_recebidos",
         "web_research",
+        "documentos_financeiros",
     }
 )
 
@@ -578,6 +579,7 @@ async def executar_componente(
     from app.workers.tasks.contratos_pncp import run_contratos_pncp
     from app.workers.tasks.recursos_recebidos import run_recursos_recebidos
     from app.workers.tasks.web_research import run_web_research
+    from app.workers.tasks.documentos_financeiros import run_documentos_financeiros
 
     runners = {
         "brasil_api": run_brasil_api,
@@ -585,6 +587,7 @@ async def executar_componente(
         "contratos_pncp": run_contratos_pncp,
         "recursos_recebidos": run_recursos_recebidos,
         "web_research": run_web_research,
+        "documentos_financeiros": run_documentos_financeiros,
     }
     execution_error: Exception | None = None
     try:

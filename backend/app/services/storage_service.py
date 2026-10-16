@@ -120,6 +120,12 @@ class StorageService:
         logger.info("storage.document_key_ready", storage_key=storage_key, uploaded=uploaded)
         return uploaded
 
+    def download_document_at_key(self, storage_key: str) -> bytes:
+        """Baixa bytes do R2 sem registrar conteudo, nome ou URL assinada."""
+        client = get_r2_client()
+        response = client.get_object(Bucket=settings.R2_BUCKET_NAME, Key=storage_key)
+        return response["Body"].read()
+
     async def get_presigned_url(self, storage_key: str, expires_in: int = 3600) -> str:
         """Gera URL pré-assinada para download seguro (expira em 1h por padrão)."""
         client = get_r2_client()

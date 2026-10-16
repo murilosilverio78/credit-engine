@@ -1004,6 +1004,17 @@ async def start_report_analysis(operation_id: str):
                 .eq("id", operation_id)
                 .execute(),
             )
+            # Documentos financeiros sao uma leitura paga e complementar. Falha
+            # precisa ficar no snapshot, mas nao pode impedir o relatorio atual.
+            try:
+                from app.workers.tasks.documentos_financeiros import run_documentos_financeiros
+                await asyncio.to_thread(run_documentos_financeiros, operation_id)
+            except Exception as exc:
+                logger.warning(
+                    "pipeline.documentos_financeiros_nonblocking_failure",
+                    operation_id=operation_id,
+                    error=exc.__class__.__name__,
+                )
             return await _phase3_4(operation_id)
         except Exception as exc:
             stage = _PIPELINE_STAGE.get()

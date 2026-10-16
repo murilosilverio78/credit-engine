@@ -30,6 +30,7 @@ DEFAULT_TTL: dict[str, int] = {
     "boa_vista": 24,
     "serpro": 24,
     "web_research": 48,
+    "documentos_financeiros": 24,
     "score_engine": 0,
 }
 SANCTION_COMPONENTS = {
