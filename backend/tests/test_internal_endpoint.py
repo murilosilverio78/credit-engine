@@ -65,6 +65,7 @@ def test_capture_documents_endpoint_filters_explicit_quote_ids(monkeypatch):
         "cotacoes_broadfactor": [
             {"cotacao_id": "C-1", "cnpj": "03012610000101", "operation_id": None, "estagio": "DOCUMENTADA"},
             {"cotacao_id": "C-2", "cnpj": "03012610000101", "operation_id": None, "estagio": "ENQUADRADA"},
+            {"cotacao_id": "C-3", "cnpj": "03012610000101", "operation_id": None, "estagio": "ENCERRADA"},
         ],
     })
     monkeypatch.setattr(database, "supabase", db)
@@ -78,7 +79,7 @@ def test_capture_documents_endpoint_filters_explicit_quote_ids(monkeypatch):
     response = make_client().post(
         "/api/v1/internal/documentos/capturar",
         headers={"X-Internal-Token": "configured-token"},
-        json={"cotacao_ids": ["C-2"]},
+        json={"cotacao_ids": ["C-2", "C-3"]},
     )
 
     assert response.status_code == 200

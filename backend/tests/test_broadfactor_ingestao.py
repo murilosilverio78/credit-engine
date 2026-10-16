@@ -132,7 +132,7 @@ def install_funnel(monkeypatch, cotacoes, documentos=None, initial_quotes=None):
                 estagio_max=maximum,
             )
             closed += 1
-        return closed
+        return {"encerradas": closed, "falhas_encerramento": 0}
 
     async def start_analysis(operation_id, **_kwargs):
         analyses.append(operation_id)
@@ -142,6 +142,11 @@ def install_funnel(monkeypatch, cotacoes, documentos=None, initial_quotes=None):
     monkeypatch.setattr(broadfactor_ingestao, "_load_quote_state", load_state)
     monkeypatch.setattr(broadfactor_ingestao, "_update_quote_stage", update_stage)
     monkeypatch.setattr(broadfactor_ingestao, "_mark_missing_quotes_closed", close_missing)
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_mark_expired_quotes_closed",
+        lambda *_args, **_kwargs: {"encerradas": 0, "falhas_encerramento": 0},
+    )
     monkeypatch.setattr(broadfactor_ingestao, "_update_quote_status", lambda *_args: None)
     monkeypatch.setattr(broadfactor_ingestao, "_start_analysis", start_analysis)
     return database, created, analyses
@@ -260,6 +265,101 @@ async def test_empty_listing_never_closes_existing_quotes(monkeypatch):
     assert result["encerradas"] == 0
 
 
+@pytest.mark.asyncio
+async def test_suspicious_listing_still_closes_expired_quotes(monkeypatch):
+    database, _, _ = install_funnel(
+        monkeypatch,
+        [],
+        initial_quotes=[{
+            "cotacao_id": "C-expired",
+            "ambiente": "PRODUCAO",
+            "estagio": "DOCUMENTADA",
+            "estagio_max": "DOCUMENTADA",
+            "data_expiracao": "2026-10-15",
+        }],
+    )
+    calls = []
+
+    def close_expired(_, **_kwargs):
+        calls.append("expired")
+        database.quotes["C-expired"]["estagio"] = "ENCERRADA"
+        database.quotes["C-expired"]["estagio_motivo"] = "cotacao_expirada"
+        return {"encerradas": 1, "falhas_encerramento": 0}
+
+    monkeypatch.setattr(broadfactor_ingestao, "_listing_is_safe_for_closure", lambda *_: False)
+    monkeypatch.setattr(broadfactor_ingestao, "_mark_expired_quotes_closed", close_expired)
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert calls == ["expired"]
+    assert database.quotes["C-expired"]["estagio"] == "ENCERRADA"
+    assert database.quotes["C-expired"]["estagio_motivo"] == "cotacao_expirada"
+    assert result["encerradas_expiradas"] == 1
+    assert result["encerradas_ausentes"] == 0
+
+
+@pytest.mark.asyncio
+async def test_expired_listed_quote_is_not_restored_or_sent_to_document_capture(monkeypatch):
+    expired = quote("C-expired-listed")
+    expired.data_expiracao = date(2026, 10, 15)
+    database, _, _ = install_funnel(
+        monkeypatch,
+        [expired],
+        documentos={expired.id: [document()]},
+        initial_quotes=[{
+            "cotacao_id": expired.id,
+            "ambiente": "PRODUCAO",
+            "estagio": "DOCUMENTADA",
+            "estagio_max": "DOCUMENTADA",
+            "operation_id": "operation-C-expired-listed",
+        }],
+    )
+    captures = []
+    restores = []
+
+    def close_expired(_, **_kwargs):
+        database.quotes[expired.id]["estagio"] = "ENCERRADA"
+        database.quotes[expired.id]["estagio_motivo"] = "cotacao_expirada"
+        return {"encerradas": 1, "falhas_encerramento": 0}
+
+    monkeypatch.setattr(broadfactor_ingestao, "_mark_expired_quotes_closed", close_expired)
+    monkeypatch.setattr(broadfactor_ingestao, "_capturar_documentos", lambda *args: captures.append(args))
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_restore_linked_operation_if_reappeared",
+        lambda *_args: restores.append(True),
+    )
+
+    await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert database.quotes[expired.id]["estagio"] == "ENCERRADA"
+    assert captures == []
+    assert restores == []
+
+
+@pytest.mark.asyncio
+async def test_safe_listing_is_recorded_even_when_missing_closure_batch_fails(monkeypatch):
+    install_funnel(monkeypatch, [])
+    recordings = []
+
+    monkeypatch.setattr(broadfactor_ingestao, "_listing_is_safe_for_closure", lambda *_: True)
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_mark_missing_quotes_closed",
+        lambda *_: (_ for _ in ()).throw(RuntimeError("database unavailable")),
+    )
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_record_successful_listing",
+        lambda _db, count: recordings.append(count),
+    )
+
+    result = await broadfactor_ingestao.run_broadfactor_ingestao()
+
+    assert recordings == [0]
+    assert result["falhas_encerramento"] == 1
+
+
 @pytest.mark.parametrize(
     "status",
     ["completed", "approved", "rejected", "escalated", "manual_review", "pending", "processing", "running"],
@@ -320,6 +420,67 @@ def test_listing_with_less_than_half_previous_volume_is_not_safe(monkeypatch):
     )
 
     assert broadfactor_ingestao._listing_is_safe_for_closure(object(), 49) is False
+
+
+def test_failed_quote_closure_does_not_block_following_quotes(monkeypatch):
+    closed = []
+    logs = []
+
+    def close_quote(_, row, *, motivo):
+        if row["cotacao_id"] == "C-fails":
+            raise RuntimeError("transition refused")
+        closed.append((row["cotacao_id"], motivo))
+
+    monkeypatch.setattr(broadfactor_ingestao, "_close_quote", close_quote)
+    monkeypatch.setattr(
+        broadfactor_ingestao.logger,
+        "error",
+        lambda event, **values: logs.append((event, values)),
+    )
+
+    summary = broadfactor_ingestao._close_rows(
+        object(),
+        [
+            {"cotacao_id": "C-fails", "operation_id": "op-fails"},
+            {"cotacao_id": "C-works", "operation_id": "op-works"},
+        ],
+        motivo="cotacao_ausente_na_listagem",
+    )
+
+    assert summary == {"encerradas": 1, "falhas_encerramento": 1}
+    assert closed == [("C-works", "cotacao_ausente_na_listagem")]
+    assert logs == [("broadfactor_ingestao.quote_closure_failed", {
+        "cotacao_id": "C-fails", "operation_id": "op-fails", "error": "transition refused",
+    })]
+
+
+def test_mark_expired_quotes_closes_only_dates_before_brt_today(monkeypatch):
+    from tests.fakes.postgrest import Postgrest
+
+    database = Postgrest({"cotacoes_broadfactor": [
+        {"cotacao_id": "C-expired", "ambiente": "PRODUCAO", "estagio": "DOCUMENTADA", "data_expiracao": "2026-10-15"},
+        {"cotacao_id": "C-today", "ambiente": "PRODUCAO", "estagio": "DOCUMENTADA", "data_expiracao": "2026-10-16"},
+        {"cotacao_id": "C-closed", "ambiente": "PRODUCAO", "estagio": "ENCERRADA", "data_expiracao": "2026-10-01"},
+    ]})
+    closed = []
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_execute_with_retry",
+        lambda _id, _component, _action, request: request(),
+    )
+    monkeypatch.setattr(
+        broadfactor_ingestao,
+        "_close_quote",
+        lambda _db, row, *, motivo: closed.append((row["cotacao_id"], motivo)),
+    )
+
+    summary = broadfactor_ingestao._mark_expired_quotes_closed(
+        database,
+        today=date(2026, 10, 16),
+    )
+
+    assert summary == {"encerradas": 1, "falhas_encerramento": 0}
+    assert closed == [("C-expired", "cotacao_expirada")]
 
 
 @pytest.mark.asyncio

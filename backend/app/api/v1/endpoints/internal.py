@@ -245,7 +245,7 @@ async def capturar_documentos(
 
     query = supabase.table("cotacoes_broadfactor").select(
         "cotacao_id,cnpj,operation_id,estagio"
-    )
+    ).neq("estagio", "ENCERRADA")
     cotacao_ids = request.cotacao_ids if request else None
     if cotacao_ids is None:
         query = query.in_("estagio", ["DOCUMENTADA", "QUALIFICADA"])

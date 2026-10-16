@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import time
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import structlog
 
@@ -223,7 +224,7 @@ def _update_quote_stage(
     n_documentos: int | None = None,
     tipos_documento: list[str] | None = None,
     estagio_max: str | None = None,
-) -> None:
+) -> bool:
     data: dict[str, Any] = {
         "estagio": estagio,
         "estagio_motivo": motivo,
@@ -258,6 +259,8 @@ def _update_quote_stage(
             estagio=estagio,
             error=str(exc),
         )
+        return False
+    return True
 
 
 def _documentos_info(documentos: list[DocumentoAnexo]) -> tuple[int, list[str]]:
@@ -370,10 +373,15 @@ def _transition_quote_operation(
     return True
 
 
-def _close_linked_operation(supabase: Any, row: dict[str, Any]) -> None:
+def _close_linked_operation(
+    supabase: Any,
+    row: dict[str, Any],
+    *,
+    motivo: str = "cotacao_ausente_na_listagem",
+) -> bool:
     operation_id = row.get("operation_id")
     if not operation_id:
-        return
+        return False
     result = _execute_with_retry(
         str(operation_id), "broadfactor_ingestao", "load_operation_for_quote_closure",
         lambda: supabase.table("operations").select("status,pendencia_coleta")
@@ -382,10 +390,10 @@ def _close_linked_operation(supabase: Any, row: dict[str, Any]) -> None:
     operation = result.data or {}
     current = operation.get("status")
     if current in PROTECTED_QUOTE_OPERATION_STATUSES or current not in TERMINAL_QUOTE_OPERATION_STATUSES:
-        return
-    _transition_quote_operation(
+        return False
+    return _transition_quote_operation(
         supabase, str(operation_id), next_status="cotacao_encerrada",
-        previous_status=current, motivos=["cotacao_ausente_na_listagem"],
+        previous_status=current, motivos=[motivo],
         action_context="cotacao_encerrada",
         previous_pendencia_coleta=bool(operation.get("pendencia_coleta")),
     )
@@ -420,7 +428,58 @@ def _restore_linked_operation_if_reappeared(supabase: Any, operation_id: str) ->
     )
 
 
-def _mark_missing_quotes_closed(supabase: Any, seen_ids: set[str]) -> int:
+def _today_brt() -> date:
+    return datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+
+
+def _close_quote(
+    supabase: Any,
+    row: dict[str, Any],
+    *,
+    motivo: str,
+) -> None:
+    cotacao_id = str(row["cotacao_id"])
+    estagio_max = _stage_max(row.get("estagio_max"), row.get("estagio") or "LISTA_ESPERA")
+    # Fecha primeiro a operação vinculada: se a transição/auditoria falhar, a
+    # cotação permanece ativa e poderá ser tentada novamente no próximo ciclo.
+    _close_linked_operation(supabase, row, motivo=motivo)
+    if not _update_quote_stage(
+        supabase,
+        cotacao_id,
+        "ENCERRADA",
+        motivo=motivo,
+        estagio_max=estagio_max,
+    ):
+        raise RuntimeError("quote_stage_update_failed")
+
+
+def _close_rows(
+    supabase: Any,
+    rows: list[dict[str, Any]],
+    *,
+    motivo: str,
+) -> dict[str, int]:
+    closed = 0
+    failures = 0
+    for row in rows:
+        cotacao_id = row.get("cotacao_id")
+        if not cotacao_id:
+            continue
+        try:
+            _close_quote(supabase, row, motivo=motivo)
+            closed += 1
+        except Exception as exc:
+            failures += 1
+            logger.error(
+                "broadfactor_ingestao.quote_closure_failed",
+                cotacao_id=cotacao_id,
+                operation_id=row.get("operation_id"),
+                error=str(exc),
+            )
+    return {"encerradas": closed, "falhas_encerramento": failures}
+
+
+def _mark_missing_quotes_closed(supabase: Any, seen_ids: set[str]) -> dict[str, int]:
     result = _execute_with_retry(
         "broadfactor_ingestao",
         "broadfactor_ingestao",
@@ -431,22 +490,36 @@ def _mark_missing_quotes_closed(supabase: Any, seen_ids: set[str]) -> int:
         .neq("estagio", "ENCERRADA")
         .execute(),
     )
-    closed = 0
-    for row in result.data or []:
-        cotacao_id = row.get("cotacao_id")
-        if not cotacao_id or cotacao_id in seen_ids:
-            continue
-        estagio_max = _stage_max(row.get("estagio_max"), row.get("estagio") or "LISTA_ESPERA")
-        _update_quote_stage(
-            supabase,
-            cotacao_id,
-            "ENCERRADA",
-            motivo="cotacao_ausente_na_listagem",
-            estagio_max=estagio_max,
-        )
-        _close_linked_operation(supabase, row)
-        closed += 1
-    return closed
+    rows = [
+        row
+        for row in result.data or []
+        if row.get("cotacao_id") and row.get("cotacao_id") not in seen_ids
+    ]
+    return _close_rows(supabase, rows, motivo="cotacao_ausente_na_listagem")
+
+
+def _mark_expired_quotes_closed(
+    supabase: Any,
+    *,
+    today: date | None = None,
+) -> dict[str, int]:
+    today = today or _today_brt()
+    result = _execute_with_retry(
+        "broadfactor_ingestao",
+        "broadfactor_ingestao",
+        "load_expired_quotes_for_closure",
+        lambda: supabase.table("cotacoes_broadfactor")
+        .select("cotacao_id,estagio,estagio_max,operation_id,data_expiracao")
+        .eq("ambiente", "PRODUCAO")
+        .neq("estagio", "ENCERRADA")
+        .lt("data_expiracao", today.isoformat())
+        .execute(),
+    )
+    return _close_rows(
+        supabase,
+        result.data or [],
+        motivo="cotacao_expirada",
+    )
 
 
 def _count_stages(supabase: Any) -> dict[str, int]:
@@ -529,6 +602,9 @@ async def _run_broadfactor_ingestao(
             "reprocessadas": 0,
             "duplicadas": 0,
             "tentativas_esgotadas": 0,
+            "encerradas_ausentes": 0,
+            "encerradas_expiradas": 0,
+            "falhas_encerramento": 0,
             "falhas": 1,
         }
 
@@ -560,6 +636,9 @@ async def _run_broadfactor_ingestao(
             "reprocessadas": 0,
             "duplicadas": 0,
             "tentativas_esgotadas": 0,
+            "encerradas_ausentes": 0,
+            "encerradas_expiradas": 0,
+            "falhas_encerramento": 0,
             "falhas": 0,
         }
         logger.info("broadfactor_ingestao.dry_run_completed", **summary)
@@ -581,13 +660,34 @@ async def _run_broadfactor_ingestao(
 
     seen_ids = {cotacao.id for cotacao in cotacoes}
     encerradas = 0
+    encerradas_ausentes = 0
+    encerradas_expiradas = 0
+    falhas_encerramento = 0
+    today_brt = _today_brt()
+    try:
+        expiradas = _mark_expired_quotes_closed(supabase, today=today_brt)
+        encerradas_expiradas = int(expiradas["encerradas"])
+        falhas_encerramento += int(expiradas["falhas_encerramento"])
+        encerradas += encerradas_expiradas
+    except Exception as exc:
+        falhas_encerramento += 1
+        logger.error("broadfactor_ingestao.close_expired_failed", error=str(exc))
+
     if _listing_is_safe_for_closure(supabase, len(cotacoes)):
         try:
-            encerradas = _mark_missing_quotes_closed(supabase, seen_ids)
-            _record_successful_listing(supabase, len(cotacoes))
+            ausentes = _mark_missing_quotes_closed(supabase, seen_ids)
+            encerradas_ausentes = int(ausentes["encerradas"])
+            falhas_encerramento += int(ausentes["falhas_encerramento"])
+            encerradas += encerradas_ausentes
         except Exception as exc:
-            falhas += 1
+            falhas_encerramento += 1
             logger.error("broadfactor_ingestao.close_missing_failed", error=str(exc))
+        finally:
+            try:
+                _record_successful_listing(supabase, len(cotacoes))
+            except Exception as exc:
+                falhas += 1
+                logger.error("broadfactor_ingestao.record_listing_failed", error=str(exc))
 
     for index, cotacao in enumerate(cotacoes):
         active_tasks = [
@@ -635,6 +735,15 @@ async def _run_broadfactor_ingestao(
             estagio_max = state.get("estagio_max")
             operation_id = str(state["operation_id"]) if state.get("operation_id") else None
 
+            # A Broadfactor pode continuar listando cotacoes ja vencidas. Elas
+            # nao reapareceram para o funil: permanecem encerradas e seus
+            # documentos jamais sao consultados/capturados neste ciclo.
+            if (
+                estagio == "ENCERRADA"
+                and cotacao.data_expiracao
+                and cotacao.data_expiracao < today_brt
+            ):
+                continue
             if estagio == "ENCERRADA" and operation_id:
                 _restore_linked_operation_if_reappeared(supabase, operation_id)
 
@@ -918,6 +1027,9 @@ async def _run_broadfactor_ingestao(
         "descartadas_por_motivo": dict(sorted(motivos.items())),
         "estagios": estagios,
         "encerradas": encerradas,
+        "encerradas_ausentes": encerradas_ausentes,
+        "encerradas_expiradas": encerradas_expiradas,
+        "falhas_encerramento": falhas_encerramento,
         "criadas": criadas,
         "reprocessadas": reprocessadas,
         "duplicadas": duplicadas,
