@@ -138,6 +138,7 @@ class Result:
     status: int | None = None
     message: str | None = None
     endpoint: str = ""
+    error_type: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -171,7 +172,11 @@ class QuotationInactiveError(BroadfactorError):
 
 class DocumentDownloadError(BroadfactorError):
     """O conteudo retornado para um documento Broadfactor nao e utilizavel."""
-    pass
+
+    def __init__(self, code: str, status=None, endpoint="", error_type: str | None = None):
+        super().__init__(code, status=status, endpoint=endpoint)
+        self.code = code
+        self.error_type = error_type
 
 
 # --------------------------------------------------------------------------
@@ -682,7 +687,7 @@ class BroadfactorClient:
         self._autenticar()
 
     # ------------------------------------------------------------ transporte
-    def _req(self, method: str, caminho: str, *, body=None) -> Result:
+    def _req(self, method: str, caminho: str, *, body=None, timeout: int | None = None) -> Result:
         self._garantir_token()
         # Prefixo forcado: sem /integracao a API devolve 403 com envelope do
         # Spring Security, que parece erro de autorizacao mas e rota errada.
@@ -694,14 +699,19 @@ class BroadfactorClient:
         for tentativa in range(1, MAX_RETRIES + 1):
             try:
                 r = self._s.request(
-                    method, url, json=body, timeout=self.timeout,
+                    method, url, json=body, timeout=timeout or self.timeout,
                     headers={"Authorization": f"Bearer {self._token}"})
             except httpx.RequestError as e:
                 ultimo_erro = e
                 if tentativa < MAX_RETRIES:
                     time.sleep(2 ** tentativa)
                     continue
-                return Result(Outcome.ERROR, message=str(e), endpoint=caminho)
+                return Result(
+                    Outcome.ERROR,
+                    message=str(e),
+                    endpoint=caminho,
+                    error_type=e.__class__.__name__,
+                )
 
             if r.status_code == 401:
                 rejected_token = self._token
@@ -909,7 +919,11 @@ class BroadfactorClient:
 
     def baixar_documento(self, documento_id: str) -> DocumentoBaixado:
         """Baixa um anexo da cotacao sem expor seu conteudo em logs."""
-        res = self._req("GET", f"/empresa/documentos/baixar/{documento_id}")
+        res = self._req(
+            "GET",
+            f"/empresa/documentos/baixar/{documento_id}",
+            timeout=120,
+        )
         if "QUOTATION_INACTIVE" in str(res.message or "").upper():
             raise QuotationInactiveError(
                 "QUOTATION_INACTIVE",
@@ -917,10 +931,13 @@ class BroadfactorClient:
                 endpoint=res.endpoint,
             )
         if not res.ok or not isinstance(res.data, dict):
+            message = str(res.message or "").lower()
+            code = "timeout" if "timeout" in message or str(res.error_type or "").endswith("Timeout") else "falha_download_documento"
             raise DocumentDownloadError(
-                "falha_download_documento",
+                code,
                 status=res.status,
                 endpoint=res.endpoint,
+                error_type=res.error_type,
             )
         encoded = res.data.get("arquivo")
         if not isinstance(encoded, str) or not encoded.strip():
@@ -930,7 +947,10 @@ class BroadfactorClient:
                 endpoint=res.endpoint,
             )
         try:
-            content = base64.b64decode(encoded, validate=True)
+            normalized = re.sub(r"\s+", "", encoded)
+            normalized = re.sub(r"^data:[^,]*;base64,", "", normalized, flags=re.IGNORECASE)
+            normalized += "=" * (-len(normalized) % 4)
+            content = base64.b64decode(normalized, validate=True)
         except (ValueError, TypeError) as exc:
             raise DocumentDownloadError(
                 "documento_base64_invalido",

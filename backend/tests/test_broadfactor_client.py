@@ -154,6 +154,43 @@ def test_download_document_decodes_base64_and_keeps_metadata(monkeypatch):
     assert document.conteudo == b"pdf"
 
 
+@pytest.mark.parametrize(
+    ("encoded", "expected"),
+    [
+        ("cGRm\r\n", b"pdf"),
+        ("data:application/pdf;base64,cGRm", b"pdf"),
+        ("Zm8", b"fo"),
+    ],
+)
+def test_download_document_normalizes_whitespace_data_uri_and_padding(monkeypatch, encoded, expected):
+    client = BroadfactorClient("client", "secret", "http://broadfactor.test")
+    monkeypatch.setattr(
+        client,
+        "_req",
+        lambda *_args, **_kwargs: Result(Outcome.OK, data={"arquivo": encoded}),
+    )
+
+    assert client.baixar_documento("doc-1").conteudo == expected
+
+
+def test_download_document_uses_own_timeout_and_classifies_timeout(monkeypatch):
+    client = BroadfactorClient("client", "secret", "http://broadfactor.test")
+    calls = []
+
+    def request(*args, **kwargs):
+        calls.append((args, kwargs))
+        return Result(Outcome.ERROR, message="request timeout", error_type="ReadTimeout")
+
+    monkeypatch.setattr(client, "_req", request)
+
+    with pytest.raises(DocumentDownloadError, match="timeout") as error:
+        client.baixar_documento("doc-1")
+
+    assert calls[0][1]["timeout"] == 120
+    assert error.value.code == "timeout"
+    assert error.value.error_type == "ReadTimeout"
+
+
 def test_download_document_rejects_invalid_base64(monkeypatch):
     client = BroadfactorClient("client", "secret", "http://broadfactor.test")
     monkeypatch.setattr(

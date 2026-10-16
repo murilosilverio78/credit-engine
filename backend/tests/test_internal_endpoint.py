@@ -19,6 +19,7 @@ def make_client() -> TestClient:
 
 def test_capture_documents_endpoint_without_body_uses_documented_quotes(monkeypatch):
     from app.core import database
+    from app.integrations.broadfactor.client import DocumentDownloadError
     from app.services import documentos_captura_service
 
     db = Postgrest({
@@ -35,7 +36,7 @@ def test_capture_documents_endpoint_without_body_uses_documented_quotes(monkeypa
     def fake_capture(cotacao_id, cnpj, operation_id=None):
         calls.append((cotacao_id, cnpj, operation_id))
         if cotacao_id == "C-2":
-            raise RuntimeError("storage unavailable")
+            raise DocumentDownloadError("falha_download_documento", status=403)
         return {"capturados": 1, "reaproveitados": 0, "falhas": 0, "indisponiveis": 0, "ignorados": 0}
 
     monkeypatch.setattr(documentos_captura_service, "capturar_documentos_cotacao", fake_capture)
@@ -51,6 +52,9 @@ def test_capture_documents_endpoint_without_body_uses_documented_quotes(monkeypa
         "indisponiveis": 0,
         "ignorados": 0,
     }
+    assert response.json()["cotacoes"][1]["erro"] == (
+        "DocumentDownloadError:falha_download_documento:403"
+    )
 
 
 def test_capture_documents_endpoint_filters_explicit_quote_ids(monkeypatch):

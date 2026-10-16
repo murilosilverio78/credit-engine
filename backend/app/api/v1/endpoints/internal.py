@@ -238,7 +238,10 @@ async def capturar_documentos(
 ):
     """Captura anexos financeiros em sequencia, sem alterar o funil."""
     from app.core.database import supabase
-    from app.services.documentos_captura_service import capturar_documentos_cotacao
+    from app.services.documentos_captura_service import (
+        _erro,
+        capturar_documentos_cotacao,
+    )
 
     query = supabase.table("cotacoes_broadfactor").select(
         "cotacao_id,cnpj,operation_id,estagio"
@@ -279,7 +282,7 @@ async def capturar_documentos(
                 "falhas": 1,
                 "indisponiveis": 0,
                 "ignorados": 0,
-                "erro": f"{exc.__class__.__name__}: falha_na_captura",
+                "erro": _erro(exc),
             })
             totals["falhas"] += 1
     return {"cotacoes": items, "totais": totals}

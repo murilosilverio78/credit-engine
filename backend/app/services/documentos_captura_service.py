@@ -67,9 +67,15 @@ def _normalized_cnpj(cnpj: str) -> str:
     return value
 
 
-def _safe_error(exc: Exception) -> str:
+def _erro(exc: Exception) -> str:
     """Nunca persiste ou registra corpo/base64/token vindo de fonte externa."""
-    return f"{exc.__class__.__name__}: falha_na_captura"[:200]
+    code = str(getattr(exc, "code", None) or "falha_na_captura")
+    status = getattr(exc, "status", None)
+    detail = f"{exc.__class__.__name__}:{code}:{status}"
+    error_type = getattr(exc, "error_type", None)
+    if error_type:
+        detail = f"{detail}:{error_type}"
+    return detail[:200]
 
 
 def _extension(nome: str | None, mime: str | None) -> str:
@@ -312,7 +318,7 @@ def capturar_documentos_cotacao(
             _upsert(database, {
                 **base,
                 "status": "FALHA",
-                "erro": _safe_error(exc),
+                "erro": _erro(exc),
                 "tentativas": attempts + 1,
             })
             summary["falhas"] += 1

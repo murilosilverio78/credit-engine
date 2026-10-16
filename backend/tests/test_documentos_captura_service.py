@@ -6,6 +6,7 @@ for key in ("SECRET_KEY", "TWOCAPTCHA_API_KEY", "RESEND_API_KEY"):
 from app.integrations.broadfactor.client import (  # noqa: E402
     DocumentoAnexo,
     DocumentoBaixado,
+    DocumentDownloadError,
     QuotationInactiveError,
 )
 from app.services.documentos_captura_service import (  # noqa: E402
@@ -136,3 +137,33 @@ def test_failure_isolated_and_inactive_marks_remaining_documents():
     assert result["indisponiveis"] == 2
     assert {row["status"] for row in database.tables["documentos_cliente"]} == {"FALHA", "INDISPONIVEL"}
     assert storage.calls == []
+
+
+def test_failure_reason_contains_download_code_and_http_status():
+    database = Postgrest({"documentos_cliente": []})
+    client = FakeClient(
+        [doc("forbidden")],
+        {"forbidden": DocumentDownloadError("falha_download_documento", status=403)},
+    )
+
+    result = capture(database, client, FakeStorage())
+
+    assert result["falhas"] == 1
+    assert database.tables["documentos_cliente"][0]["erro"] == (
+        "DocumentDownloadError:falha_download_documento:403"
+    )
+
+
+def test_failure_reason_includes_network_error_type_without_payload():
+    database = Postgrest({"documentos_cliente": []})
+    client = FakeClient(
+        [doc("timeout")],
+        {"timeout": DocumentDownloadError("timeout", error_type="ReadTimeout")},
+    )
+
+    result = capture(database, client, FakeStorage())
+
+    assert result["falhas"] == 1
+    assert database.tables["documentos_cliente"][0]["erro"] == (
+        "DocumentDownloadError:timeout:None:ReadTimeout"
+    )
