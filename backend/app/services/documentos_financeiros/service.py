@@ -724,7 +724,18 @@ def _consolidate(
                 and _num(x.get("dividas_onus_atual")) is not None
                 else None
             ),
-            "participacoes": x.get("participacoes") or [],
+            "bens_por_grupo": {
+                key: _num(value)
+                for key, value in (x.get("bens_por_grupo") or {}).items()
+            },
+            "participacoes": [
+                {
+                    **item,
+                    "cnpj": re.sub(r"\D", "", str(item.get("cnpj") or "")) or None,
+                    "valor": _num(item.get("valor")),
+                }
+                for item in (x.get("participacoes") or [])
+            ],
         }
         for x in irpf
     ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import date
 from typing import Any
 
@@ -88,8 +89,24 @@ def _contract_key(value: Any) -> tuple[int, int] | None:
     return (int(match.group(1)), int(match.group(2))) if match else None
 
 
+def _plain(value: Any) -> str:
+    return (
+        "".join(
+            c
+            for c in unicodedata.normalize("NFKD", str(value or ""))
+            if not unicodedata.combining(c)
+        )
+        .lower()
+        .strip()
+    )
+
+
 def emit_financeiro(
-    snapshots: dict[str, Any], *, fingerprint: str, operation: dict[str, Any]
+    snapshots: dict[str, Any],
+    *,
+    fingerprint: str,
+    operation: dict[str, Any],
+    parameters: dict[str, Any] | None = None,
 ):
     payload = snapshots.get("documentos_financeiros")
     if not isinstance(payload, dict):
@@ -102,6 +119,7 @@ def emit_financeiro(
                 fingerprint=fingerprint,
             )
         ]
+    parameters = parameters or {}
     output = []
     documents = payload.get("documentos") or []
     families = {
@@ -213,6 +231,47 @@ def emit_financeiro(
                 fingerprint=fingerprint,
             )
         )
+    societario = payload.get("societario") or {}
+    capital_contract = _num(societario.get("capital_social"))
+    capital_balance = _num(
+        (payload.get("demonstracoes") or [{}])[0].get("capital_social")
+    )
+    try:
+        changed = date.fromisoformat(
+            str((societario.get("data_ultima_alteracao") or {}).get("valor"))[:10]
+        )
+        quoted = date.fromisoformat(str(operation.get("data_cotacao"))[:10])
+        months = (quoted.year - changed.year) * 12 + quoted.month - changed.month
+    except (TypeError, ValueError):
+        changed = None
+        months = None
+    variation = (
+        abs(capital_contract - capital_balance) / abs(capital_balance)
+        if capital_contract is not None and capital_balance not in (None, 0)
+        else None
+    )
+    recent = months is not None and 0 <= months <= int(
+        parameters.get("capital_alteracao_recente_meses", 6)
+    )
+    output.append(
+        _emit(
+            "capital_social_alterado_recente",
+            Escopo.CEDENTE,
+            {
+                "data_alteracao": changed.isoformat() if changed else None,
+                "capital_contrato": capital_contract,
+                "capital_balanco": capital_balance,
+                "variacao": variation,
+            },
+            payload,
+            fingerprint=fingerprint,
+            state=Estado.CONFIRMADO
+            if recent and variation is not None and variation > 0.05
+            else Estado.NEGATIVO_CONFIRMADO
+            if recent is not None and variation is not None
+            else Estado.NAO_VERIFICADO,
+        )
+    )
     current = (payload.get("demonstracoes") or [{}])[0]
     pl = _num(current.get("patrimonio_liquido"))
     output.append(
@@ -231,17 +290,28 @@ def emit_financeiro(
             field=current.get("patrimonio_liquido"),
         )
     )
-    key = _contract_key(operation.get("contrato_id"))
+    try:
+        from app.workers.tasks.contratos_pncp import _operation_contract_numbers
+
+        keys = {
+            _contract_key(number) for number in _operation_contract_numbers(operation)
+        }
+    except Exception:
+        keys = {_contract_key(operation.get("contrato_id"))}
+    cedido = (snapshots.get("contratos_pncp") or {}).get("contrato_cedido") or {}
+    keys.add(_contract_key(cedido.get("numero_contrato_empenho")))
+    keys.discard(None)
     same, other = [], []
     for debt in (payload.get("endividamento") or {}).get("fontes", []):
         for creditor in debt.get("dados", {}).get("credores", []):
             if creditor.get("cessao_recebiveis"):
-                (
-                    same
-                    if key
-                    and _contract_key(creditor.get("contrato_cedido_referencia")) == key
-                    else other
-                ).append(creditor)
+                reference = creditor.get("contrato_cedido_referencia")
+                if not reference:
+                    same.append({**creditor, "ambigua": True})
+                elif _contract_key(reference) in keys:
+                    same.append(creditor)
+                else:
+                    other.append(creditor)
     output.append(
         _emit(
             "cessao_previa_mesmo_contrato",
@@ -249,8 +319,19 @@ def emit_financeiro(
             {"cessoes": same},
             payload,
             fingerprint=fingerprint,
-            state=Estado.CONFIRMADO if same else Estado.NEGATIVO_CONFIRMADO,
-            confidence=Confianca.MEDIA,
+            state=Estado.AMBIGUO
+            if any(item.get("ambigua") for item in same)
+            else Estado.CONFIRMADO
+            if same
+            else Estado.NEGATIVO_CONFIRMADO
+            if {"SCR", "ENDIVIDAMENTO_DECLARADO"}.intersection(families)
+            else Estado.NAO_VERIFICADO,
+            confidence=Confianca.ALTA
+            if same and not any(item.get("ambigua") for item in same)
+            else Confianca.MEDIA,
+            pendencia={"motivo": "confirmar contratos cedidos"}
+            if any(item.get("ambigua") for item in same)
+            else None,
         )
     )
     output.append(
@@ -315,17 +396,28 @@ def emit_financeiro(
         )
     )
     brasil = snapshots.get("brasil_api") or {}
-    activity = str(
-        brasil.get("atividade_principal") or brasil.get("descricao_atividade") or ""
-    ).lower()
-    exceptions = ("construcao", "obras", "vigilancia", "limpeza", "conservacao")
+    activity = " ".join(
+        [
+            str(
+                brasil.get("atividade_principal")
+                or brasil.get("descricao_atividade")
+                or ""
+            ),
+            *[str(item) for item in (brasil.get("atividades_secundarias") or [])],
+            str((payload.get("societario") or {}).get("objeto_resumo") or ""),
+        ]
+    )
+    exceptions = tuple(
+        parameters.get("simples_atividades_excecao")
+        or ("construcao", "obras", "vigilancia", "limpeza", "conservacao")
+    )
     applies = (
         brasil.get("opcao_simples") is True
         and operation.get("contrato_dedicacao_exclusiva") is True
     )
     simple_state = (
         Estado.AMBIGUO
-        if applies and any(word in activity for word in exceptions)
+        if applies and any(_plain(word) in _plain(activity) for word in exceptions)
         else Estado.CONFIRMADO
         if applies
         else Estado.NEGATIVO_CONFIRMADO
@@ -345,12 +437,65 @@ def emit_financeiro(
     )
     avalistas = payload.get("avalistas") or []
     operation_value = _num(operation.get("valor_enquadrado"))
-    coverage = sum(item.get("patrimonio_liquido_declarado") or 0 for item in avalistas)
+    cnpj = re.sub(r"\D", "", str(operation.get("cnpj") or ""))
+    discounts = {
+        "especie": 1.0,
+        "quotas_cedente": 1.0,
+        "veiculos": 0.6,
+        "imoveis": 0.5,
+        "aplicacoes": 0.2,
+        "outros": 0.5,
+    } | {
+        key.removeprefix("desconto_"): value
+        for key, value in parameters.items()
+        if key.startswith("desconto_")
+    }
+    adjusted = []
+    for item in avalistas:
+        groups = item.get("bens_por_grupo") or {}
+        especie = _num(groups.get("especie")) or 0
+        applications = _num(groups.get("aplicacoes_depositos")) or 0
+        quotas_self = sum(
+            _num(part.get("valor")) or 0
+            for part in item.get("participacoes") or []
+            if part.get("cnpj") == cnpj
+        )
+        quotas_other = sum(
+            _num(part.get("valor")) or 0
+            for part in item.get("participacoes") or []
+            if part.get("cnpj") != cnpj
+        )
+        adjusted_value = (
+            especie * (1 - float(discounts["especie"]))
+            + applications * (1 - float(discounts["aplicacoes"]))
+            + (_num(groups.get("veiculos")) or 0) * (1 - float(discounts["veiculos"]))
+            + (_num(groups.get("imoveis")) or 0) * (1 - float(discounts["imoveis"]))
+            + ((_num(groups.get("outros")) or 0) + quotas_other)
+            * (1 - float(discounts["outros"]))
+            + quotas_self * (1 - float(discounts["quotas_cedente"]))
+            - (_num(item.get("dividas")) or 0)
+        )
+        adjusted.append(
+            {
+                "pl_declarado": item.get("patrimonio_liquido_declarado"),
+                "pl_ajustado": adjusted_value,
+                "especie": especie,
+                "quotas_cedente": quotas_self,
+            }
+        )
+    coverage = sum(item["pl_ajustado"] for item in adjusted)
     output.append(
         _emit(
             "aval_cobertura",
             Escopo.OPERACAO,
-            coverage / operation_value if operation_value else None,
+            {
+                "cobertura": coverage / operation_value if operation_value else None,
+                "pl_declarado": sum(
+                    _num(item["pl_declarado"]) or 0 for item in adjusted
+                ),
+                "pl_ajustado": coverage,
+                "descontos_usados": discounts,
+            },
             payload,
             fingerprint=fingerprint,
             state=Estado.CONFIRMADO
@@ -359,8 +504,16 @@ def emit_financeiro(
         )
     )
     non_verifiable = [
-        {"cpf_final": item.get("cpf_final"), "bens": item.get("bens")}
-        for item in avalistas
+        {
+            "cpf_final": avalista.get("cpf_final"),
+            "pct_especie": avalista["especie"]
+            / max(_num(avalista["pl_declarado"]) or 1, 1),
+            "pct_quotas_cedente": avalista["quotas_cedente"]
+            / max(_num(avalista["pl_declarado"]) or 1, 1),
+            "pct_total": (avalista["especie"] + avalista["quotas_cedente"])
+            / max(_num(avalista["pl_declarado"]) or 1, 1),
+        }
+        for avalista in adjusted
     ]
     output.append(
         _emit(
@@ -373,10 +526,10 @@ def emit_financeiro(
         )
     )
     socios = (payload.get("societario") or {}).get("socios") or []
-    irpf_names = {str(item.get("nome") or "").strip().lower() for item in avalistas}
+    irpf_names = {_plain(item.get("nome")) for item in avalistas}
     for socio in socios:
         name = str(socio.get("nome") or "").strip()
-        if socio.get("administrador") and name.lower() not in irpf_names:
+        if socio.get("administrador") and _plain(name) not in irpf_names:
             output.append(
                 _emit(
                     "avalista_sem_irpf",

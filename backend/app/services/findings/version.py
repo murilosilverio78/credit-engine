@@ -13,5 +13,10 @@ HASH_EXTRAS = {
     "documentos": (),
     "reputacional": (),
     "porte": ("overrides",),
-    "financeiro": ("valor_enquadrado", "contrato_operacao"),
+    "financeiro": (
+        "valor_enquadrado",
+        "contrato_operacao",
+        "cotacao_data",
+        "parametros_financeiros",
+    ),
 }

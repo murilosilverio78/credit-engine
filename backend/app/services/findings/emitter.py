@@ -88,7 +88,7 @@ def _load_snapshots(database, operation_id: str):
 def _quote_catalog(database, operation_id: str):
     row = _first_row(
         database.table("cotacoes_broadfactor")
-        .select("tipos_documento")
+        .select("tipos_documento,data_cotacao")
         .eq("operation_id", operation_id)
     )
     if not row:
@@ -96,8 +96,19 @@ def _quote_catalog(database, operation_id: str):
     return {
         "documentos_broadfactor": [
             {"tipo": item} for item in (row.get("tipos_documento") or []) if item
-        ]
+        ],
+        "data_cotacao": row.get("data_cotacao"),
     }
+
+
+def _financial_parameters(database):
+    try:
+        return (
+            _first_row(database.table("documentos_financeiros_config").select("*"))
+            or {}
+        )
+    except Exception:
+        return {}
 
 
 def _operation_documents(database, operation_id: str):
@@ -174,7 +185,9 @@ def emit_findings(
             return EmissionResult("sem_catalogo")
         extras = version.HASH_EXTRAS[especialista]
         quote_catalog = (
-            _quote_catalog(db, operation_id) if "tipos_documento" in extras else None
+            _quote_catalog(db, operation_id)
+            if "tipos_documento" in extras or "cotacao_data" in extras
+            else None
         )
         if quote_catalog:
             snapshots["catalogo_broadfactor"] = quote_catalog
@@ -208,6 +221,11 @@ def emit_findings(
                     "cotacao_id",
                 )
             }
+        if "cotacao_data" in extras:
+            operation["data_cotacao"] = (quote_catalog or {}).get("data_cotacao")
+            hash_extras["cotacao_data"] = operation["data_cotacao"]
+        if "parametros_financeiros" in extras:
+            hash_extras["parametros_financeiros"] = _financial_parameters(db)
         if "tipos_documento" in extras:
             hash_extras["tipos_documento"] = (quote_catalog or {}).get(
                 "documentos_broadfactor"
@@ -226,6 +244,8 @@ def emit_findings(
             }
         )
         adapter_kwargs = {"fingerprint": fingerprint, "operation": operation}
+        if especialista == "financeiro":
+            adapter_kwargs["parameters"] = hash_extras.get("parametros_financeiros", {})
         if especialista == "sacado_orgao":
             adapter_kwargs["database"] = db
         candidates = adapter(snapshots, **adapter_kwargs)

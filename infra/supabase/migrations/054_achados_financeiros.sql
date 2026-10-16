@@ -27,7 +27,7 @@ INSERT INTO finding_catalog (codigo,versao,escopo,classe_padrao,natureza,tipo_va
 ('dependencia_publica',1,'CEDENTE','INFORMATIVO','CODIGO','NUMERO','Dependencia de recebimentos publicos'),
 ('salto_escala_real',1,'CEDENTE','AJUSTE','CODIGO','NUMERO','Salto de escala por contratos publicos'),
 ('simples_com_cessao_mao_obra',1,'CEDENTE','CONDICAO','CODIGO','BOOLEANO','Simples Nacional com cessao de mao de obra'),
-('aval_cobertura',1,'OPERACAO','AJUSTE','CODIGO','NUMERO','Cobertura de aval'),
+('aval_cobertura',1,'OPERACAO','AJUSTE','CODIGO','OBJETO','Cobertura de aval'),
 ('aval_patrimonio_nao_verificavel',1,'OPERACAO','INFORMATIVO','CODIGO','OBJETO','Patrimonio de aval nao verificavel'),
 ('avalista_sem_irpf',1,'OPERACAO','CONDICAO','CODIGO','OBJETO','Administrador sem IRPF extraido')
 ON CONFLICT (codigo,versao) DO NOTHING;
