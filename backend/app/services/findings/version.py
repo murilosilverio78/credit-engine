@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 9 recalcula a confiança da fonte pela classificação extraída.
+Version 10 trata extrações financeiras truncadas, recibos sem IRPF e proveniência por campo.
 """
 
-EMITTER_VERSION = "9"
+EMITTER_VERSION = "10"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

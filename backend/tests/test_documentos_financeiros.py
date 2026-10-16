@@ -1,8 +1,13 @@
 """Contratos puros do extrator financeiro; nao usam documentos reais."""
 
+from app.services.pdf_texto import Deadline
+import app.services.documentos_financeiros.service as financial_service
+
 from app.services.documentos_financeiros.service import (
     SCHEMA_VERSAO,
     _consolidate,
+    _empty_core_reason,
+    _extract_with_truncation_recovery,
     _manifest,
     _num,
     _pages,
@@ -109,7 +114,9 @@ def test_schema_v2_separa_dinheiro_em_especie_de_aplicacoes():
 
 
 def test_consolidacao_escolhe_sped_e_calcula_indicadores():
-    evidence = lambda value: {"valor": value}
+    def evidence(value):
+        return {"valor": value}
+
     balance = {
         "data_base": evidence("2025-12-31"),
         "natureza": "anual",
@@ -139,14 +146,16 @@ def test_consolidacao_escolhe_sped_e_calcula_indicadores():
         },
     ]
     result = _consolidate(rows, "m", {"valor_operacao": 50})
-    assert result["demonstracoes"][0]["fonte"] == "SPED_ECD"
+    assert result["demonstracoes"][0]["fonte"]["ativo_total"] == "SPED_ECD"
     assert result["verificacoes"][0]["resultado"] == "OK"
     assert result["indicadores"]["liquidez_corrente"]["valor"] == 1.6
     assert result["divergencias"]
 
 
 def test_recencia_prioriza_anual_recente_e_faturamento_mais_recente():
-    evidence = lambda value: {"valor": value}
+    def evidence(value):
+        return {"valor": value}
+
     annual = {
         "data_base": evidence("2025-12-31"),
         "natureza": "anual",
@@ -207,7 +216,9 @@ def test_recencia_prioriza_anual_recente_e_faturamento_mais_recente():
 
 
 def test_data_brasileira_ordena_demonstracao_e_ausente_nao_vira_zero():
-    evidence = lambda value, **extra: {"valor": value, **extra}
+    def evidence(value, **extra):
+        return {"valor": value, **extra}
+
     old = {
         "data_base": evidence("31/12/2024"),
         "natureza": "anual",
@@ -237,7 +248,9 @@ def test_data_brasileira_ordena_demonstracao_e_ausente_nao_vira_zero():
 
 
 def test_parcela_faltante_e_alavancagem_declarada():
-    evidence = lambda value, **extra: {"valor": value, **extra}
+    def evidence(value, **extra):
+        return {"valor": value, **extra}
+
     balance = {
         "data_base": evidence("2025-12-31"),
         "natureza": "anual",
@@ -283,7 +296,9 @@ def test_parcela_faltante_e_alavancagem_declarada():
 
 
 def test_divergencia_capital_social_e_participacao_irpf():
-    evidence = lambda value: {"valor": value}
+    def evidence(value):
+        return {"valor": value}
+
     balance = {
         "data_base": evidence("2025-12-31"),
         "natureza": "anual",
@@ -322,3 +337,118 @@ def test_divergencia_capital_social_e_participacao_irpf():
     assert {item["campo"] for item in result["divergencias"]}.issuperset(
         {"capital_social", "participacao_socio_capital_social"}
     )
+
+
+def test_truncamento_reextrai_demonstracao_por_exercicio(monkeypatch):
+    def evidence(value):
+        return {"valor": value}
+
+    calls = []
+    responses = iter(
+        [
+            (
+                {"familia": "SPED_ECD", "dados": {"exercicios": []}},
+                (1, 8000, 0.1),
+                "max_tokens",
+            ),
+            (
+                {
+                    "familia": "SPED_ECD",
+                    "dados": {
+                        "exercicios": [
+                            {"data_base": evidence("2024-12-31"), "natureza": "anual"}
+                        ]
+                    },
+                },
+                (1, 2, 0.01),
+                "end_turn",
+            ),
+            (
+                {
+                    "familia": "SPED_ECD",
+                    "dados": {
+                        "exercicios": [
+                            {"data_base": evidence("2025-12-31"), "natureza": "anual"}
+                        ]
+                    },
+                },
+                (1, 2, 0.01),
+                "end_turn",
+            ),
+        ]
+    )
+
+    def fake_call(*args, **kwargs):
+        calls.append(kwargs["max_tokens"])
+        return next(responses)
+
+    monkeypatch.setattr(financial_service, "_call_with_limit", fake_call)
+    extracted, _, truncated = _extract_with_truncation_recovery(
+        None,
+        "SPED_ECD",
+        {"ano_referencia": 2024},
+        "balanco 2024 e balanco 2025",
+        Deadline.start(30),
+    )
+
+    assert not truncated
+    assert calls == [8000, 8000, 8000]
+    assert len(extracted["dados"]["exercicios"]) == 2
+
+
+def test_nucleo_vazio_e_parcial_mas_recibo_irpf_e_identificado():
+    assert _empty_core_reason("SPED_ECD", {"exercicios": []}) == "demonstracoes_vazias"
+    assert _empty_core_reason("FATURAMENTO", {"meses": []}) == "faturamento_sem_meses"
+    dados = {"tem_recibo": True, "bens_por_grupo": {}, "participacoes": []}
+    assert _empty_core_reason("IRPF", dados, {"tem_recibo_rfb": True}) is None
+    assert dados["irpf_somente_recibo"] is True
+
+
+def test_mes_ano_anual_vira_ultimo_dia_e_mesmo_exercicio_mescla_campos():
+    def evidence(value, confidence="MEDIA"):
+        return {"valor": value, "confianca": confidence}
+
+    rows = [
+        {
+            "sha256": "a" * 64,
+            "familia": "SPED_ECD",
+            "status": "EXTRAIDO",
+            "payload": {
+                "classificacao": {"tem_recibo_rfb": True},
+                "dados": {
+                    "exercicios": [
+                        {
+                            "data_base": evidence("2024-12"),
+                            "natureza": "anual",
+                            "ativo_total": evidence(100, "ALTA"),
+                        }
+                    ]
+                },
+            },
+        },
+        {
+            "sha256": "b" * 64,
+            "familia": "BALANCO_DRE",
+            "status": "EXTRAIDO",
+            "payload": {
+                "classificacao": {"assinado_contador": True},
+                "dados": {
+                    "exercicios": [
+                        {
+                            "data_base": evidence("2024-12-31"),
+                            "natureza": "anual",
+                            "resultado_liquido": evidence(20, "MEDIA"),
+                        }
+                    ]
+                },
+            },
+        },
+    ]
+    demonstration = _consolidate(rows, "manifest")["demonstracoes"][0]
+    assert demonstration["data_base"]["valor"] == "2024-12-31"
+    assert demonstration["ativo_total"]["valor"] == 100
+    assert demonstration["resultado_liquido"]["valor"] == 20
+    assert demonstration["fonte"] == {
+        "ativo_total": "SPED_ECD",
+        "resultado_liquido": "BALANCO_DRE",
+    }

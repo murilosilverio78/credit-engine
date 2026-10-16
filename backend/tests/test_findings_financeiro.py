@@ -77,7 +77,9 @@ def test_financial_findings_use_evidence_confidence_and_identify_avalista():
 
 
 def test_vhg_payload_preserves_financial_provenance_and_confidence():
-    evidence = lambda value, confidence: {"valor": value, "confianca": confidence}
+    def evidence(value, confidence):
+        return {"valor": value, "confianca": confidence}
+
     assert _confidence({"familia": "SPED_ECD", "tem_recibo_rfb": True}) == "ALTA"
     assert _confidence({"familia": "IRPF", "tem_recibo_rfb": True}) == "ALTA"
     assert _confidence({"familia": "ECF", "tem_recibo_rfb": True}) == "ALTA"
@@ -183,3 +185,49 @@ def test_vhg_payload_preserves_financial_provenance_and_confidence():
         Confianca.ALTA,
         Confianca.MEDIA,
     }
+
+
+def test_irpf_somente_recibo_nao_vira_cobertura_zero():
+    payload = _financeiro_payload()
+    payload["avalistas"] = [
+        {
+            "nome": "Ana Avalista",
+            "cpf_final": "123",
+            "familia": "IRPF",
+            "irpf_somente_recibo": True,
+            "bens_por_grupo": {},
+            "participacoes": [],
+        }
+    ]
+    findings = emit_financeiro(
+        {"documentos_financeiros": payload, "contratos_pncp": {}},
+        fingerprint="recibo",
+        operation={"valor_enquadrado": 100, "cnpj": "12345678000100"},
+    )
+    coverage = next(item for item in findings if item.codigo == "aval_cobertura")
+    receipt = next(
+        item
+        for item in findings
+        if item.codigo == "avalista_sem_irpf"
+        and item.estado == Estado.CONFIRMADO
+        and item.valor.get("motivo") == "somente_recibo"
+    )
+
+    assert coverage.estado == Estado.NAO_VERIFICADO
+    assert receipt.valor == {"nome": "Ana Avalista", "motivo": "somente_recibo"}
+
+
+def test_aval_usa_participacao_sem_cnpj_com_desconto_outros():
+    payload = _financeiro_payload()
+    payload["avalistas"][0]["bens_por_grupo"] = {"participacoes_societarias": 100}
+    findings = {
+        item.codigo: item
+        for item in emit_financeiro(
+            {"documentos_financeiros": payload, "contratos_pncp": {}},
+            fingerprint="quotas-sem-cnpj",
+            operation={"valor_enquadrado": 100, "cnpj": "12345678000100"},
+        )
+    }
+
+    assert findings["aval_cobertura"].valor["pl_ajustado"] == 50
+    assert findings["aval_cobertura"].valor["cobertura"] == 0.5

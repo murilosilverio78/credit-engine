@@ -19,7 +19,11 @@ def _confidence(value: Any, fallback: Confianca = Confianca.BAIXA) -> Confianca:
 def _minimum_confidence(*values: Any) -> Confianca:
     """Returns the least certain available evidence confidence."""
     confidences = [_confidence(value) for value in values if value is not None]
-    return min(confidences, key=lambda item: _rank(item)) if confidences else Confianca.BAIXA
+    return (
+        min(confidences, key=lambda item: _rank(item))
+        if confidences
+        else Confianca.BAIXA
+    )
 
 
 def _rank(value: Confianca) -> int:
@@ -27,7 +31,21 @@ def _rank(value: Confianca) -> int:
 
 
 def _field_confidence(field: Any, fallback: Confianca) -> Confianca:
-    return _confidence(field.get("confianca"), fallback) if isinstance(field, dict) else fallback
+    return (
+        _confidence(field.get("confianca"), fallback)
+        if isinstance(field, dict)
+        else fallback
+    )
+
+
+def _demonstration_source(
+    demonstration: dict[str, Any], field: str | None = None
+) -> str | None:
+    """Reads field-level source provenance while accepting pre-v10 snapshots."""
+    source = demonstration.get("fonte")
+    if isinstance(source, dict):
+        return source.get(field or "") or demonstration.get("fonte_principal")
+    return source or demonstration.get("fonte_principal")
 
 
 def _source_confidence(payload: dict[str, Any], family: str | None) -> Confianca:
@@ -41,10 +59,21 @@ def _source_confidence(payload: dict[str, Any], family: str | None) -> Confianca
     confidences.extend(
         item.get("confianca")
         for item in payload.get("demonstracoes", [])
-        if item.get("fonte") == family
+        if family
+        and family
+        in {
+            _demonstration_source(item),
+            *(
+                item.get("fonte", {}).values()
+                if isinstance(item.get("fonte"), dict)
+                else []
+            ),
+        }
     )
     if family == "FATURAMENTO":
-        confidences.append((payload.get("faturamento_12m") or {}).get("confianca_fonte"))
+        confidences.append(
+            (payload.get("faturamento_12m") or {}).get("confianca_fonte")
+        )
     if family == "CONTRATO_SOCIAL":
         confidences.append((payload.get("societario") or {}).get("confianca"))
     return _minimum_confidence(*confidences)
@@ -61,7 +90,11 @@ def _resolved_confidence(
         return Confianca.BAIXA
     source = _source_confidence(payload, family)
     reading = _field_confidence(field, source)
-    return _minimum_confidence(source, reading) if state == Estado.NEGATIVO_CONFIRMADO else reading
+    return (
+        _minimum_confidence(source, reading)
+        if state == Estado.NEGATIVO_CONFIRMADO
+        else reading
+    )
 
 
 def _evidence(
@@ -225,7 +258,7 @@ def emit_financeiro(
                 payload,
                 fingerprint=fingerprint,
                 state=state,
-                family=current.get("fonte"),
+                family=_demonstration_source(current, "ativo_total"),
                 field=item,
                 pendencia={"motivo": "balanco_nao_verificavel"}
                 if state == Estado.NAO_VERIFICADO
@@ -360,11 +393,9 @@ def emit_financeiro(
             else Estado.NEGATIVO_CONFIRMADO
             if pl is not None
             else Estado.NAO_VERIFICADO,
-            family=current.get("fonte"),
+            family=_demonstration_source(current, "patrimonio_liquido"),
             field=current.get("patrimonio_liquido"),
-            pendencia={"motivo": "patrimonio_liquido_ausente"}
-            if pl is None
-            else None,
+            pendencia={"motivo": "patrimonio_liquido_ausente"} if pl is None else None,
         )
     )
     try:
@@ -553,18 +584,45 @@ def emit_financeiro(
     }
     adjusted = []
     for item in avalistas:
+        if item.get("irpf_somente_recibo"):
+            output.append(
+                _emit(
+                    "avalista_sem_irpf",
+                    Escopo.OPERACAO,
+                    {"nome": item.get("nome"), "motivo": "somente_recibo"},
+                    payload,
+                    fingerprint=fingerprint,
+                    state=Estado.CONFIRMADO,
+                    family=item.get("familia") or "IRPF",
+                    entity=item.get("nome"),
+                )
+            )
+            continue
         groups = item.get("bens_por_grupo") or {}
         especie = _num(groups.get("especie")) or 0
         applications = _num(groups.get("aplicacoes_depositos")) or 0
+        participacoes = item.get("participacoes") or []
         quotas_self = sum(
             _num(part.get("valor")) or 0
-            for part in item.get("participacoes") or []
+            for part in participacoes
             if part.get("cnpj") == cnpj
         )
-        quotas_other = sum(
+        quotas_other_known = sum(
             _num(part.get("valor")) or 0
-            for part in item.get("participacoes") or []
-            if part.get("cnpj") != cnpj
+            for part in participacoes
+            if part.get("cnpj") and part.get("cnpj") != cnpj
+        )
+        quotas_without_cnpj = sum(
+            _num(part.get("valor")) or 0
+            for part in participacoes
+            if not part.get("cnpj")
+        )
+        declared_quotas = _num(groups.get("participacoes_societarias"))
+        quotas_other = (
+            quotas_other_known
+            + max(declared_quotas - quotas_self - quotas_other_known, 0)
+            if declared_quotas is not None
+            else quotas_other_known + quotas_without_cnpj
         )
         adjusted_value = (
             especie * (1 - float(discounts["especie"]))
@@ -588,9 +646,7 @@ def emit_financeiro(
             }
         )
     coverage = sum(item["pl_ajustado"] for item in adjusted)
-    aval_confidence = _minimum_confidence(
-        *(item.get("confianca") for item in adjusted)
-    )
+    aval_confidence = _minimum_confidence(*(item.get("confianca") for item in adjusted))
     output.append(
         _emit(
             "aval_cobertura",
@@ -606,11 +662,11 @@ def emit_financeiro(
             payload,
             fingerprint=fingerprint,
             state=Estado.CONFIRMADO
-            if operation_value and avalistas
+            if operation_value and adjusted
             else Estado.NAO_VERIFICADO,
             confidence=aval_confidence,
             pendencia={"motivo": "avalistas_ou_valor_enquadrado_ausente"}
-            if not operation_value or not avalistas
+            if not operation_value or not adjusted
             else None,
         )
     )

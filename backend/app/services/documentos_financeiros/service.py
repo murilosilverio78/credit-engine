@@ -3,6 +3,7 @@
 from __future__ import annotations
 import hashlib
 import re
+from calendar import monthrange
 from datetime import date
 from typing import Any
 import anthropic
@@ -241,6 +242,7 @@ def _extraction_tool(familia: str) -> dict[str, Any]:
             "nome": {"type": ["string", "null"], "maxLength": 200},
             "cpf_final": {"type": ["string", "null"], "maxLength": 3},
             "tem_recibo": {"type": "boolean"},
+            "irpf_somente_recibo": {"type": "boolean"},
             "rendimentos_tributaveis": e,
             "rendimentos_isentos": e,
             "bens_direitos_total_atual": e,
@@ -299,15 +301,34 @@ def _usage(response: Any) -> tuple[int | None, int | None, float]:
 
 
 def _call(client: anthropic.Anthropic, tool: dict[str, Any], prompt: str):
+    return _call_with_limit(client, tool, prompt, max_tokens=3500)
+
+
+def _call_with_limit(
+    client: anthropic.Anthropic,
+    tool: dict[str, Any],
+    prompt: str,
+    *,
+    max_tokens: int,
+) -> tuple[dict[str, Any], tuple[int | None, int | None, float], str | None]:
+    """Calls Claude and retains its terminal reason for truncation handling."""
     r = client.messages.create(
         model=settings.CLAUDE_MODEL_EXTRACTION,
-        max_tokens=3500,
+        max_tokens=max_tokens,
         temperature=0,
         tools=[tool],
         tool_choice={"type": "tool", "name": tool["name"]},
         messages=[{"role": "user", "content": prompt}],
     )
-    return _tool_result(r), _usage(r)
+    stop_reason = getattr(r, "stop_reason", None)
+    try:
+        result = _tool_result(r)
+    except RuntimeError:
+        if stop_reason == "max_tokens":
+            result = {}
+        else:
+            raise
+    return result, _usage(r), stop_reason
 
 
 def _safe_payload(value: Any) -> Any:
@@ -348,6 +369,134 @@ def _prune(value: Any, schema: dict[str, Any]) -> Any:
 def _whitelist(family: str, value: dict[str, Any]) -> dict[str, Any]:
     schema = _extraction_tool(family)["input_schema"]
     return _safe_payload(_prune({**value, "familia": family}, schema))
+
+
+DEMONSTRACAO_FAMILIAS = {"SPED_ECD", "BALANCO_DRE", "BALANCETE", "BALANCO_ABERTURA"}
+
+
+def _exercise_years(classificacao: dict[str, Any], text: str) -> list[int]:
+    """Returns the years visible in a document, preserving classification first."""
+    years: list[int] = []
+    classified = classificacao.get("ano_referencia")
+    if isinstance(classified, int) and 1900 <= classified <= 2100:
+        years.append(classified)
+    for value in re.findall(r"\b(19\d{2}|20\d{2})\b", text):
+        year = int(value)
+        if year not in years:
+            years.append(year)
+    return years[:12]
+
+
+def _join_usage(
+    *usages: tuple[int | None, int | None, float],
+) -> tuple[int | None, int | None, float]:
+    """Adds token usage without treating a missing provider value as zero in output."""
+    return (
+        sum(item[0] or 0 for item in usages),
+        sum(item[1] or 0 for item in usages),
+        round(sum(item[2] for item in usages), 4),
+    )
+
+
+def _extraction_prompt(family: str, text: str, year: int | None = None) -> str:
+    scope = f" Extraia apenas o exercicio de {year}." if year else ""
+    return (
+        "Extraia somente o schema. Datas devem ser ISO (AAAA-MM-DD; competencia AAAA-MM)."
+        " IRPF: grupo 06 codigo 10 ou descricao dinheiro em especie vai em especie, nunca em"
+        " aplicacoes_depositos; grupo 06 codigo 01 (conta corrente) vai em aplicacoes_depositos,"
+        " nunca em especie. IRPF nunca inclui endereco, banco, dependentes, pagamentos ou CPF completo."
+        f"{scope}\n{text[:120000]}"
+    )
+
+
+def _extract_with_truncation_recovery(
+    client: anthropic.Anthropic,
+    family: str,
+    classificacao: dict[str, Any],
+    text: str,
+    deadline: Deadline,
+) -> tuple[dict[str, Any], tuple[int | None, int | None, float], bool]:
+    """Extracts once at 8k tokens, then splits truncated demonstrations by exercise."""
+    raw, usage, stop_reason = _call_with_limit(
+        client,
+        _extraction_tool(family),
+        _extraction_prompt(family, text),
+        max_tokens=8000,
+    )
+    if stop_reason != "max_tokens":
+        return _whitelist(family, raw), usage, False
+    if family not in DEMONSTRACAO_FAMILIAS:
+        return _whitelist(family, raw), usage, True
+    years = _exercise_years(classificacao, text)
+    if not years:
+        return _whitelist(family, raw), usage, True
+    extracted: list[dict[str, Any]] = []
+    usages = [usage]
+    for year in years:
+        deadline.remaining("reextracao_por_exercicio")
+        retry_raw, retry_usage, retry_stop = _call_with_limit(
+            client,
+            _extraction_tool(family),
+            _extraction_prompt(family, text, year),
+            max_tokens=8000,
+        )
+        usages.append(retry_usage)
+        if retry_stop == "max_tokens":
+            return (
+                {"familia": family, "dados": {"exercicios": extracted}},
+                _join_usage(*usages),
+                True,
+            )
+        extracted.extend(
+            (_whitelist(family, retry_raw).get("dados") or {}).get("exercicios") or []
+        )
+    return (
+        {"familia": family, "dados": {"exercicios": extracted}},
+        _join_usage(*usages),
+        False,
+    )
+
+
+def _empty_core_reason(
+    family: str,
+    dados: dict[str, Any],
+    classificacao: dict[str, Any] | None = None,
+) -> str | None:
+    """Distinguishes valid zeroes from a model response with no usable core facts."""
+    if family in DEMONSTRACAO_FAMILIAS and not dados.get("exercicios"):
+        return "demonstracoes_vazias"
+    if family == "FATURAMENTO" and not dados.get("meses"):
+        return "faturamento_sem_meses"
+    if family == "IRPF":
+        groups = dados.get("bens_por_grupo") or {}
+        fields = (
+            dados.get("bens_direitos_total_atual"),
+            dados.get("bens_direitos_total_anterior"),
+            dados.get("rendimentos_tributaveis"),
+            dados.get("rendimentos_isentos"),
+            *groups.values(),
+            *[item.get("valor") for item in dados.get("participacoes") or []],
+        )
+        if any(_num(field) is not None for field in fields):
+            return None
+        if dados.get("tem_recibo") or (classificacao or {}).get("tem_recibo_rfb"):
+            dados["irpf_somente_recibo"] = True
+            return None
+        return "irpf_sem_bens_ou_rendimentos"
+    return None
+
+
+def _legacy_extraction_is_empty(row: dict[str, Any]) -> bool:
+    """Makes old false-positive EXTRAIDO cache rows eligible for a safe retry."""
+    payload = row.get("payload") or {}
+    return (
+        _empty_core_reason(
+            str(row.get("familia") or payload.get("familia") or ""),
+            payload.get("dados") or {},
+            payload.get("classificacao") or {},
+        )
+        is not None
+    )
 
 
 def _confidence(c: dict[str, Any]) -> str:
@@ -400,7 +549,9 @@ def _extract_one(
 ) -> dict[str, Any]:
     sha = str(doc["sha256"])
     old = _existing(sha)
-    if old and old.get("status") in {"EXTRAIDO", "PARCIAL", "IGNORADO_DERIVADO"}:
+    if old and old.get("status") == "IGNORADO_DERIVADO":
+        return old
+    if old and old.get("status") == "EXTRAIDO" and not _legacy_extraction_is_empty(old):
         return old
     attempts = int((old or {}).get("tentativas") or 0)
     if attempts >= MAX_ATTEMPTS:
@@ -417,7 +568,7 @@ def _extract_one(
             pages, _, _ = ocr_pdf(
                 pdf, int(config.get("max_paginas_extracao", 40)), deadline
             )
-        classificacao, custo_a = _call(
+        classificacao, custo_a, _ = _call(
             client,
             _classification_tool(),
             "Classifique pelo conteudo; nao repita dados pessoais.\n"
@@ -449,32 +600,32 @@ def _extract_one(
                     pages, family, int(config.get("max_paginas_extracao", 40))
                 )
             )
-            raw, custo_b = _call(
+            good, custo_b, truncated = _extract_with_truncation_recovery(
                 client,
-                _extraction_tool(family),
-                "Extraia somente o schema. Datas devem ser ISO (AAAA-MM-DD; competencia AAAA-MM). "
-                "IRPF: grupo 06 codigo 10 ou dinheiro em especie vai em especie, nunca em aplicacoes_depositos. "
-                "IRPF nunca inclui endereco, banco, dependentes, pagamentos ou CPF completo.\n"
-                + text[:120000],
+                family,
+                classificacao,
+                text,
+                deadline,
             )
-            good = _whitelist(family, raw)
+            dados = good.get("dados") or {}
+            empty_reason = _empty_core_reason(family, dados, classificacao)
             row = {
                 "sha256": sha,
                 "familia": family,
                 "schema_versao": SCHEMA_VERSAO,
-                "status": "EXTRAIDO",
+                "status": "PARCIAL" if truncated or empty_reason else "EXTRAIDO",
                 "ano_referencia": classificacao.get("ano_referencia"),
                 "payload": {
                     "familia": family,
                     "classificacao": _safe_payload(classificacao),
-                    "dados": good.get("dados", {}),
+                    "dados": dados,
                     "confianca_fonte": _confidence(classificacao),
                 },
                 "modelo": settings.CLAUDE_MODEL_EXTRACTION,
                 "tokens_entrada": (custo_a[0] or 0) + (custo_b[0] or 0),
                 "tokens_saida": (custo_a[1] or 0) + (custo_b[1] or 0),
                 "custo_usd": round(custo_a[2] + custo_b[2], 4),
-                "erro": None,
+                "erro": "saida_truncada" if truncated else empty_reason,
                 "tentativas": attempts + 1,
             }
     except TimeoutError:
@@ -604,6 +755,11 @@ def _normalize_dates(value: Any, field: str | None = None) -> Any:
         return [_normalize_dates(item, field) for item in value]
     if not isinstance(value, dict):
         return value
+    original_data_base = (
+        value.get("data_base", {}).get("valor")
+        if isinstance(value.get("data_base"), dict)
+        else None
+    )
     normalized = {key: _normalize_dates(item, key) for key, item in value.items()}
     if field in DATE_FIELDS and "valor" in normalized:
         parsed = _as_date(normalized)
@@ -611,12 +767,28 @@ def _normalize_dates(value: Any, field: str | None = None) -> Any:
             normalized["valor"] = (
                 parsed.isoformat()[:7] if field == "competencia" else parsed.isoformat()
             )
+    data_base = normalized.get("data_base")
+    if (
+        normalized.get("natureza") == "anual"
+        and isinstance(data_base, dict)
+        and re.fullmatch(r"\d{4}-\d{2}", str(original_data_base or ""))
+    ):
+        year, month = map(int, str(original_data_base).split("-"))
+        data_base["valor"] = date(year, month, monthrange(year, month)[1]).isoformat()
     return normalized
 
 
 def _strict_sum(values: list[float | None]) -> float | None:
     """Soma somente se todos os valores requeridos foram informados."""
     return None if any(value is None for value in values) else sum(values)
+
+
+def _demonstration_source(demonstration: dict[str, Any], field: str) -> str | None:
+    """Returns the source selected for one consolidated demonstration field."""
+    source = demonstration.get("fonte")
+    if isinstance(source, dict):
+        return source.get(field) or demonstration.get("fonte_principal")
+    return source or demonstration.get("fonte_principal")
 
 
 def _consolidate(
@@ -639,9 +811,9 @@ def _consolidate(
         source = {"sha256": row.get("sha256"), "familia": f, "confianca": c}
         if f in {"SPED_ECD", "BALANCO_DRE", "BALANCETE", "BALANCO_ABERTURA"}:
             for x in d.get("exercicios", []):
-                exercises.setdefault(
-                    str((x.get("data_base") or {}).get("valor")), []
-                ).append((x, f, c, source))
+                data_base = _as_date(x.get("data_base"))
+                key = data_base.strftime("%Y-%m") if data_base else None
+                exercises.setdefault(str(key), []).append((x, f, c, source))
         elif f == "FATURAMENTO":
             revenue.append((d, c, source))
         elif f in {"SCR", "ENDIVIDAMENTO_DECLARADO"}:
@@ -661,27 +833,60 @@ def _consolidate(
     for year, items in exercises.items():
         items.sort(key=lambda x: (_rank(x[2]), preference[x[1]]), reverse=True)
         x, f, c, source = items[0]
+        merged: dict[str, Any] = {}
+        field_sources: dict[str, str] = {}
+        for field in BALANCE:
+            available = [item for item in items if _num(item[0].get(field)) is not None]
+            if not available:
+                merged[field] = x.get(field)
+                continue
+            available.sort(
+                key=lambda item: (
+                    _rank(_minimum_evidence_confidence(item[2], item[0].get(field))),
+                    preference[item[1]],
+                ),
+                reverse=True,
+            )
+            chosen, chosen_family, _, chosen_source = available[0]
+            evidence = chosen.get(field)
+            if isinstance(evidence, dict):
+                evidence = {
+                    **evidence,
+                    "fonte": chosen_family,
+                    "sha256": chosen_source.get("sha256"),
+                }
+            merged[field] = evidence
+            field_sources[field] = chosen_family
         demos.append(
             {
                 "data_base": x.get("data_base"),
                 "natureza": x.get("natureza"),
-                "fonte": f,
+                "fonte": field_sources,
+                "fonte_principal": f,
                 "confianca": c,
                 "sha256": source.get("sha256"),
                 "familia": source.get("familia"),
-                **{k: x.get(k) for k in BALANCE},
+                **merged,
             }
         )
         for k in BALANCE:
             vals = [
-                (family, _num(item.get(k)), _minimum_evidence_confidence(confidence, item.get(k)), meta)
+                (
+                    family,
+                    _num(item.get(k)),
+                    _minimum_evidence_confidence(confidence, item.get(k)),
+                    meta,
+                )
                 for item, family, confidence, meta in items
                 if _num(item.get(k)) is not None
             ]
             if (
                 len(vals) > 1
                 and min(value for _, value, _, _ in vals)
-                and (max(value for _, value, _, _ in vals) - min(value for _, value, _, _ in vals))
+                and (
+                    max(value for _, value, _, _ in vals)
+                    - min(value for _, value, _, _ in vals)
+                )
                 / min(value for _, value, _, _ in vals)
                 > 0.05
             ):
@@ -719,10 +924,13 @@ def _consolidate(
         reverse=True,
     )
     socials.sort(
-        key=lambda item: _as_date(item["dados"].get("data_ultima_alteracao")) or date.min,
+        key=lambda item: _as_date(item["dados"].get("data_ultima_alteracao"))
+        or date.min,
         reverse=True,
     )
-    fat, faturamento_confianca, faturamento_source = revenue[0] if revenue else ({}, "BAIXA", {})
+    fat, faturamento_confianca, faturamento_source = (
+        revenue[0] if revenue else ({}, "BAIXA", {})
+    )
     meses = fat.get("meses") or []
     soma = _strict_sum([_num(item.get("valor")) for item in meses]) if meses else None
     declarado = _num(fat.get("total_declarado"))
@@ -736,6 +944,7 @@ def _consolidate(
         {
             "nome": x.get("nome"),
             "cpf_final": x.get("cpf_final"),
+            "irpf_somente_recibo": bool(x.get("irpf_somente_recibo")),
             "confianca": _minimum_evidence_confidence(
                 source.get("confianca"),
                 x.get("bens_direitos_total_atual"),
@@ -903,16 +1112,14 @@ def _consolidate(
             "faturamento_atual",
             faturamento_atual,
             "faturamento ate 3 meses",
-            _minimum_evidence_confidence(faturamento_confianca, fat.get("data_emissao")),
+            _minimum_evidence_confidence(
+                faturamento_confianca, fat.get("data_emissao")
+            ),
         ),
     ]
     scr_source = next((item for item in debts if item["familia"] == "SCR"), None)
     declared_source = next(
-        (
-            item
-            for item in debts
-            if item["familia"] == "ENDIVIDAMENTO_DECLARADO"
-        ),
+        (item for item in debts if item["familia"] == "ENDIVIDAMENTO_DECLARADO"),
         None,
     )
     scr = (scr_source or {}).get("dados")
@@ -961,7 +1168,9 @@ def _consolidate(
             else "parcelas_ou_faturamento_ausente",
         ),
     }
-    debt_confidence = _minimum_evidence_confidence(*(item.get("confianca") for item in debts))
+    debt_confidence = _minimum_evidence_confidence(
+        *(item.get("confianca") for item in debts)
+    )
     inds["liquidez_corrente"]["confianca"] = _minimum_evidence_confidence(
         cur.get("confianca"),
         cur.get("ativo_circulante"),
@@ -986,15 +1195,15 @@ def _consolidate(
     inds["servico_divida_sobre_faturamento"]["confianca"] = (
         _minimum_evidence_confidence(debt_confidence, faturamento_confianca)
     )
-    inds["liquidez_corrente"]["fonte"] = cur.get("fonte")
-    inds["alavancagem"]["fonte"] = cur.get("fonte")
-    inds["alavancagem_declarada"]["fonte"] = (
-        (scr_source or declared_source or {}).get("familia")
+    inds["liquidez_corrente"]["fonte"] = _demonstration_source(cur, "ativo_circulante")
+    inds["alavancagem"]["fonte"] = _demonstration_source(cur, "emprestimos_cp")
+    inds["alavancagem_declarada"]["fonte"] = (scr_source or declared_source or {}).get(
+        "familia"
     )
-    inds["margem_liquida"]["fonte"] = cur.get("fonte")
+    inds["margem_liquida"]["fonte"] = _demonstration_source(cur, "resultado_liquido")
     inds["servico_divida_sobre_faturamento"]["fonte"] = (
-        (scr_source or declared_source or {}).get("familia") or faturamento_source.get("familia")
-    )
+        scr_source or declared_source or {}
+    ).get("familia") or faturamento_source.get("familia")
     return {
         "schema_versao": SCHEMA_VERSAO,
         "manifest_documentos": manifest,
