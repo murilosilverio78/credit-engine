@@ -398,6 +398,26 @@ def emit_financeiro(
             pendencia={"motivo": "patrimonio_liquido_ausente"} if pl is None else None,
         )
     )
+    valor_enquadrado = _num(operation.get("valor_enquadrado"))
+    output.append(
+        _emit(
+            "exposicao_sobre_pl",
+            Escopo.OPERACAO,
+            valor_enquadrado / pl
+            if valor_enquadrado is not None and pl not in (None, 0)
+            else None,
+            payload,
+            fingerprint=fingerprint,
+            state=Estado.CONFIRMADO
+            if valor_enquadrado is not None and pl not in (None, 0)
+            else Estado.NAO_VERIFICADO,
+            family=_demonstration_source(current, "patrimonio_liquido"),
+            field=current.get("patrimonio_liquido"),
+            pendencia={"motivo": "valor_enquadrado_ou_patrimonio_liquido_ausente"}
+            if valor_enquadrado is None or pl in (None, 0)
+            else None,
+        )
+    )
     try:
         from app.workers.tasks.contratos_pncp import _operation_contract_numbers
 

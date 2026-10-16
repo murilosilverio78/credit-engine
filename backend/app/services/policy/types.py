@@ -1,8 +1,8 @@
 """Tipos sem dependencias de banco para a politica em modo sombra."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
 from typing import Any
 
 
@@ -41,18 +41,32 @@ class ResultadoPolitica:
     dimensoes: dict[str, float]
     efeitos_novos: list[dict[str, Any]]
     trilha: dict[str, list[dict[str, str | None]]]
+    condicoes_precedentes: list[dict[str, Any]] = field(default_factory=list)
+    alcada_minima: int = 1
+    limite_multiplicadores: list[dict[str, Any]] = field(default_factory=list)
+    taxa_ajuste_pp: float = 0.0
+    informativos: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "score": self.score, "rating": self.rating,
-            "rating_potencial": self.rating_potencial, "merit": self.merit,
+            "score": self.score,
+            "rating": self.rating,
+            "rating_potencial": self.rating_potencial,
+            "merit": self.merit,
             "merit_potencial": self.merit_potencial,
             "fator_regularidade": self.fator_regularidade,
             "fator_potencial": self.fator_potencial,
             "penalizacao_balanco": self.penalizacao_balanco,
             "limite_aprovado_rs": self.limite_aprovado_rs,
             "limite_flags": self.limite_flags,
-            "bloqueios": self.bloqueios, "ajuste_pd": self.ajuste_pd,
-            "dimensoes": self.dimensoes, "efeitos_novos": self.efeitos_novos,
+            "bloqueios": self.bloqueios,
+            "ajuste_pd": self.ajuste_pd,
+            "dimensoes": self.dimensoes,
+            "efeitos_novos": self.efeitos_novos,
             "trilha": self.trilha,
+            "condicoes_precedentes": self.condicoes_precedentes,
+            "alcada_minima": self.alcada_minima,
+            "limite_multiplicadores": self.limite_multiplicadores,
+            "taxa_ajuste_pp": self.taxa_ajuste_pp,
+            "informativos": self.informativos,
         }

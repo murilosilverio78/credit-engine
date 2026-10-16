@@ -1,15 +1,23 @@
 from pathlib import Path
 
 
-MIGRATION = Path(__file__).parents[2] / "infra/supabase/migrations/043_achados_fundacao.sql"
+MIGRATION = (
+    Path(__file__).parents[2] / "infra/supabase/migrations/043_achados_fundacao.sql"
+)
 
 
 def test_achados_migration_has_atomic_rpc_and_service_role_only_grant():
     sql = MIGRATION.read_text(encoding="utf-8")
     assert "UNIQUE (operation_id, especialista, entrada_hash)" in sql
     assert "ON CONFLICT (operation_id, especialista, entrada_hash) DO NOTHING" in sql
-    assert "REVOKE EXECUTE ON FUNCTION registrar_achados(JSONB, JSONB) FROM PUBLIC, anon, authenticated" in sql
-    assert "GRANT EXECUTE ON FUNCTION registrar_achados(JSONB, JSONB) TO service_role" in sql
+    assert (
+        "REVOKE EXECUTE ON FUNCTION registrar_achados(JSONB, JSONB) FROM PUBLIC, anon, authenticated"
+        in sql
+    )
+    assert (
+        "GRANT EXECUTE ON FUNCTION registrar_achados(JSONB, JSONB) TO service_role"
+        in sql
+    )
     assert "false | false | true" in sql
 
 
@@ -42,5 +50,23 @@ def test_policy_v0_migration_adds_shadow_state_and_service_role_only_storage():
     assert "policy_shadow_runs" in sql
     assert "BEFORE UPDATE OR DELETE OR TRUNCATE ON policy_shadow_runs" in sql
     assert "WITH (security_invoker = true)" in sql
-    assert "REVOKE ALL ON policy_parameters, policy_shadow_runs FROM PUBLIC, anon, authenticated" in sql
-    assert "GRANT SELECT ON policy_parameters, policy_shadow_runs, vw_policy_shadow_ultimos TO service_role" in sql
+    assert (
+        "REVOKE ALL ON policy_parameters, policy_shadow_runs FROM PUBLIC, anon, authenticated"
+        in sql
+    )
+    assert (
+        "GRANT SELECT ON policy_parameters, policy_shadow_runs, vw_policy_shadow_ultimos TO service_role"
+        in sql
+    )
+
+
+def test_policy_v2_draft_seeds_generic_effects_without_promoting_it():
+    sql = (MIGRATION.parent / "055_politica_v2_rascunho.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "(2, 'RASCUNHO'" in sql
+    assert "exposicao_sobre_pl" in sql
+    assert "limite_fator_minimo" in sql
+    for target in ("'cp'", "'alcada'", "'limite_mult'", "'taxa_pp'", "'info'"):
+        assert target in sql
+    assert "NOTIFY pgrst, 'reload schema';" in sql

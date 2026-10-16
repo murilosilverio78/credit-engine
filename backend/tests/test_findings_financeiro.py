@@ -185,6 +185,8 @@ def test_vhg_payload_preserves_financial_provenance_and_confidence():
         Confianca.ALTA,
         Confianca.MEDIA,
     }
+    assert findings["exposicao_sobre_pl"].valor == 1
+    assert findings["exposicao_sobre_pl"].confianca == Confianca.ALTA
 
 
 def test_irpf_somente_recibo_nao_vira_cobertura_zero():

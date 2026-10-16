@@ -14,7 +14,7 @@ from app.services.analysis_runtime import is_shutting_down
 from app.services.operation_watchdog_service import run_operation_watchdog
 from app.services.findings.backfill import reemitir_operacao, select_operations
 from app.services.policy.loader import load_policy
-from app.services.policy.shadow import avaliar_sombra
+from app.services.policy.shadow import avaliar_sombra, comparar_sombra
 from app.workers.http_utils import (
     acquire_portal_call,
     portal_api_url,
@@ -43,6 +43,8 @@ class PolicyShadowRequest(BaseModel):
     ambiente: str = "PRODUCAO"
     limite: int = Field(default=20, ge=1, le=100)
     aplicar: bool = False
+    versao: int | None = Field(default=None, ge=1)
+    comparar_com: int | None = Field(default=None, ge=1)
 
     @field_validator("ambiente")
     @classmethod
@@ -147,12 +149,16 @@ async def trigger_operation_watchdog(
 
 
 @router.post("/findings/reemitir")
-async def reemitir_findings(request: FindingsReemitRequest, _: None = Depends(verify_internal_token)):
+async def reemitir_findings(
+    request: FindingsReemitRequest, _: None = Depends(verify_internal_token)
+):
     from app.core.database import supabase
 
     operation_ids = await asyncio.to_thread(
         select_operations,
-        operation_ids=[str(item) for item in request.operation_ids] if request.operation_ids is not None else None,
+        operation_ids=[str(item) for item in request.operation_ids]
+        if request.operation_ids is not None
+        else None,
         ambiente=request.ambiente,
         limite=request.limite,
         database=supabase,
@@ -163,26 +169,64 @@ async def reemitir_findings(request: FindingsReemitRequest, _: None = Depends(ve
         if _monotonic() - started >= 45:
             remaining = operation_ids[index:]
             break
-        result = await asyncio.to_thread(reemitir_operacao, operation_id, aplicar=request.aplicar, database=supabase)
+        result = await asyncio.to_thread(
+            reemitir_operacao, operation_id, aplicar=request.aplicar, database=supabase
+        )
         processed += 1
         operations.append(result)
         for outcome in result["especialistas"].values():
             totals[outcome] = totals.get(outcome, 0) + 1
-    return {"aplicar": request.aplicar, "processadas": processed, "restantes": remaining, "operacoes": operations, "totais": totals}
+    return {
+        "aplicar": request.aplicar,
+        "processadas": processed,
+        "restantes": remaining,
+        "operacoes": operations,
+        "totais": totals,
+    }
 
 
 @router.post("/politica/sombra")
-async def executar_politica_sombra(request: PolicyShadowRequest, _: None = Depends(verify_internal_token)):
+async def executar_politica_sombra(
+    request: PolicyShadowRequest, _: None = Depends(verify_internal_token)
+):
     """Run shadow comparison sequentially; this endpoint never decides credit."""
     from app.core.database import supabase
 
     try:
-        await asyncio.to_thread(load_policy, database=supabase, status="SOMBRA")
+        selected = await asyncio.to_thread(
+            load_policy,
+            database=supabase,
+            versao=request.versao,
+            status="SOMBRA",
+        )
     except LookupError:
-        raise HTTPException(status_code=409, detail="Nao ha politica em SOMBRA.")
+        raise HTTPException(
+            status_code=409, detail="Politica para sombra nao encontrada."
+        )
+    if selected["version"].get("status") and selected["version"].get("status") not in {
+        "SOMBRA",
+        "RASCUNHO",
+    }:
+        raise HTTPException(
+            status_code=422,
+            detail="Apenas politicas SOMBRA ou RASCUNHO podem rodar em sombra.",
+        )
+    if request.comparar_com is not None:
+        try:
+            await asyncio.to_thread(
+                load_policy,
+                database=supabase,
+                versao=request.comparar_com,
+            )
+        except LookupError:
+            raise HTTPException(
+                status_code=422, detail="Politica de comparacao nao encontrada."
+            )
     operation_ids = await asyncio.to_thread(
         select_operations,
-        operation_ids=[str(item) for item in request.operation_ids] if request.operation_ids is not None else None,
+        operation_ids=[str(item) for item in request.operation_ids]
+        if request.operation_ids is not None
+        else None,
         ambiente=request.ambiente,
         limite=request.limite,
         database=supabase,
@@ -193,11 +237,43 @@ async def executar_politica_sombra(request: PolicyShadowRequest, _: None = Depen
         if _monotonic() - started >= 45:
             remaining = operation_ids[index:]
             break
-        result = await asyncio.to_thread(avaliar_sombra, operation_id, database=supabase, aplicar=request.aplicar)
-        operations.append({"operation_id": operation_id, "classe_geral": result["classe_geral"], "divergencias": result["divergencias"]})
-        key = result["classe_geral"]
+        if request.comparar_com is not None:
+            result = await asyncio.to_thread(
+                comparar_sombra,
+                operation_id,
+                database=supabase,
+                aplicar=request.aplicar,
+                versao=selected["version"].get("versao"),
+                comparar_com=request.comparar_com,
+            )
+            shadow_result = result["shadow"]
+            operations.append(
+                {key: value for key, value in result.items() if key != "shadow"}
+            )
+        else:
+            shadow_result = await asyncio.to_thread(
+                avaliar_sombra,
+                operation_id,
+                database=supabase,
+                aplicar=request.aplicar,
+                versao=selected["version"].get("versao"),
+            )
+            operations.append(
+                {
+                    "operation_id": operation_id,
+                    "classe_geral": shadow_result["classe_geral"],
+                    "divergencias": shadow_result["divergencias"],
+                }
+            )
+        key = shadow_result["classe_geral"]
         totals[key] = totals.get(key, 0) + 1
-    return {"aplicar": request.aplicar, "processadas": len(operations), "restantes": remaining, "operacoes": operations, "totais": totals}
+    return {
+        "aplicar": request.aplicar,
+        "processadas": len(operations),
+        "restantes": remaining,
+        "operacoes": operations,
+        "totais": totals,
+    }
 
 
 @router.post("/ingestao/broadfactor")
@@ -243,9 +319,11 @@ async def capturar_documentos(
         capturar_documentos_cotacao,
     )
 
-    query = supabase.table("cotacoes_broadfactor").select(
-        "cotacao_id,cnpj,operation_id,estagio"
-    ).neq("estagio", "ENCERRADA")
+    query = (
+        supabase.table("cotacoes_broadfactor")
+        .select("cotacao_id,cnpj,operation_id,estagio")
+        .neq("estagio", "ENCERRADA")
+    )
     cotacao_ids = request.cotacao_ids if request else None
     if cotacao_ids is None:
         query = query.in_("estagio", ["DOCUMENTADA", "QUALIFICADA"])
@@ -275,15 +353,17 @@ async def capturar_documentos(
             items.append({"cotacao_id": cotacao_id, **resumo})
         except Exception as exc:
             # Uma cotacao nao pode impedir a preservacao das demais.
-            items.append({
-                "cotacao_id": cotacao_id,
-                "capturados": 0,
-                "reaproveitados": 0,
-                "falhas": 1,
-                "indisponiveis": 0,
-                "ignorados": 0,
-                "erro": _erro(exc),
-            })
+            items.append(
+                {
+                    "cotacao_id": cotacao_id,
+                    "capturados": 0,
+                    "reaproveitados": 0,
+                    "falhas": 1,
+                    "indisponiveis": 0,
+                    "ignorados": 0,
+                    "erro": _erro(exc),
+                }
+            )
             totals["falhas"] += 1
     return {"cotacoes": items, "totais": totals}
 
@@ -343,7 +423,10 @@ async def reavaliar_funil(
     )
     operations = await asyncio.to_thread(_operacoes_para_reavaliar_funil, requested_ids)
     if any(row.get("status") in {"processing", "running"} for row in operations):
-        raise HTTPException(status_code=409, detail="Há análise em andamento para uma operação solicitada")
+        raise HTTPException(
+            status_code=409,
+            detail="Há análise em andamento para uma operação solicitada",
+        )
     operations = [row for row in operations if row.get("status") == "reprovada_triagem"]
 
     results: list[dict] = []
@@ -364,10 +447,12 @@ async def reavaliar_funil(
             )
             outcome = decidir_status_pos_fase2(motivos)
             next_status = outcome["status"]
-            supabase.table("operations").update({
-                "status": next_status,
-                "pendencia_coleta": outcome["pendencia_coleta"],
-            }).eq("id", operation_id).execute()
+            supabase.table("operations").update(
+                {
+                    "status": next_status,
+                    "pendencia_coleta": outcome["pendencia_coleta"],
+                }
+            ).eq("id", operation_id).execute()
             if next_status != previous_status:
                 AuditService().log(
                     operation_id=operation_id,
@@ -390,27 +475,31 @@ async def reavaliar_funil(
                 .data
                 or {}
             )
-            results.append({
-                "operation_id": operation_id,
-                "status_anterior": previous_status,
-                "status_novo": next_status,
-                "valor_enquadrado": refreshed.get("valor_enquadrado"),
-                "capacidade_contrato": refreshed.get("capacidade_contrato"),
-                "motivos": motivos,
-                "flags": refreshed.get("flags_funil") or [],
-                "erro": "; ".join(source_errors) if source_errors else None,
-            })
+            results.append(
+                {
+                    "operation_id": operation_id,
+                    "status_anterior": previous_status,
+                    "status_novo": next_status,
+                    "valor_enquadrado": refreshed.get("valor_enquadrado"),
+                    "capacidade_contrato": refreshed.get("capacidade_contrato"),
+                    "motivos": motivos,
+                    "flags": refreshed.get("flags_funil") or [],
+                    "erro": "; ".join(source_errors) if source_errors else None,
+                }
+            )
         except Exception as exc:
-            results.append({
-                "operation_id": operation_id,
-                "status_anterior": previous_status,
-                "status_novo": previous_status,
-                "valor_enquadrado": None,
-                "capacidade_contrato": None,
-                "motivos": [],
-                "flags": [],
-                "erro": str(exc),
-            })
+            results.append(
+                {
+                    "operation_id": operation_id,
+                    "status_anterior": previous_status,
+                    "status_novo": previous_status,
+                    "valor_enquadrado": None,
+                    "capacidade_contrato": None,
+                    "motivos": [],
+                    "flags": [],
+                    "erro": str(exc),
+                }
+            )
     return {"operacoes": results}
 
 
@@ -427,27 +516,44 @@ async def recoletar_cadastro(
     from app.workers.tasks.orchestrator import refresh_degraded_registry_flag
 
     operation_id_text = str(operation_id)
-    operation_result = supabase.table("operations").select(
-        "id,status,cotacao_id,source,analysis_attempts"
-    ).eq("id", operation_id_text).maybe_single().execute()
+    operation_result = (
+        supabase.table("operations")
+        .select("id,status,cotacao_id,source,analysis_attempts")
+        .eq("id", operation_id_text)
+        .maybe_single()
+        .execute()
+    )
     operation = operation_result.data or {}
     if not operation:
         raise HTTPException(status_code=404, detail="Operação não encontrada")
     if operation.get("status") in {"processing", "running"}:
-        raise HTTPException(status_code=409, detail="Há análise em andamento para esta operação")
+        raise HTTPException(
+            status_code=409, detail="Há análise em andamento para esta operação"
+        )
 
-    snapshots_result = supabase.table("component_snapshots").select(
-        "component,status"
-    ).eq("operation_id", operation_id_text).execute()
+    snapshots_result = (
+        supabase.table("component_snapshots")
+        .select("component,status")
+        .eq("operation_id", operation_id_text)
+        .execute()
+    )
     failed_before = {
-        row.get("component") for row in (snapshots_result.data or [])
+        row.get("component")
+        for row in (snapshots_result.data or [])
         if row.get("status") == "failed"
     }
     await asyncio.to_thread(run_brasil_api, operation_id_text, use_cache=False)
-    degraded = await asyncio.to_thread(refresh_degraded_registry_flag, operation_id_text)
-    source_result = supabase.table("component_snapshots").select(
-        "parsed_result"
-    ).eq("operation_id", operation_id_text).eq("component", "brasil_api").maybe_single().execute()
+    degraded = await asyncio.to_thread(
+        refresh_degraded_registry_flag, operation_id_text
+    )
+    source_result = (
+        supabase.table("component_snapshots")
+        .select("parsed_result")
+        .eq("operation_id", operation_id_text)
+        .eq("component", "brasil_api")
+        .maybe_single()
+        .execute()
+    )
     parsed = (source_result.data or {}).get("parsed_result") or {}
     fonte = parsed.get("fonte") or "BRASIL_API"
     previous_status = operation.get("status")
@@ -455,17 +561,22 @@ async def recoletar_cadastro(
     outcome: dict | None = None
 
     if operation.get("cotacao_id") and previous_status == "aguardando_relatorio":
-        from app.services.funil_qualificacao_service import atualizar_estagio_pos_fase2, decidir_status_pos_fase2
+        from app.services.funil_qualificacao_service import (
+            atualizar_estagio_pos_fase2,
+            decidir_status_pos_fase2,
+        )
 
         _stage, motivos = await asyncio.to_thread(
             atualizar_estagio_pos_fase2, str(operation["cotacao_id"]), operation_id_text
         )
         outcome = decidir_status_pos_fase2(motivos)
         next_status = outcome["status"]
-        supabase.table("operations").update({
-            "status": next_status,
-            "pendencia_coleta": outcome["pendencia_coleta"],
-        }).eq("id", operation_id_text).execute()
+        supabase.table("operations").update(
+            {
+                "status": next_status,
+                "pendencia_coleta": outcome["pendencia_coleta"],
+            }
+        ).eq("id", operation_id_text).execute()
     elif (
         previous_status == "failed"
         and operation.get("source") == "admin_ui"
@@ -473,15 +584,20 @@ async def recoletar_cadastro(
     ):
         attempts = int(operation.get("analysis_attempts") or 0)
         if attempts >= 3:
-            raise HTTPException(status_code=409, detail="Limite de tentativas de análise atingido")
+            raise HTTPException(
+                status_code=409, detail="Limite de tentativas de análise atingido"
+            )
         next_status = "pending"
-        supabase.table("operations").update({
-            "status": next_status,
-            "analysis_attempts": attempts + 1,
-            "error_message": None,
-            "completed_at": None,
-        }).eq("id", operation_id_text).eq("status", "failed").execute()
+        supabase.table("operations").update(
+            {
+                "status": next_status,
+                "analysis_attempts": attempts + 1,
+                "error_message": None,
+                "completed_at": None,
+            }
+        ).eq("id", operation_id_text).eq("status", "failed").execute()
         from app.workers.tasks.orchestrator import start_analysis
+
         background_tasks.add_task(start_analysis, operation_id_text, recovery=True)
 
     if next_status != previous_status:
@@ -494,7 +610,9 @@ async def recoletar_cadastro(
             payload={
                 "contexto": "recoleta_cadastro",
                 "fonte": fonte,
-                "motivos_classificados": outcome.get("motivos_classificados") if outcome else None,
+                "motivos_classificados": outcome.get("motivos_classificados")
+                if outcome
+                else None,
             },
         )
     return {
@@ -546,7 +664,9 @@ async def executar_componente(
 ):
     """Executa uma fonte liberada e, opcionalmente, reavalia o funil aberto."""
     if component not in EXECUTABLE_COMPONENTS:
-        raise HTTPException(status_code=422, detail="Componente não permitido para execução interna")
+        raise HTTPException(
+            status_code=422, detail="Componente não permitido para execução interna"
+        )
 
     from app.core.database import supabase
 
@@ -562,7 +682,9 @@ async def executar_componente(
     if not operation:
         raise HTTPException(status_code=404, detail="Operação não encontrada")
     if operation.get("status") in {"processing", "running"}:
-        raise HTTPException(status_code=409, detail="Há análise em andamento para esta operação")
+        raise HTTPException(
+            status_code=409, detail="Há análise em andamento para esta operação"
+        )
 
     supabase.table("component_snapshots").upsert(
         {
@@ -631,10 +753,12 @@ async def executar_componente(
         )
         outcome = decidir_status_pos_fase2(motivos)
         next_status = outcome["status"]
-        supabase.table("operations").update({
-            "status": next_status,
-            "pendencia_coleta": outcome["pendencia_coleta"],
-        }).eq("id", operation_id_text).execute()
+        supabase.table("operations").update(
+            {
+                "status": next_status,
+                "pendencia_coleta": outcome["pendencia_coleta"],
+            }
+        ).eq("id", operation_id_text).execute()
         reavaliacao = {
             "status": next_status,
             "pendencia_coleta": outcome["pendencia_coleta"],
@@ -658,7 +782,9 @@ async def executar_componente(
         "operation_id": operation_id_text,
         "component": component,
         "status": snapshot.get("status") or "missing",
-        "erro": snapshot.get("error_message") if snapshot.get("status") == "failed" else None,
+        "erro": snapshot.get("error_message")
+        if snapshot.get("status") == "failed"
+        else None,
         "parsed_result": _component_result_summary(component, parsed_result),
         "reavaliacao_funil": reavaliacao,
     }

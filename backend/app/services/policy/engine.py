@@ -4,9 +4,10 @@ Only parameters and rules contain numeric policy choices.  This module does
 not import database clients or the score engine so it can be differentially
 tested without external state.
 """
+
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 import unicodedata
 
@@ -20,7 +21,12 @@ def _number(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _finding(entrada: EntradaPolitica, code: str, trail: dict[str, list[dict[str, str | None]]], stage: str):
+def _finding(
+    entrada: EntradaPolitica,
+    code: str,
+    trail: dict[str, list[dict[str, str | None]]],
+    stage: str,
+):
     item = entrada.findings.get(code)
     if item:
         trail.setdefault(stage, []).append({"codigo": code, "run_id": item.run_id})
@@ -36,16 +42,29 @@ def _rating(score: float, bands: dict[str, Any]) -> str:
 
 def _level(value: Any, params: dict[str, Any]) -> float:
     levels = params["nivel_nota"]
-    aliases = {"Atenção": "Atencao", "atenção": "Atencao", "atencao": "Atencao", "excepcional": "Excepcional", "forte": "Forte", "adequado": "Adequado", "fraco": "Fraco", "critico": "Critico", "crítico": "Critico"}
+    aliases = {
+        "Atenção": "Atencao",
+        "atenção": "Atencao",
+        "atencao": "Atencao",
+        "excepcional": "Excepcional",
+        "forte": "Forte",
+        "adequado": "Adequado",
+        "fraco": "Fraco",
+        "critico": "Critico",
+        "crítico": "Critico",
+    }
     value = aliases.get(str(value).strip().lower(), value)
     return _number(levels.get(value), _number(levels["Adequado"]))
 
 
-def _porte_cadastral_score(value: Any, capital: float | None, empresarial: bool, params: dict[str, Any]) -> float:
+def _porte_cadastral_score(
+    value: Any, capital: float | None, empresarial: bool, params: dict[str, Any]
+) -> float:
     """Mirror the deterministic branches of ``_porte_score``."""
     raw = str(value or "").upper()
     normalized = "".join(
-        char for char in unicodedata.normalize("NFKD", str(value or "").upper())
+        char
+        for char in unicodedata.normalize("NFKD", str(value or "").upper())
         if not unicodedata.combining(char)
     )
     if "MEI" in raw or "MICROEMPREENDEDOR" in raw:
@@ -84,18 +103,39 @@ def _age_at_reference(finding, reference: date) -> float:
 def _pd(entrada, params, rating, trail, data_referencia):
     cv_finding = _finding(entrada, "volatilidade_cv", trail, "ajuste_pd")
     series_finding = _finding(entrada, "receita_serie_anual", trail, "ajuste_pd")
-    cv = _number(cv_finding.valor) if cv_finding and cv_finding.valor is not None else None
-    series = series_finding.valor if series_finding and isinstance(series_finding.valor, dict) else {}
+    cv = (
+        _number(cv_finding.valor)
+        if cv_finding and cv_finding.valor is not None
+        else None
+    )
+    series = (
+        series_finding.valor
+        if series_finding and isinstance(series_finding.valor, dict)
+        else {}
+    )
     informed = series.get("anos_informados")
-    inferred = len([year for year in series.get("anos_na_serie", []) if isinstance(year, int) and year < data_referencia.year])
+    inferred = len(
+        [
+            year
+            for year in series.get("anos_na_serie", [])
+            if isinstance(year, int) and year < data_referencia.year
+        ]
+    )
     years = int(informed) if informed is not None else inferred
     minimum = int(_number(params["pd_min_anos_completos_volatilidade"]))
     multiplier, parameter = 1.0, None
     new_insufficient = cv is None and informed is not None and years < minimum
-    legacy_insufficient = informed is None and cv == 0 and _number(series.get("serie_qtd_chaves")) > 0 and years < minimum
+    legacy_insufficient = (
+        informed is None
+        and cv == 0
+        and _number(series.get("serie_qtd_chaves")) > 0
+        and years < minimum
+    )
     if new_insufficient or legacy_insufficient:
         faixa, parameter = "HISTORICO_INSUFICIENTE", "pd_mult_historico_insuficiente"
-        multiplier = _number(params.get(parameter) or params.get("pd_mult_volatilidade_moderada"), 1.0)
+        multiplier = _number(
+            params.get(parameter) or params.get("pd_mult_volatilidade_moderada"), 1.0
+        )
     elif cv is None:
         faixa = "INDISPONIVEL"
     elif cv <= _number(params["pd_cv_corte_moderado"]):
@@ -106,8 +146,21 @@ def _pd(entrada, params, rating, trail, data_referencia):
     else:
         faixa, parameter = "ALTA", "pd_mult_volatilidade_alta"
         multiplier = _number(params.get(parameter), 1.0)
-    base = _number(params["pd_performada"]) * _number(params["pd_mult_por_rating"].get(rating))
-    return {"cv": cv, "anos_completos": years, "min_anos_completos": minimum, "corte_moderado": _number(params["pd_cv_corte_moderado"]), "corte_alto": _number(params["pd_cv_corte_alto"]), "faixa_volatilidade": faixa, "parametro": parameter, "multiplicador_volatilidade": multiplier, "pd_base": round(base, 6), "pd_ajustada": round(base * multiplier, 6)}
+    base = _number(params["pd_performada"]) * _number(
+        params["pd_mult_por_rating"].get(rating)
+    )
+    return {
+        "cv": cv,
+        "anos_completos": years,
+        "min_anos_completos": minimum,
+        "corte_moderado": _number(params["pd_cv_corte_moderado"]),
+        "corte_alto": _number(params["pd_cv_corte_alto"]),
+        "faixa_volatilidade": faixa,
+        "parametro": parameter,
+        "multiplicador_volatilidade": multiplier,
+        "pd_base": round(base, 6),
+        "pd_ajustada": round(base * multiplier, 6),
+    }
 
 
 def _new_effects(entrada, rules, trail):
@@ -118,21 +171,172 @@ def _new_effects(entrada, rules, trail):
         found = _finding(entrada, str(rule.get("codigo")), trail, "efeitos_novos")
         condition, value = rule.get("condicao") or {}, found.valor if found else None
         applies = False
-        if found and found.confianca == "ALTA" and rule.get("codigo") == "conta_vinculada_regime":
+        if (
+            found
+            and found.confianca == "ALTA"
+            and rule.get("codigo") == "conta_vinculada_regime"
+        ):
             applies = value == condition.get("valor")
-        elif found and rule.get("codigo") == "glosa_historica" and isinstance(value, dict):
-            applies = _number(value.get("taxa_glosa")) >= _number(condition.get("taxa_glosa_min")) and _number(value.get("faturado_total")) >= _number(condition.get("faturado_total_min"))
+        elif (
+            found
+            and rule.get("codigo") == "glosa_historica"
+            and isinstance(value, dict)
+        ):
+            applies = _number(value.get("taxa_glosa")) >= _number(
+                condition.get("taxa_glosa_min")
+            ) and _number(value.get("faturado_total")) >= _number(
+                condition.get("faturado_total_min")
+            )
         if applies:
-            effects.append({"codigo": rule.get("codigo"), "parametro_alvo": rule.get("parametro_alvo"), "direcao": rule.get("direcao"), "magnitude": _number(rule.get("magnitude"))})
+            effects.append(
+                {
+                    "codigo": rule.get("codigo"),
+                    "parametro_alvo": rule.get("parametro_alvo"),
+                    "direcao": rule.get("direcao"),
+                    "magnitude": _number(rule.get("magnitude")),
+                }
+            )
     return effects
+
+
+_CONFIDENCE_RANK = {"BAIXA": 1, "MEDIA": 2, "ALTA": 3}
+
+
+def _path(value: Any, path: str) -> Any:
+    """Reads a dot-separated path from a finding value; empty means scalar."""
+    if not path:
+        return value
+    current = value
+    for key in path.split("."):
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _compare(value: Any, op: str, reference: Any) -> bool:
+    """Evaluates the closed comparison operators accepted by policy_rules."""
+    try:
+        if op == "in":
+            return value in (reference if isinstance(reference, list) else [reference])
+        if op == "==":
+            return value == reference
+        if op == "!=":
+            return value != reference
+        left, right = float(value), float(reference)
+        return {
+            "<": left < right,
+            "<=": left <= right,
+            ">": left > right,
+            ">=": left >= right,
+        }.get(op, False)
+    except (TypeError, ValueError):
+        return False
+
+
+def _matches_rule(
+    found: Any, condition: dict[str, Any], *, rating: str | None = None
+) -> bool:
+    """Matches a versioned generic rule without coercing a missing finding to zero."""
+    rating_in = condition.get("rating_in")
+    if rating_in is not None:
+        return rating is not None and rating in rating_in
+    if found is None:
+        return False
+    states = condition.get("estados")
+    if states is None and condition.get("estado") is not None:
+        states = [condition["estado"]]
+    if states is not None and found.estado not in states:
+        return False
+    minimum = condition.get("confianca_minima", condition.get("confianca"))
+    if minimum and _CONFIDENCE_RANK.get(found.confianca, 0) < _CONFIDENCE_RANK.get(
+        str(minimum), 0
+    ):
+        return False
+    comparison = condition.get("comparacao")
+    if comparison:
+        return _compare(
+            _path(found.valor, str(comparison.get("campo") or "")),
+            str(comparison.get("op") or ""),
+            comparison.get("ref"),
+        )
+    if "valor" in condition:
+        return found.valor == condition["valor"]
+    # v2 conditions are state-based unless they explicitly add a comparison.
+    # Legacy v1 VETOs retain their historical truthy-value guard.
+    return True if "estados" in condition else bool(found.valor)
+
+
+def _generic_effects(
+    entrada: EntradaPolitica,
+    rules: list[dict[str, Any]],
+    trail: dict[str, list[dict[str, str | None]]],
+    rating: str,
+    parametros: dict[str, Any],
+    vetos: set[str] | None = None,
+) -> dict[str, Any]:
+    """Projects v2 rule effects while leaving v1's score interpreter intact."""
+    output = {
+        "condicoes_precedentes": [],
+        "alcada_minima": 1,
+        "limite_multiplicadores": [],
+        "taxa_ajuste_pp": 0.0,
+        "informativos": [],
+    }
+    for rule in rules:
+        target = str(rule.get("parametro_alvo") or "")
+        if target not in {"cp", "alcada", "limite_mult", "taxa_pp", "info"}:
+            continue
+        condition = rule.get("condicao") or {}
+        code = str(rule.get("codigo") or "")
+        if target == "cp" and code in (vetos or set()):
+            continue
+        found = _finding(entrada, code, trail, "regras_genericas")
+        if not _matches_rule(found, condition, rating=rating):
+            continue
+        magnitude = _number(rule.get("magnitude"))
+        if target == "cp":
+            output["condicoes_precedentes"].append(
+                {
+                    "codigo": code,
+                    "descricao": condition.get("mensagem") or code,
+                    "documento_exigido": condition.get("documento_exigido")
+                    or condition.get("mensagem")
+                    or code,
+                }
+            )
+        elif target == "alcada":
+            output["alcada_minima"] = max(output["alcada_minima"], int(magnitude))
+        elif target == "limite_mult":
+            output["limite_multiplicadores"].append(
+                {"codigo": code, "fator": magnitude}
+            )
+        elif target == "taxa_pp":
+            output["taxa_ajuste_pp"] += magnitude
+        else:
+            output["informativos"].append({"codigo": code, "valor": found.valor})
+    product = 1.0
+    for item in output["limite_multiplicadores"]:
+        product *= item["fator"]
+    output["limite_fator"] = max(
+        _number(parametros.get("limite_fator_minimo"), 0.4), product
+    )
+    output["taxa_ajuste_pp"] = round(output["taxa_ajuste_pp"], 4)
+    return output
 
 
 def _limit(entrada, params, trail):
     value = _finding(entrada, "contratos_valor_total_ativo_rs", trail, "limite")
     total_active = _number(value.valor) if value else 0.0
     operation = entrada.operation
-    margin, contract, balance = (_number(operation.get(key)) for key in ("margem_disponivel", "contrato_saldo", "saldo_vincendo"))
-    requested, framed, maximum = (_number(operation.get(key)) for key in ("valor_solicitado", "valor_enquadrado", "pct_max_contrato"))
+    margin, contract, balance = (
+        _number(operation.get(key))
+        for key in ("margem_disponivel", "contrato_saldo", "saldo_vincendo")
+    )
+    requested, framed, maximum = (
+        _number(operation.get(key))
+        for key in ("valor_solicitado", "valor_enquadrado", "pct_max_contrato")
+    )
     if framed > 0:
         return (min(framed, requested) if requested > 0 else framed), []
     if margin > 0:
@@ -160,7 +364,12 @@ def _band(value: float, bands: list[dict[str, Any]]) -> float:
     return _number(bands[-1]["nota"])
 
 
-def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[dict[str, Any]], data_referencia: date) -> ResultadoPolitica:
+def avaliar(
+    entrada: EntradaPolitica,
+    parametros: dict[str, Any],
+    regras: list[dict[str, Any]],
+    data_referencia: date,
+) -> ResultadoPolitica:
     """Evaluate facts only; no I/O, current clock, or score-engine import."""
     trail: dict[str, list[dict[str, str | None]]] = {}
     vetos = []
@@ -168,20 +377,32 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
         if rule.get("classe") != "VETO":
             continue
         found = _finding(entrada, str(rule.get("codigo")), trail, "vetos")
-        if found and found.estado == "CONFIRMADO" and found.confianca == "ALTA" and bool(found.valor):
+        if _matches_rule(found, rule.get("condicao") or {}):
             vetos.append(str(found.codigo))
     idade = _finding(entrada, "idade_empresa_anos", trail, "saude_cadastral")
     capital = _finding(entrada, "capital_social_rs", trail, "saude_cadastral")
     porte = _finding(entrada, "porte_cadastral", trail, "saude_cadastral")
     qsa = _finding(entrada, "qsa_estabilidade", trail, "saude_cadastral")
-    idade_score = _band(_age_at_reference(idade, data_referencia), parametros["faixas_idade"]) if idade else 55.0
+    idade_score = (
+        _band(_age_at_reference(idade, data_referencia), parametros["faixas_idade"])
+        if idade
+        else 55.0
+    )
     # The official engine uses ``brasil.get("capital_social") or ...``:
     # zero is consequently indistinguishable from a missing capital and is a
     # material-data absence, rather than the lowest capital band.
-    raw_capital = _number(capital.valor) if capital and capital.valor is not None else 0.0
+    raw_capital = (
+        _number(capital.valor) if capital and capital.valor is not None else 0.0
+    )
     capital_value = raw_capital if raw_capital > 0 else None
-    capital_score = _band(capital_value, parametros["faixas_capital"]) if capital_value is not None else 55.0
-    empresarial = _finding(entrada, "natureza_juridica_empresarial", trail, "saude_cadastral")
+    capital_score = (
+        _band(capital_value, parametros["faixas_capital"])
+        if capital_value is not None
+        else 55.0
+    )
+    empresarial = _finding(
+        entrada, "natureza_juridica_empresarial", trail, "saude_cadastral"
+    )
     porte_score = _porte_cadastral_score(
         porte.valor if porte else None,
         capital_value,
@@ -189,19 +410,35 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
         parametros,
     )
     qsa_value = qsa.valor if qsa else {}
-    recent = qsa_value.get("entrada_mais_recente") if isinstance(qsa_value, dict) else None
+    recent = (
+        qsa_value.get("entrada_mais_recente") if isinstance(qsa_value, dict) else None
+    )
     qsa_score = _number(parametros["faixas_estabilidade_qsa"]["sem_dados"])
     if recent:
-        years = max((data_referencia - date.fromisoformat(str(recent))).days / 365.25, 0)
-        qsa_score = _number(parametros["faixas_estabilidade_qsa"]["maior_3" if years > 3 else "de_1_a_3" if years >= 1 else "menor_1"])
+        years = max(
+            (data_referencia - date.fromisoformat(str(recent))).days / 365.25, 0
+        )
+        qsa_score = _number(
+            parametros["faixas_estabilidade_qsa"][
+                "maior_3" if years > 3 else "de_1_a_3" if years >= 1 else "menor_1"
+            ]
+        )
     sub = parametros["subpesos_cadastral"]
-    health = round(idade_score * _number(sub["idade"]) + capital_score * _number(sub["capital"]) + porte_score * _number(sub["porte"]) + qsa_score * _number(sub["estabilidade"]), 1)
+    health = round(
+        idade_score * _number(sub["idade"])
+        + capital_score * _number(sub["capital"])
+        + porte_score * _number(sub["porte"])
+        + qsa_score * _number(sub["estabilidade"]),
+        1,
+    )
     cadastro = _finding(entrada, "cadastro_inativo", trail, "saude_cadastral")
     situacao_missing = cadastro is not None and cadastro.estado == "NAO_VERIFICADO"
     if not idade or capital_value is None or situacao_missing:
         # Older unit fixtures predate this versioned parameter.  The seed
         # always provides it; 55 is the official historical/default cap.
-        health = min(health, _number(parametros.get("score_cap_dado_material_ausente", 55)))
+        health = min(
+            health, _number(parametros.get("score_cap_dado_material_ausente", 55))
+        )
 
     active = _finding(entrada, "contratos_ativos_qtd", trail, "relacionamento")
     total = _finding(entrada, "contratos_total_qtd", trail, "relacionamento")
@@ -212,10 +449,28 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
     active_n = _number(active.valor) if active else 0.0
     total_n = _number(total.valor) if total else 0.0
     org_n = _number(orgs.valor) if orgs else 0.0
-    volume = 30 if active_n == 0 else 50 if active_n == 1 else 68 if active_n <= 4 else 82 if active_n <= 9 else 92
+    volume = (
+        30
+        if active_n == 0
+        else 50
+        if active_n == 1
+        else 68
+        if active_n <= 4
+        else 82
+        if active_n <= 9
+        else 92
+    )
     fallback = 45 if org_n <= 1 else 62 if org_n == 2 else 78 if org_n <= 4 else 90
     hhi_n = _number(hhi.valor, -1) if hhi else -1
-    concentration = 90 if 0 < hhi_n < 2500 else 70 if hhi_n <= 6000 and hhi_n > 0 else 45 if hhi_n > 0 else fallback
+    concentration = (
+        90
+        if 0 < hhi_n < 2500
+        else 70
+        if hhi_n <= 6000 and hhi_n > 0
+        else 45
+        if hhi_n > 0
+        else fallback
+    )
     # ``None`` receipt months do not activate the fallback in the official
     # engine.  An unverified finding is therefore distinct from a known zero.
     if (
@@ -225,36 +480,63 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
         and _number(months.valor) < _number(parametros["hhi_min_meses_recebimento"])
     ):
         concentration = min(concentration, fallback)
-    history = 50 if total_n <= 2 else 68 if total_n <= 5 else 82 if total_n <= 12 else 92
-    maturity_score = 55 if not maturity or _number(maturity.valor) < 1 else 72 if _number(maturity.valor) < 3 else 88
+    history = (
+        50 if total_n <= 2 else 68 if total_n <= 5 else 82 if total_n <= 12 else 92
+    )
+    maturity_score = (
+        55
+        if not maturity or _number(maturity.valor) < 1
+        else 72
+        if _number(maturity.valor) < 3
+        else 88
+    )
     rel = parametros["subpesos_relacionamento"]
-    relationship = round(volume * _number(rel["volume"]) + concentration * _number(rel["concentracao"]) + history * _number(rel["historico"]) + maturity_score * _number(rel["maturidade"]), 1)
+    relationship = round(
+        volume * _number(rel["volume"])
+        + concentration * _number(rel["concentracao"])
+        + history * _number(rel["historico"])
+        + maturity_score * _number(rel["maturidade"]),
+        1,
+    )
 
     capability = _finding(entrada, "capacidade_operacional", trail, "niveis")
     reputation = _finding(entrada, "reputacao_mercado", trail, "niveis")
-    capability_score = _level(capability.valor if capability else "Adequado", parametros)
-    reputation_score = _level(reputation.valor if reputation else "Adequado", parametros)
+    capability_score = _level(
+        capability.valor if capability else "Adequado", parametros
+    )
+    reputation_score = _level(
+        reputation.valor if reputation else "Adequado", parametros
+    )
     weights = parametros["pesos_merito"]
-    merit_potential = round(sum(
-        score * _number(weights[name])
-        for name, score in (
-            ("relacionamento_governamental", relationship),
-            ("porte_operacionalidade", capability_score),
-            ("saude_cadastral", health),
-            ("reputacao_mercado", reputation_score),
-        )
-    ), 1)
+    merit_potential = round(
+        sum(
+            score * _number(weights[name])
+            for name, score in (
+                ("relacionamento_governamental", relationship),
+                ("porte_operacionalidade", capability_score),
+                ("saude_cadastral", health),
+                ("reputacao_mercado", reputation_score),
+            )
+        ),
+        1,
+    )
 
     haircuts = 0.0
     penalties = 0.0
-    for code, penalty_key in (("certidao_cnd_federal_pendente", "penalidade_cnd_federal_ausente"), ("certidao_cndt_pendente", "penalidade_cndt_ausente"), ("certidao_fgts_pendente", "penalidade_fgts_ausente")):
+    for code, penalty_key in (
+        ("certidao_cnd_federal_pendente", "penalidade_cnd_federal_ausente"),
+        ("certidao_cndt_pendente", "penalidade_cndt_ausente"),
+        ("certidao_fgts_pendente", "penalidade_fgts_ausente"),
+    ):
         found = _finding(entrada, code, trail, "regularidade")
         value = found.valor if found else None
         state = value.get("estado") if isinstance(value, dict) else "ausente"
         haircuts += _number(parametros["haircut_certidao_por_estado"].get(state))
         if state == "ausente":
             penalties += _number(parametros[penalty_key])
-    factor_potential = round(max(_number(parametros["piso_fator_regularidade"]), 1 - haircuts), 2)
+    factor_potential = round(
+        max(_number(parametros["piso_fator_regularidade"]), 1 - haircuts), 2
+    )
     factor = round(max(0.0, factor_potential - penalties / 100), 2)
     balance = _finding(entrada, "balanco_ausente", trail, "balanco")
     configured_balance_penalty = _number(parametros["penalidade_balanco_ausente"])
@@ -265,33 +547,87 @@ def avaliar(entrada: EntradaPolitica, parametros: dict[str, Any], regras: list[d
         # `_apply_missing_balance_penalty` limits the final-score reduction to
         # the Porte/Operacionalidade contribution; keep the potential score
         # untouched and lower only the effective dimension.
-        balance_penalty = min(configured_balance_penalty, capability_score * porte_weight)
-        effective_capability_score = round(max(0.0, capability_score - (balance_penalty / porte_weight)), 1) if porte_weight > 0 else capability_score
-    merit = round(sum(
-        score * _number(weights[name])
-        for name, score in (
-            ("relacionamento_governamental", relationship),
-            ("porte_operacionalidade", effective_capability_score),
-            ("saude_cadastral", health),
-            ("reputacao_mercado", reputation_score),
+        balance_penalty = min(
+            configured_balance_penalty, capability_score * porte_weight
         )
-    ), 1)
+        effective_capability_score = (
+            round(max(0.0, capability_score - (balance_penalty / porte_weight)), 1)
+            if porte_weight > 0
+            else capability_score
+        )
+    merit = round(
+        sum(
+            score * _number(weights[name])
+            for name, score in (
+                ("relacionamento_governamental", relationship),
+                ("porte_operacionalidade", effective_capability_score),
+                ("saude_cadastral", health),
+                ("reputacao_mercado", reputation_score),
+            )
+        ),
+        1,
+    )
     score = round(max(0.0, round(merit_potential * factor, 1) - balance_penalty), 1)
     if vetos:
         gate_score = _number(parametros["score_bloqueio"])
         dimensions = {
-            name: gate_score for name in (
-                "relacionamento_governamental", "porte_operacionalidade",
-                "saude_cadastral", "reputacao_mercado",
+            name: gate_score
+            for name in (
+                "relacionamento_governamental",
+                "porte_operacionalidade",
+                "saude_cadastral",
+                "reputacao_mercado",
             )
         }
         # The official snapshot retains the regularity factors under a veto,
         # but deliberately persists no potential merit or balance penalty.
         # Mirror those nulls so differential parity remains field-for-field
         # strict instead of omitting fields from the comparison.
-        return ResultadoPolitica(gate_score, "E", "E", gate_score, None, factor, factor_potential, None, 0.0, [], vetos, None, dimensions, [], trail)
+        return ResultadoPolitica(
+            gate_score,
+            "E",
+            "E",
+            gate_score,
+            None,
+            factor,
+            factor_potential,
+            None,
+            0.0,
+            [],
+            vetos,
+            None,
+            dimensions,
+            [],
+            trail,
+        )
     rating = _rating(score, parametros["faixas_rating"])
-    potential_rating = _rating(round(merit_potential * factor_potential, 1), parametros["faixas_rating"])
+    potential_rating = _rating(
+        round(merit_potential * factor_potential, 1), parametros["faixas_rating"]
+    )
     limit, limit_flags = _limit(entrada, parametros, trail)
     effects = _new_effects(entrada, regras, trail)
-    return ResultadoPolitica(score, rating, potential_rating, merit, merit_potential, factor, factor_potential, round(balance_penalty, 2), limit, limit_flags, [], _pd(entrada, parametros, rating, trail, data_referencia), {"saude_cadastral": health, "relacionamento_governamental": relationship, "porte_operacionalidade": effective_capability_score, "reputacao_mercado": reputation_score}, effects, trail)
+    generic = _generic_effects(entrada, regras, trail, rating, parametros, set(vetos))
+    limit = round(limit * generic.pop("limite_fator"), 2)
+    return ResultadoPolitica(
+        score,
+        rating,
+        potential_rating,
+        merit,
+        merit_potential,
+        factor,
+        factor_potential,
+        round(balance_penalty, 2),
+        limit,
+        limit_flags,
+        [],
+        _pd(entrada, parametros, rating, trail, data_referencia),
+        {
+            "saude_cadastral": health,
+            "relacionamento_governamental": relationship,
+            "porte_operacionalidade": effective_capability_score,
+            "reputacao_mercado": reputation_score,
+        },
+        effects,
+        trail,
+        **generic,
+    )

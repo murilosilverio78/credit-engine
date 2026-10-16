@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 10 trata extrações financeiras truncadas, recibos sem IRPF e proveniência por campo.
+Version 11 inclui exposição enquadrada sobre patrimônio líquido para a política v2.
 """
 
-EMITTER_VERSION = "10"
+EMITTER_VERSION = "11"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {
