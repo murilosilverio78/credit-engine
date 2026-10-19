@@ -1830,7 +1830,7 @@ function ShadowPolicyPanel({ operationId, policy }: { operationId: string; polic
   const decision = policy.decisao ?? {};
   const adjustments = policy.ajustes ?? {};
   const money = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-  const reasons = (decision.alcada_motivos ?? []).map((reason) => `Nível ${reason.nivel ?? "—"}: ${reason.mensagem ?? reason.codigo}`).join(" · ") || "—";
+  const reasons = (decision.alcada_motivos ?? []).map((reason) => reason.texto).filter(Boolean).join(" · ");
   return (
     <section className="report-section rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -1841,14 +1841,14 @@ function ShadowPolicyPanel({ operationId, policy }: { operationId: string; polic
         <table className="w-full text-left text-xs"><thead className="text-[10px] uppercase text-muted-foreground"><tr><th className="pb-1.5"> </th><th className="pb-1.5">Oficial</th><th className="pb-1.5">v2 em sombra</th></tr></thead><tbody>
           <tr className="border-t border-border"><td className="py-1.5">Rating</td><td>{policy.oficial?.rating ?? "—"}</td><td>{decision.rating ?? "—"}</td></tr>
           <tr className="border-t border-border"><td className="py-1.5">Limite</td><td>{money(policy.oficial?.limite)}</td><td>{money(decision.limite)}</td></tr>
-          <tr className="border-t border-border"><td className="py-1.5">Alçada</td><td>—</td><td>Nível {decision.alcada_minima ?? 1}<span className="block text-[10px] text-muted-foreground">{reasons}</span></td></tr>
+          <tr className="border-t border-border"><td className="py-1.5">Alçada</td><td>não se aplica</td><td>Nível {decision.alcada_minima ?? 1}{reasons ? <span className="block text-[10px] text-muted-foreground">{reasons}</span> : null}</td></tr>
         </tbody></table>
       </div>
-      {decision.status_decisao === "DADOS_INSUFICIENTES" ? <p className="mt-3 text-xs text-amber-800">Sem dados para rating: faltam {(decision.faltantes ?? []).join(", ") || "especialistas"}.</p> : null}
+      {decision.status_decisao === "DADOS_INSUFICIENTES" ? <p className="mt-3 text-xs text-amber-800">Sem dados para rating: faltam {(decision.faltantes ?? []).map((item) => item.texto).filter(Boolean).join(", ") || "especialistas"}.</p> : null}
       {decision.status_decisao === "VETO" ? <p className="mt-3 text-xs text-red-700">Veto: {(decision.bloqueios ?? []).map((item) => item.finding?.rotulo ?? item.codigo).join(", ")}</p> : null}
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <div><p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Condições precedentes</p>{(policy.condicoes_precedentes ?? []).map((item, index) => <div className="border-t border-border py-1.5 text-xs" key={`${item.codigo}-${index}`}><p>{item.descricao ?? item.codigo}</p><p className="text-[10px] text-muted-foreground">{item.documento_exigido ?? "Documento exigido"} · <ShadowDocumentLink operationId={operationId} item={item} /></p></div>) || null}</div>
-        <div><p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Ajustes e informativos</p>{(adjustments.limite_multiplicadores ?? []).map((item, index) => <p className="border-t border-border py-1.5 text-xs" key={`${item.codigo}-${index}`}>Limite × {item.fator?.toLocaleString("pt-BR", { maximumFractionDigits: 2 })} — {item.finding?.rotulo ?? item.codigo}</p>)}{adjustments.taxa_ajuste_pp ? <p className="border-t border-border py-1.5 text-xs">Taxa {adjustments.taxa_ajuste_pp.toLocaleString("pt-BR")} p.p. <span className="text-muted-foreground">(informativo, não aplicado ao preço)</span></p> : null}{(policy.informativos ?? []).map((item, index) => <p className="border-t border-border py-1.5 text-xs" key={`${item.codigo}-${index}`}>{item.finding?.rotulo ?? item.codigo}: {typeof item.valor === "object" ? JSON.stringify(item.valor) : String(item.valor ?? "—")}</p>)}</div>
+        <div><p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Condições precedentes</p>{(policy.condicoes_precedentes ?? []).map((item, index) => <div className="border-t border-border py-1.5 text-xs" key={`${item.codigo}-${index}`}><p>{item.texto}</p><p className="text-[10px] text-muted-foreground">{item.documento_exigido ?? "Documento exigido"} · <ShadowDocumentLink operationId={operationId} item={item} /></p></div>) || null}</div>
+        <div><p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Ajustes e informativos</p>{(adjustments.limite_multiplicadores ?? []).map((item, index) => <p className="border-t border-border py-1.5 text-xs" key={`${item.codigo}-${index}`}>Limite × {item.fator?.toLocaleString("pt-BR", { maximumFractionDigits: 2 })} — {item.finding?.rotulo ?? item.codigo}</p>)}{adjustments.taxa_ajuste_pp ? <p className="border-t border-border py-1.5 text-xs">Taxa {adjustments.taxa_ajuste_pp.toLocaleString("pt-BR")} p.p. <span className="text-muted-foreground">(informativo, não aplicado ao preço)</span></p> : null}{(policy.informativos ?? []).map((item, index) => <p className="border-t border-border py-1.5 text-xs" key={`${item.codigo}-${index}`}>{item.texto}</p>)}</div>
       </div>
     </section>
   );

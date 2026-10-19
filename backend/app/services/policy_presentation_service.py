@@ -5,6 +5,100 @@ from __future__ import annotations
 from typing import Any
 
 
+_MISSING_TEXT = {
+    "porte": "porte e operacionalidade (sai no relatório completo)",
+    "sacado_orgao": "sacado e órgão",
+    "cadastro_regularidade": "cadastro e regularidade",
+}
+_FIELD_LABELS = {
+    "capital_social": "Capital social",
+    "participacao_socio_capital_social": "Participação societária no capital social",
+    "margem_liquida": "Margem líquida",
+    "receita": "Receita",
+}
+_SOURCE_LABELS = {"balanco": "balanço", "irpf": "IRPF", "sped_ecd": "SPED ECD"}
+
+
+def _number(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _money(value: Any) -> str:
+    amount = _number(value)
+    if amount is None:
+        return "não informado"
+    if abs(amount) >= 1_000_000:
+        return f"R$ {amount / 1_000_000:,.2f} mi".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"R$ {amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _percent(value: Any) -> str:
+    amount = _number(value)
+    if amount is None:
+        return "não informado"
+    percentage = amount * 100
+    digits = 0 if abs(percentage) > 10 else 1
+    return f"{percentage:.{digits}f}%".replace(".", ",")
+
+
+def _label(value: Any) -> str:
+    raw = str(value or "")
+    return _FIELD_LABELS.get(raw, raw.replace("_", " ").capitalize())
+
+
+def _generic_value(value: Any, key: str = "") -> str:
+    if isinstance(value, dict):
+        return "; ".join(
+            f"{_label(name)}: {_generic_value(item, str(name))}"
+            for name, item in value.items()
+        ) or "não informado"
+    if isinstance(value, list):
+        return "; ".join(_generic_value(item, key) for item in value) or "não informado"
+    if any(term in key.lower() for term in ("pct", "margem", "cobertura", "participacao")):
+        return _percent(value)
+    if any(term in key.lower() for term in ("valor", "receita", "capital", "patrimonio", "pl_")):
+        return _money(value)
+    if value is None or value == "":
+        return "não informado"
+    return str(value)
+
+
+def _informative_text(code: str, value: Any, label: str) -> list[str]:
+    data = _record(value)
+    if code == "aval_cobertura":
+        return [
+            "Aval cobre "
+            f"{_percent(data.get('cobertura'))} da operação "
+            f"(patrimônio ajustado {_money(data.get('pl_ajustado'))} de "
+            f"{_money(data.get('pl_declarado'))} declarados)"
+        ]
+    if code == "aval_patrimonio_nao_verificavel":
+        people = value if isinstance(value, list) else []
+        return [
+            f"Patrimônio do aval não verificável: {item.get('nome') or 'Avalista'} "
+            f"(CPF final {item.get('cpf_final') or 'não informado'})"
+            for item in map(_record, people)
+            if _number(item.get("pct_total")) == 0 or _number(item.get("pct_especie")) == 0
+        ]
+    if code == "dependencia_publica":
+        return [f"{_percent(value)} da receita vem de pagamentos públicos"]
+    if code == "divergencia_documental":
+        items = value if isinstance(value, list) else [data]
+        return [
+            f"{_label(item.get('campo'))}: {_SOURCE_LABELS.get(str(item.get('fonte_a')), str(item.get('fonte_a') or 'Fonte A'))} diz {_generic_value(item.get('valor_a'), str(item.get('campo') or ''))}, "
+            f"{_SOURCE_LABELS.get(str(item.get('fonte_b')), str(item.get('fonte_b') or 'Fonte B'))} diz {_generic_value(item.get('valor_b'), str(item.get('campo') or ''))}"
+            for item in map(_record, items)
+        ]
+    if code == "margem_liquida":
+        return [f"Margem líquida de {_percent(value)}"]
+    if code == "receita_declarada_12m":
+        return [f"Receita declarada nos últimos 12 meses: {_money(value)}"]
+    return [f"{label}: {_generic_value(value, code)}"]
+
+
 def _rows(query) -> list[dict[str, Any]]:
     result = query.execute()
     return list(getattr(result, "data", None) or [])
@@ -97,12 +191,24 @@ def latest_policy_view(operation_id: str, *, database=None, operation: dict[str,
     docs = _rows(database.table("documentos_cliente").select("id,cnpj,nome_arquivo,tipo,sha256,capturado_em").eq("cnpj", operation.get("cnpj"))) if hashes else []
     docs_by_hash = {str(row.get("sha256")): row for row in docs if str(row.get("sha256")) in hashes}
 
-    def enrich(items: Any) -> list[dict[str, Any]]:
+    def enrich(items: Any, *, kind: str = "item") -> list[dict[str, Any]]:
         output = []
         for item in items if isinstance(items, list) else []:
             value = dict(item) if isinstance(item, dict) else {"codigo": str(item)}
-            value["finding"] = _finding_projection(finding_by_code.get(str(value.get("codigo") or "")), labels, docs_by_hash)
-            output.append(value)
+            code = str(value.get("codigo") or "")
+            finding = _finding_projection(finding_by_code.get(code), labels, docs_by_hash)
+            value["finding"] = finding
+            if kind == "informativo":
+                raw_value = value.get("valor")
+                label = (finding or {}).get("rotulo") or labels.get(code) or _label(code)
+                for text in _informative_text(code, raw_value, str(label)):
+                    output.append({**value, "texto": text})
+            elif kind == "alcada":
+                message = value.get("mensagem") or _label(code)
+                output.append({**value, "texto": f"Nível {value.get('nivel')}: {message}"})
+            else:
+                text = value.get("descricao") or value.get("documento_exigido") or _label(code)
+                output.append({**value, "texto": str(text)})
         return output
 
     bloqueios = []
@@ -112,9 +218,9 @@ def latest_policy_view(operation_id: str, *, database=None, operation: dict[str,
     return {
         "status": "OK",
         "politica": {"versao": version.get("versao"), "status": version.get("status"), "data_referencia": shadow.get("data_referencia"), "shadow_logic_version": result.get("shadow_logic_version")},
-        "decisao": {"status_decisao": result.get("status_decisao"), "rating": result.get("rating"), "limite": result.get("limite_aprovado_rs"), "alcada_minima": result.get("alcada_minima", 1), "alcada_motivos": enrich(result.get("alcada_motivos")), "faltantes": result.get("faltantes") or [], "bloqueios": bloqueios},
+        "decisao": {"status_decisao": result.get("status_decisao"), "rating": result.get("rating"), "limite": result.get("limite_aprovado_rs"), "alcada_minima": result.get("alcada_minima", 1), "alcada_motivos": enrich(result.get("alcada_motivos"), kind="alcada"), "faltantes": [{"codigo": str(code), "texto": _MISSING_TEXT.get(str(code), _label(code))} for code in result.get("faltantes") or []], "bloqueios": bloqueios},
         "oficial": {"rating": oficial.get("rating", operation.get("rating")), "limite": oficial.get("limite_aprovado_rs", oficial.get("limite", operation.get("limite_aprovado")))},
         "condicoes_precedentes": enrich(result.get("condicoes_precedentes")),
         "ajustes": {"limite_multiplicadores": enrich(result.get("limite_multiplicadores")), "taxa_ajuste_pp": result.get("taxa_ajuste_pp", 0.0)},
-        "informativos": enrich(result.get("informativos")),
+        "informativos": enrich(result.get("informativos"), kind="informativo"),
     }

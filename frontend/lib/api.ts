@@ -194,7 +194,7 @@ export function getOperation(operationId: string) {
 export type PolicyShadowView = {
   status: "OK" | "SEM_AVALIACAO";
   politica?: { versao?: number; status?: string; data_referencia?: string; shadow_logic_version?: string };
-  decisao?: { status_decisao?: string; rating?: string | null; limite?: number | null; alcada_minima?: number; alcada_motivos?: Array<{ codigo?: string; nivel?: number; mensagem?: string }> ; faltantes?: string[]; bloqueios?: Array<{ codigo?: string; finding?: PolicyFinding | null }> };
+  decisao?: { status_decisao?: string; rating?: string | null; limite?: number | null; alcada_minima?: number; alcada_motivos?: Array<{ codigo?: string; nivel?: number; mensagem?: string; texto?: string }> ; faltantes?: Array<{ codigo?: string; texto?: string }>; bloqueios?: Array<{ codigo?: string; finding?: PolicyFinding | null }> };
   oficial?: { rating?: string | null; limite?: number | null };
   condicoes_precedentes?: PolicyItem[];
   ajustes?: { limite_multiplicadores?: PolicyItem[]; taxa_ajuste_pp?: number };
@@ -202,7 +202,7 @@ export type PolicyShadowView = {
 };
 
 export type PolicyFinding = { codigo?: string; rotulo?: string; estado?: string; confianca?: string; valor?: unknown; evidencia?: Array<{ documento?: { documento_id?: string; nome_arquivo?: string; familia?: string; data_base?: string; pagina?: string | number; trecho?: string } }> };
-export type PolicyItem = { codigo?: string; descricao?: string; documento_exigido?: string; fator?: number; valor?: unknown; finding?: PolicyFinding | null };
+export type PolicyItem = { codigo?: string; descricao?: string; documento_exigido?: string; fator?: number; valor?: unknown; texto?: string; finding?: PolicyFinding | null };
 
 export function getOperationPolicy(operationId: string) {
   return request<PolicyShadowView>(`/api/v1/operations/${encodeURIComponent(operationId)}/politica`);

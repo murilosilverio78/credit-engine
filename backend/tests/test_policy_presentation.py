@@ -34,6 +34,48 @@ def test_policy_view_enriches_cp_with_source_document():
     assert evidence == {"documento_id": "doc-1", "nome_arquivo": "balanco.pdf", "familia": "ULTIMO_BALANCO", "data_base": "2026-10-01", "pagina": 2, "trecho": "assinatura"}
 
 
+def test_policy_view_formats_real_operation_02295223_informativos():
+    """Valores da 02295223 / operação 271d9f08, sem expor JSON na leitura."""
+    result = {
+        "status_decisao": "DADOS_INSUFICIENTES",
+        "faltantes": ["porte", "sacado_orgao", "cadastro_regularidade"],
+        "alcada_minima": 3,
+        "alcada_motivos": [{"codigo": "rating", "nivel": 2, "mensagem": "Rating D"}, {"codigo": "exposicao_sobre_pl", "nivel": 3, "mensagem": "Exposição sobre PL"}],
+        "condicoes_precedentes": [{"codigo": "capital_social_alterado_recente", "descricao": "Comprovar integralização do capital", "documento_exigido": "Comprovante"}],
+        "informativos": [
+            {"codigo": "aval_cobertura", "valor": {"cobertura": 0.085, "pl_ajustado": 8_180_000, "pl_declarado": 9_000_000}},
+            {"codigo": "aval_patrimonio_nao_verificavel", "valor": [{"nome": "Ana", "cpf_final": "1234", "pct_total": 0, "pct_especie": 0}, {"nome": "Bia", "cpf_final": "5678", "pct_total": 0.5, "pct_especie": 0.2}]},
+            {"codigo": "dependencia_publica", "valor": 0.625},
+            {"codigo": "divergencia_documental", "valor": [{"campo": "capital_social", "fonte_a": "balanco", "valor_a": 1_000_000, "fonte_b": "irpf", "valor_b": 900_000}]},
+            {"codigo": "margem_liquida", "valor": 0.084},
+            {"codigo": "receita_declarada_12m", "valor": 8_180_000},
+        ],
+    }
+    db = _database(result)
+    db.tables["findings"].extend(
+        {"operation_id": "op-1", "run_id": "run-1", "codigo": code, "estado": "CONFIRMADO", "confianca": "ALTA", "valor": value, "evidencia": []}
+        for code, value in [(item["codigo"], item["valor"]) for item in result["informativos"]]
+    )
+    db.tables["finding_catalog"].extend({"codigo": item["codigo"], "descricao": item["codigo"].replace("_", " ").capitalize()} for item in result["informativos"])
+
+    view = latest_policy_view("op-1", database=db)
+
+    assert [item["texto"] for item in view["decisao"]["faltantes"]] == [
+        "porte e operacionalidade (sai no relatório completo)", "sacado e órgão", "cadastro e regularidade"
+    ]
+    assert [item["texto"] for item in view["decisao"]["alcada_motivos"]] == ["Nível 2: Rating D", "Nível 3: Exposição sobre PL"]
+    assert view["condicoes_precedentes"][0]["texto"] == "Comprovar integralização do capital"
+    assert [item["texto"] for item in view["informativos"]] == [
+        "Aval cobre 8,5% da operação (patrimônio ajustado R$ 8,18 mi de R$ 9,00 mi declarados)",
+        "Patrimônio do aval não verificável: Ana (CPF final 1234)",
+        "62% da receita vem de pagamentos públicos",
+        "Capital social: balanço diz R$ 1,00 mi, IRPF diz R$ 900.000,00",
+        "Margem líquida de 8,4%",
+        "Receita declarada nos últimos 12 meses: R$ 8,18 mi",
+    ]
+    assert all("{" not in item["texto"] for item in view["informativos"])
+
+
 @pytest.mark.parametrize("decision", [
     {"status_decisao": "DADOS_INSUFICIENTES", "faltantes": ["porte"]},
     {"status_decisao": "VETO", "bloqueios": ["capital_social_alterado_recente"]},

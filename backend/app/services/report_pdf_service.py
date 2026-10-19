@@ -538,15 +538,16 @@ def policy_v2_section(policy: dict[str, Any]) -> str:
     decision = record(policy.get("decisao"))
     official = record(policy.get("oficial"))
     authority = "; ".join(
-        f"Nível {item.get('nivel')}: {item.get('mensagem') or item.get('codigo')}"
+        text(item.get("texto"), "")
         for item in map(record, array(decision.get("alcada_motivos")))
-    ) or "-"
+        if item.get("texto")
+    )
     comparison = table(
         ["", "Oficial", "v2 em sombra"],
         [
             ["Rating", official.get("rating"), decision.get("rating") or "-"],
             ["Limite", optional_money(official.get("limite")), optional_money(decision.get("limite"))],
-            ["Alçada", "-", f"Nível {text(decision.get('alcada_minima'), '1')} — {authority}"],
+            ["Alçada", "não se aplica", f"Nível {text(decision.get('alcada_minima'), '1')}{f' — {authority}' if authority else ''}"],
         ],
     )
     parts = [
@@ -557,7 +558,10 @@ def policy_v2_section(policy: dict[str, Any]) -> str:
     ]
     status = text(decision.get("status_decisao"), "DECISAO_CALCULADA")
     if status == "DADOS_INSUFICIENTES":
-        parts.append(f"<p><strong>Sem dados para rating:</strong> faltam {esc(', '.join(map(str, array(decision.get('faltantes')))), '-')}.</p>")
+        missing = ", ".join(
+            text(item.get("texto")) for item in map(record, array(decision.get("faltantes")))
+        ) or "especialistas"
+        parts.append(f"<p><strong>Sem dados para rating:</strong> faltam {esc(missing)}.</p>")
     if status == "VETO":
         reasons = []
         for item in map(record, array(decision.get("bloqueios"))):
@@ -582,7 +586,7 @@ def policy_v2_section(policy: dict[str, Any]) -> str:
             document = record(evidence_item.get("documento"))
             if document:
                 documents.append(f"{text(document.get('nome_arquivo'))} — pág. {text(document.get('pagina'))}")
-        conditions.append([item.get("descricao") or item.get("codigo"), item.get("documento_exigido"), "; ".join(documents) or "-"])
+        conditions.append([item.get("texto"), item.get("documento_exigido"), "; ".join(documents) or "-"])
     parts.extend(["<h2>Condições precedentes</h2>", table(["Condição", "Documento exigido", "Evidência"], conditions, "compact")])
     adjustments = []
     for item in map(record, array(record(policy.get("ajustes")).get("limite_multiplicadores"))):
@@ -594,13 +598,8 @@ def policy_v2_section(policy: dict[str, Any]) -> str:
     parts.extend(["<h2>Ajustes</h2>", table(["Ajuste", "Motivo"], adjustments, "compact")])
     infos = []
     for item in map(record, array(policy.get("informativos"))):
-        finding = record(item.get("finding"))
-        value = item.get("valor")
-        label = finding.get("rotulo") or item.get("codigo")
-        if isinstance(value, dict):
-            value = ", ".join(f"{key}: {pct_from_fraction(item_value, 1) if any(word in str(key).lower() for word in ('cobertura', 'margem')) else optional_money(item_value) if 'valor' in str(key).lower() else text(item_value)}" for key, item_value in value.items())
-        infos.append([label, value])
-    parts.extend(["<h2>Informativos</h2>", table(["Indicador", "Valor"], infos, "compact"), "</section>"])
+        infos.append([item.get("texto")])
+    parts.extend(["<h2>Informativos</h2>", table(["Informativo"], infos, "compact"), "</section>"])
     return "".join(parts)
 
 
