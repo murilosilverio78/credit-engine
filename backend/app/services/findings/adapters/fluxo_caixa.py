@@ -103,7 +103,9 @@ _CITED_CONTRACT = re.compile(
     r"(?:(\d{4})\s*/\s*(\d+)|(\d+)\s*/\s*(\d{4}))\b",
     re.IGNORECASE,
 )
-_TRIBUTARY_ORDER = re.compile(r"\b(?:INSS|IRPJ|IRRF|CSLL|PIS|COFINS|ISS|RETENCAO|DARF)\b")
+# Only orders whose observation STARTS with a tax keyword are tax payments.
+# Supplier payments routinely mention "RETENCAO DE INSS" further in the text.
+_TRIBUTARY_ORDER = re.compile(r"^\W*(?:\d+\s*-\s*)?(?:INSS|IRPJ|IRRF|CSLL|PIS|COFINS|ISS|DARF|RETENCAO)\b")
 _OPERATION_NUMBER = re.compile(r"\b(?:N\s*[º°O.]?\s*)?OP\.?\s*(\d+)\b")
 _BANK_NUMBER = re.compile(r"\b(?:BANCO|BCO)\s*(?:N\s*[º°O.]?\s*)?(\d+)\b")
 

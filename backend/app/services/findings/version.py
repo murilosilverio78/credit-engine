@@ -3,7 +3,7 @@
 Version 20 adiciona escopo de UG, conciliação 1:N e antecipações concorrentes.
 """
 
-EMITTER_VERSION = "21"
+EMITTER_VERSION = "22"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

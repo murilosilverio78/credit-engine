@@ -320,3 +320,12 @@ def test_portal_is_not_applicable_without_found_comprasnet(monkeypatch):
     result = pagamentos_portal._fetch("02955426000124", operation_id="op", today=date(2026, 10, 19))
 
     assert result["status_consulta"] == "NAO_APLICAVEL"
+
+
+def test_supplier_payment_mentioning_withholding_later_is_not_a_tax_order():
+    from app.services.findings.adapters.fluxo_caixa import _is_tax_or_withholding
+
+    payment = {"observacao": "LIQUIDACAO DE NF(S): 38, 42, 43, CONTRATO Nº: 00004/2025 - DIRETIVA PATRIMONIAL LTDA - RETENCAO DE INSS CONFORME IN 971"}
+    assert not _is_tax_or_withholding(payment)
+    for text in ("INSS NF(S): 105, 108", "IRPJ DE NF.(S): 105", "INSS-NFS(S) 3906", "RETENCAO DO ISS, CONFORME LC 116/2003", "ISS S/ SERVICO DE RECEPCAO"):
+        assert _is_tax_or_withholding({"observacao": text}), text
