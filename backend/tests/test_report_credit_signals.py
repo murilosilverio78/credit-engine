@@ -1,4 +1,12 @@
-from app.services.report_pdf_service import cover_section, pricing_section, regularity_section
+from app.services.report_pdf_service import cover_section, policy_v2_section, pricing_section, regularity_section
+
+
+def test_pdf_policy_v2_section_renders_empty_insufficient_and_veto_states():
+    assert "Sem avaliação" in policy_v2_section({"status": "SEM_AVALIACAO"})
+    insufficient = policy_v2_section({"status": "OK", "oficial": {}, "decisao": {"status_decisao": "DADOS_INSUFICIENTES", "faltantes": ["porte"]}, "ajustes": {}})
+    veto = policy_v2_section({"status": "OK", "oficial": {}, "decisao": {"status_decisao": "VETO", "bloqueios": [{"codigo": "sancao", "finding": {"rotulo": "Sanção ativa"}}]}, "ajustes": {}})
+    assert "Sem dados para rating" in insufficient
+    assert "Veto" in veto and "Sanção ativa" in veto
 
 
 def test_pdf_cover_shows_operation_conference_and_concentration():

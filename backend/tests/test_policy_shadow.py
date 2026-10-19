@@ -118,12 +118,12 @@ def test_shadow_hash_includes_logic_version(monkeypatch):
     db = _Db()
 
     first = shadow.avaliar_sombra("op", database=db, aplicar=True)
-    monkeypatch.setattr(shadow, "SHADOW_LOGIC_VERSION", "3")
+    monkeypatch.setattr(shadow, "SHADOW_LOGIC_VERSION", "4")
     changed_logic = shadow.avaliar_sombra("op", database=db, aplicar=True)
 
     assert first["entrada_hash"] != changed_logic["entrada_hash"]
-    assert first["resultado"]["shadow_logic_version"] == "2"
-    assert changed_logic["resultado"]["shadow_logic_version"] == "3"
+    assert first["resultado"]["shadow_logic_version"] == "3"
+    assert changed_logic["resultado"]["shadow_logic_version"] == "4"
     assert len(db.inserted) == 2
 
 

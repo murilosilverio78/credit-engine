@@ -48,6 +48,7 @@ class ResultadoPolitica:
     trilha: dict[str, list[dict[str, str | None]]]
     condicoes_precedentes: list[dict[str, Any]] = field(default_factory=list)
     alcada_minima: int = 1
+    alcada_motivos: list[dict[str, Any]] = field(default_factory=list)
     limite_multiplicadores: list[dict[str, Any]] = field(default_factory=list)
     taxa_ajuste_pp: float = 0.0
     informativos: list[dict[str, Any]] = field(default_factory=list)
@@ -73,6 +74,7 @@ class ResultadoPolitica:
             "trilha": self.trilha,
             "condicoes_precedentes": self.condicoes_precedentes,
             "alcada_minima": self.alcada_minima,
+            "alcada_motivos": self.alcada_motivos,
             "limite_multiplicadores": self.limite_multiplicadores,
             "taxa_ajuste_pp": self.taxa_ajuste_pp,
             "informativos": self.informativos,

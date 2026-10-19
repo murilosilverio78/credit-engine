@@ -191,6 +191,27 @@ export function getOperation(operationId: string) {
   return request<OperationDetails>(`/api/v1/operations/${operationId}`);
 }
 
+export type PolicyShadowView = {
+  status: "OK" | "SEM_AVALIACAO";
+  politica?: { versao?: number; status?: string; data_referencia?: string; shadow_logic_version?: string };
+  decisao?: { status_decisao?: string; rating?: string | null; limite?: number | null; alcada_minima?: number; alcada_motivos?: Array<{ codigo?: string; nivel?: number; mensagem?: string }> ; faltantes?: string[]; bloqueios?: Array<{ codigo?: string; finding?: PolicyFinding | null }> };
+  oficial?: { rating?: string | null; limite?: number | null };
+  condicoes_precedentes?: PolicyItem[];
+  ajustes?: { limite_multiplicadores?: PolicyItem[]; taxa_ajuste_pp?: number };
+  informativos?: PolicyItem[];
+};
+
+export type PolicyFinding = { codigo?: string; rotulo?: string; estado?: string; confianca?: string; valor?: unknown; evidencia?: Array<{ documento?: { documento_id?: string; nome_arquivo?: string; familia?: string; data_base?: string; pagina?: string | number; trecho?: string } }> };
+export type PolicyItem = { codigo?: string; descricao?: string; documento_exigido?: string; fator?: number; valor?: unknown; finding?: PolicyFinding | null };
+
+export function getOperationPolicy(operationId: string) {
+  return request<PolicyShadowView>(`/api/v1/operations/${encodeURIComponent(operationId)}/politica`);
+}
+
+export function getOperationDocumentUrl(operationId: string, documentId: string) {
+  return request<{ url: string; expires_in_seconds: number }>(`/api/v1/operations/${encodeURIComponent(operationId)}/documentos/${encodeURIComponent(documentId)}/url`);
+}
+
 export function reprocessOperationScore(operationId: string, valorOperacao?: number) {
   return request<ScoreReprocessingAccepted>(
     `/api/v1/operations/${encodeURIComponent(operationId)}/reprocessar-score`,

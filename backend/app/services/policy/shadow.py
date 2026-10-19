@@ -14,7 +14,7 @@ from app.services.policy.inputs import montar_entrada
 from app.services.policy.loader import load_policy
 
 # Bump whenever shadow comparison or classification semantics change.
-SHADOW_LOGIC_VERSION = "2"
+SHADOW_LOGIC_VERSION = "3"
 _FIELDS = (
     "merit",
     "merit_potencial",

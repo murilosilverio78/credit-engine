@@ -9,6 +9,7 @@ from app.core.database import supabase
 from app.services.analysis_runtime import is_shutting_down
 from app.services.audit_service import AuditService
 from app.services.report_pdf_service import ReportPdfService
+from app.services.policy_presentation_service import latest_policy_view
 
 router = APIRouter()
 audit = AuditService()
@@ -336,6 +337,43 @@ async def create_operation(payload: PropostaInput, background_tasks: BackgroundT
         "status": "pending",
         "message": "Análise iniciada. Acompanhe via /api/v1/operations/{id}",
     }
+
+
+@router.get("/{operation_id}/politica")
+async def get_operation_policy(
+    operation_id: str,
+    _current_user: dict = Depends(get_current_user),
+):
+    """Informational v2 policy projection; never affects the official score."""
+    return latest_policy_view(operation_id)
+
+
+@router.get("/{operation_id}/documentos/{documento_id}/url")
+async def get_operation_document_url(
+    operation_id: str,
+    documento_id: str,
+    _current_user: dict = Depends(get_current_user),
+):
+    operation = _operation_snapshot(operation_id)
+    cnpj = re.sub(r"\D", "", str(operation.get("cnpj") or ""))
+    document_rows = (
+        supabase.table("documentos_cliente")
+        .select("id,cnpj,storage_key")
+        .eq("id", documento_id)
+        .eq("cnpj", cnpj)
+        .limit(1)
+        .execute()
+    ).data or []
+    if not document_rows or not document_rows[0].get("storage_key"):
+        raise HTTPException(status_code=404, detail="Documento não encontrado para esta operação")
+    from app.services.storage_service import R2UnavailableError, StorageService
+    try:
+        url = await StorageService().get_presigned_url(
+            document_rows[0]["storage_key"], expires_in=15 * 60
+        )
+    except R2UnavailableError as exc:
+        raise HTTPException(status_code=503, detail="Armazenamento de documentos indisponível") from exc
+    return {"url": url, "expires_in_seconds": 15 * 60}
 
 
 @router.get("/{operation_id}")

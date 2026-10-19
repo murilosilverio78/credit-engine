@@ -283,6 +283,7 @@ def _generic_effects(
     output = {
         "condicoes_precedentes": [],
         "alcada_minima": 1,
+        "alcada_motivos": [],
         "limite_multiplicadores": [],
         "taxa_ajuste_pp": 0.0,
         "informativos": [],
@@ -310,7 +311,19 @@ def _generic_effects(
                 }
             )
         elif target == "alcada":
-            output["alcada_minima"] = max(output["alcada_minima"], int(magnitude))
+            nivel = int(magnitude)
+            message = condition.get("mensagem")
+            if not message and code == "rating":
+                ratings = condition.get("rating_in") or []
+                message = f"Rating {'/'.join(map(str, ratings))}" if ratings else "Rating"
+            output["alcada_minima"] = max(output["alcada_minima"], nivel)
+            output["alcada_motivos"].append(
+                {
+                    "codigo": code,
+                    "nivel": nivel,
+                    "mensagem": message or code.replace("_", " "),
+                }
+            )
         elif target == "limite_mult":
             output["limite_multiplicadores"].append(
                 {"codigo": code, "fator": magnitude}

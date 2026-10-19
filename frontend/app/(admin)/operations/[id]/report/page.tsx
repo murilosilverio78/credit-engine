@@ -23,7 +23,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { ApiError, downloadOperationReportPdf, getOperation } from "@/lib/api";
+import { ApiError, downloadOperationReportPdf, getOperation, getOperationDocumentUrl, getOperationPolicy, type PolicyItem, type PolicyShadowView } from "@/lib/api";
 import { formatTaxaAm } from "@/lib/format";
 import type { ComponentSnapshot, OperationDetails, Rating } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -1809,10 +1809,56 @@ function PrintableAnnex({ snapshots, verifiedContracts }: { snapshots: Map<strin
   );
 }
 
+function ShadowDocumentLink({ operationId, item }: { operationId: string; item: PolicyItem }) {
+  const document = item.finding?.evidencia?.find((evidence) => evidence.documento?.documento_id)?.documento;
+  if (!document?.documento_id) return <span className="text-muted-foreground">—</span>;
+  return (
+    <button
+      className="text-left text-blue-700 underline underline-offset-2 hover:text-blue-900"
+      onClick={() => void getOperationDocumentUrl(operationId, document.documento_id!).then(({ url }) => window.open(url, "_blank", "noopener,noreferrer"))}
+      type="button"
+    >
+      {document.nome_arquivo ?? "Documento de origem"}{document.pagina ? ` · pág. ${document.pagina}` : ""}
+    </button>
+  );
+}
+
+function ShadowPolicyPanel({ operationId, policy }: { operationId: string; policy?: PolicyShadowView }) {
+  if (!policy || policy.status === "SEM_AVALIACAO") {
+    return <section className="report-section rounded-lg border-[0.5px] border-dashed border-border bg-background px-4 py-3 text-xs text-muted-foreground">Sem avaliação de política em sombra para esta operação.</section>;
+  }
+  const decision = policy.decisao ?? {};
+  const adjustments = policy.ajustes ?? {};
+  const money = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const reasons = (decision.alcada_motivos ?? []).map((reason) => `Nível ${reason.nivel ?? "—"}: ${reason.mensagem ?? reason.codigo}`).join(" · ") || "—";
+  return (
+    <section className="report-section rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-medium">Política de crédito v2</h3>
+        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800">Em observação — não altera a decisão oficial</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs"><thead className="text-[10px] uppercase text-muted-foreground"><tr><th className="pb-1.5"> </th><th className="pb-1.5">Oficial</th><th className="pb-1.5">v2 em sombra</th></tr></thead><tbody>
+          <tr className="border-t border-border"><td className="py-1.5">Rating</td><td>{policy.oficial?.rating ?? "—"}</td><td>{decision.rating ?? "—"}</td></tr>
+          <tr className="border-t border-border"><td className="py-1.5">Limite</td><td>{money(policy.oficial?.limite)}</td><td>{money(decision.limite)}</td></tr>
+          <tr className="border-t border-border"><td className="py-1.5">Alçada</td><td>—</td><td>Nível {decision.alcada_minima ?? 1}<span className="block text-[10px] text-muted-foreground">{reasons}</span></td></tr>
+        </tbody></table>
+      </div>
+      {decision.status_decisao === "DADOS_INSUFICIENTES" ? <p className="mt-3 text-xs text-amber-800">Sem dados para rating: faltam {(decision.faltantes ?? []).join(", ") || "especialistas"}.</p> : null}
+      {decision.status_decisao === "VETO" ? <p className="mt-3 text-xs text-red-700">Veto: {(decision.bloqueios ?? []).map((item) => item.finding?.rotulo ?? item.codigo).join(", ")}</p> : null}
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div><p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Condições precedentes</p>{(policy.condicoes_precedentes ?? []).map((item, index) => <div className="border-t border-border py-1.5 text-xs" key={`${item.codigo}-${index}`}><p>{item.descricao ?? item.codigo}</p><p className="text-[10px] text-muted-foreground">{item.documento_exigido ?? "Documento exigido"} · <ShadowDocumentLink operationId={operationId} item={item} /></p></div>) || null}</div>
+        <div><p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Ajustes e informativos</p>{(adjustments.limite_multiplicadores ?? []).map((item, index) => <p className="border-t border-border py-1.5 text-xs" key={`${item.codigo}-${index}`}>Limite × {item.fator?.toLocaleString("pt-BR", { maximumFractionDigits: 2 })} — {item.finding?.rotulo ?? item.codigo}</p>)}{adjustments.taxa_ajuste_pp ? <p className="border-t border-border py-1.5 text-xs">Taxa {adjustments.taxa_ajuste_pp.toLocaleString("pt-BR")} p.p. <span className="text-muted-foreground">(informativo, não aplicado ao preço)</span></p> : null}{(policy.informativos ?? []).map((item, index) => <p className="border-t border-border py-1.5 text-xs" key={`${item.codigo}-${index}`}>{item.finding?.rotulo ?? item.codigo}: {typeof item.valor === "object" ? JSON.stringify(item.valor) : String(item.valor ?? "—")}</p>)}</div>
+      </div>
+    </section>
+  );
+}
+
 function Report({ operation }: { operation: OperationDetails }) {
   const generatedAt = useMemo(() => new Date(), []);
   const [downloadError, setDownloadError] = useState("");
   const [downloading, setDownloading] = useState(false);
+  const policyQuery = useQuery({ queryKey: ["operation-policy", operation.id], queryFn: () => getOperationPolicy(operation.id) });
   const snapshots = useMemo(
     () =>
       new Map(
@@ -1999,6 +2045,9 @@ function Report({ operation }: { operation: OperationDetails }) {
             {stringValue(engine.parecer, "Parecer não disponível.")}
           </p>
         </section>
+
+        <SectionTitle>Política de crédito v2</SectionTitle>
+        <ShadowPolicyPanel operationId={operation.id} policy={policyQuery.data} />
 
         <section className="report-section grid gap-2.5 md:grid-cols-2">
           <div>

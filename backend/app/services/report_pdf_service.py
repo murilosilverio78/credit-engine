@@ -525,6 +525,85 @@ def parecer_section(engine: dict[str, Any]) -> str:
     """
 
 
+def policy_v2_section(policy: dict[str, Any]) -> str:
+    """Informational shadow-policy section, intentionally independent of pricing."""
+    if policy.get("status") == "SEM_AVALIACAO":
+        return """
+        <section class="page-section avoid-break">
+          <h1>Política de crédito v2</h1>
+          <p class="note"><strong>Em observação — não altera a decisão oficial.</strong></p>
+          <p>Sem avaliação de política em sombra para esta operação.</p>
+        </section>
+        """
+    decision = record(policy.get("decisao"))
+    official = record(policy.get("oficial"))
+    authority = "; ".join(
+        f"Nível {item.get('nivel')}: {item.get('mensagem') or item.get('codigo')}"
+        for item in map(record, array(decision.get("alcada_motivos")))
+    ) or "-"
+    comparison = table(
+        ["", "Oficial", "v2 em sombra"],
+        [
+            ["Rating", official.get("rating"), decision.get("rating") or "-"],
+            ["Limite", optional_money(official.get("limite")), optional_money(decision.get("limite"))],
+            ["Alçada", "-", f"Nível {text(decision.get('alcada_minima'), '1')} — {authority}"],
+        ],
+    )
+    parts = [
+        '<section class="page-section">',
+        '<h1>Política de crédito v2</h1>',
+        '<p class="note"><strong>Em observação — não altera a decisão oficial.</strong></p>',
+        comparison,
+    ]
+    status = text(decision.get("status_decisao"), "DECISAO_CALCULADA")
+    if status == "DADOS_INSUFICIENTES":
+        parts.append(f"<p><strong>Sem dados para rating:</strong> faltam {esc(', '.join(map(str, array(decision.get('faltantes')))), '-')}.</p>")
+    if status == "VETO":
+        reasons = []
+        for item in map(record, array(decision.get("bloqueios"))):
+            finding = record(item.get("finding"))
+            value = finding.get("valor")
+            details = ""
+            if isinstance(value, dict):
+                relevant = [
+                    f"{key}: {text(value[key])}"
+                    for key in ("cadastro", "orgao", "vigencia", "vigencia_fim")
+                    if value.get(key) not in (None, "")
+                ]
+                details = f" ({'; '.join(relevant)})" if relevant else ""
+            reasons.append(f"{finding.get('rotulo') or item.get('codigo')}{details}")
+        parts.append(f"<p class=\"risk-callout\"><strong>Veto:</strong> {esc('; '.join(map(str, reasons)), '-')}</p>")
+    conditions = []
+    for item in map(record, array(policy.get("condicoes_precedentes"))):
+        finding = record(item.get("finding"))
+        evidence = array(finding.get("evidencia"))
+        documents = []
+        for evidence_item in map(record, evidence):
+            document = record(evidence_item.get("documento"))
+            if document:
+                documents.append(f"{text(document.get('nome_arquivo'))} — pág. {text(document.get('pagina'))}")
+        conditions.append([item.get("descricao") or item.get("codigo"), item.get("documento_exigido"), "; ".join(documents) or "-"])
+    parts.extend(["<h2>Condições precedentes</h2>", table(["Condição", "Documento exigido", "Evidência"], conditions, "compact")])
+    adjustments = []
+    for item in map(record, array(record(policy.get("ajustes")).get("limite_multiplicadores"))):
+        label = record(item.get("finding")).get("rotulo") or item.get("codigo")
+        adjustments.append([f"Limite × {number(item.get('fator'), 2)}", label])
+    rate = record(policy.get("ajustes")).get("taxa_ajuste_pp")
+    if rate:
+        adjustments.append([f"Taxa {number(rate, 2)} p.p.", "Informativo — não aplicado ao preço"])
+    parts.extend(["<h2>Ajustes</h2>", table(["Ajuste", "Motivo"], adjustments, "compact")])
+    infos = []
+    for item in map(record, array(policy.get("informativos"))):
+        finding = record(item.get("finding"))
+        value = item.get("valor")
+        label = finding.get("rotulo") or item.get("codigo")
+        if isinstance(value, dict):
+            value = ", ".join(f"{key}: {pct_from_fraction(item_value, 1) if any(word in str(key).lower() for word in ('cobertura', 'margem')) else optional_money(item_value) if 'valor' in str(key).lower() else text(item_value)}" for key, item_value in value.items())
+        infos.append([label, value])
+    parts.extend(["<h2>Informativos</h2>", table(["Indicador", "Valor"], infos, "compact"), "</section>"])
+    return "".join(parts)
+
+
 def regularity_section(engine: dict[str, Any]) -> str:
     regularity = record(engine.get("regularidade"))
     fator = regularity.get("fator", 1)
@@ -889,6 +968,7 @@ def document_html(operation: dict[str, Any]) -> tuple[str, str, str]:
             cover_section(operation, snapshots, engine),
             scorecard_section(engine),
             parecer_section(engine),
+            policy_v2_section(record(operation.get("politica_v2"))),
             regularity_section(engine),
             pricing_section(operation),
             contracts_annex(operation, snapshots),
@@ -935,6 +1015,11 @@ class ReportPdfService:
         operation = await OperationService().get_with_snapshots(operation_id)
         if not operation:
             raise HTTPException(status_code=404, detail="Operação não encontrada")
+        try:
+            from app.services.policy_presentation_service import latest_policy_view
+            operation["politica_v2"] = latest_policy_view(operation_id, operation=operation)
+        except Exception:
+            operation["politica_v2"] = {"status": "SEM_AVALIACAO"}
         return await asyncio.to_thread(self._render_pdf, operation)
 
     def _render_pdf(self, operation: dict[str, Any]) -> bytes:

@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from app.services.policy.engine import avaliar
+from app.services.policy.engine import _generic_effects, avaliar
 from app.services.policy.types import EntradaPolitica, FindingValue
 from tests.test_policy_engine import _params, _rating_runs
 
@@ -117,6 +117,25 @@ def test_generic_v2_composes_effects_and_uses_maximum_authority():
         {"codigo": "aval_cobertura", "valor": {"cobertura": 1.1}}
     ]
     assert result.limite_aprovado_rs == 800
+
+
+def test_authority_records_all_triggering_reasons_including_rating_d():
+    effects = _generic_effects(
+        EntradaPolitica({}, {"exposicao_sobre_pl": _finding("exposicao_sobre_pl", 3.6)}),
+        [
+            _rule("rating_d", "alcada", 2, {"rating_in": ["D"], "mensagem": "Rating D"}),
+            _rule("exposicao_sobre_pl", "alcada", 3, {"comparacao": {"campo": "", "op": ">", "ref": 2}, "mensagem": "Exposição sobre PL"}),
+        ],
+        {},
+        "D",
+        _params(),
+    )
+
+    assert effects["alcada_minima"] == 3
+    assert effects["alcada_motivos"] == [
+        {"codigo": "rating_d", "nivel": 2, "mensagem": "Rating D"},
+        {"codigo": "exposicao_sobre_pl", "nivel": 3, "mensagem": "Exposição sobre PL"},
+    ]
 
 
 def test_generic_v2_respects_confidence_absence_and_veto_precedence():
