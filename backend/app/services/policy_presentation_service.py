@@ -150,7 +150,7 @@ def _informative_text(code: str, value: Any, label: str) -> list[str]:
     if code == "taxa_conciliacao_pagamentos":
         return [f"Taxa de conciliação de pagamentos: {_percent(value)}"]
     if code == "pago_portal_vs_comprasnet":
-        return [f"Pagamentos no Portal: {_money(data.get('pago_portal_ano'))} versus {_money(data.get('pago_comprasnet_ano'))} no Comprasnet"]
+        return [f"Pagamentos no Portal: {_money(data.get('pago_portal_ano'))} versus {_money(data.get('liquidado_comprasnet_ano'))} liquidados no Comprasnet"]
     return [f"{label}: {_generic_value(value, code)}"]
 
 

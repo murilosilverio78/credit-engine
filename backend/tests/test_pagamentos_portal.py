@@ -26,6 +26,36 @@ def test_reconciliation_prefers_observation_then_value_and_is_one_to_one():
     ]
 
 
+def test_observation_matches_numeric_tokens_not_substrings():
+    invoice = _invoice("12")
+    orders = [
+        {"data": "15/09/2026", "valor": "1,00", "observacao": "competência 2026-12"},
+        {"data": "16/09/2026", "valor": "2,00", "observacao": "referência 112"},
+    ]
+
+    assert reconcile_payments([invoice], orders, "00076/2026") == []
+
+
+def test_contract_observations_require_value_and_choose_oldest_matching_order():
+    invoices = [
+        _invoice("NF-A", value="100,00"),
+        _invoice("NF-B", "2026-09-13", "200,00"),
+        _invoice("NF-C", "2026-09-14", "300,00"),
+    ]
+    orders = [
+        {"data": "20/09/2026", "valor": "300,00", "observacao": "Contrato 76/2026"},
+        {"data": "18/09/2026", "valor": "200,00", "observacao": "Contrato 76/2026"},
+        {"data": "17/09/2026", "valor": "100,00", "observacao": "Contrato 76/2026"},
+        {"data": "15/09/2026", "valor": "999,00", "observacao": "Contrato 76/2026"},
+    ]
+
+    matches = reconcile_payments(invoices, orders, "000762026")
+
+    assert [(invoice["valorliquido"], order["valor"]) for invoice, order in matches] == [
+        ("100,00", "100,00"), ("200,00", "200,00"), ("300,00", "300,00"),
+    ]
+
+
 def test_funai_payment_findings_are_informative_and_use_liquid_value():
     snapshots = {
         "contratos_comprasnet": {
@@ -75,7 +105,9 @@ def _comprasnet_found():
 
 def test_portal_falls_back_without_uasg_and_filters_contract_observation(monkeypatch):
     calls = []
-    monkeypatch.setattr(pagamentos_portal, "_context", lambda _op: ({"cnpj": "02955426000124"}, _comprasnet_found(), {}))
+    comprasnet = _comprasnet_found()
+    comprasnet["contrato_comprasnet"]["numero"] = "000762026"
+    monkeypatch.setattr(pagamentos_portal, "_context", lambda _op: ({"cnpj": "02955426000124"}, comprasnet, {}))
     monkeypatch.setattr(pagamentos_portal.httpx, "Client", lambda **_kwargs: _Client())
 
     def pages(_client, _cnpj, year, uasg):

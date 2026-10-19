@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 17 adiciona a conciliação informativa de pagamentos do Portal.
+Version 18 corrige os tokens e prioridades da conciliação de pagamentos.
 """
 
-EMITTER_VERSION = "17"
+EMITTER_VERSION = "18"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

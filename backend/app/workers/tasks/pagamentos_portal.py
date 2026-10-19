@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from app.integrations.comprasnet.parsing import parse_data, parse_number
+from app.integrations.comprasnet.parsing import number_tokens, parse_data, parse_number
 from app.workers.base import BaseComponentTask
 from app.workers.base import _execute_snapshot_write as _execute_with_retry
 from app.workers.http_utils import fetch_json_with_retry, portal_api_url, portal_headers
@@ -23,7 +23,7 @@ def _digits(value: Any) -> str:
 
 
 def _contract_token(value: Any) -> str:
-    return _digits(value).lstrip("0")
+    return max(number_tokens(value), key=len, default="")
 
 
 def _db(operation_id: str, action: str, request):
@@ -119,7 +119,10 @@ def _fetch(cnpj: str, *, operation_id: str | None = None, today: date | None = N
             if not records:
                 batches = [_pages(client, cnpj or operation.get("cnpj") or "", year, None) for year in years]
                 records = [item for batch, _ in batches for item in batch]
-                records = [item for item in records if number in _contract_token(item.get("observacao") or item.get("observacaoDocumento"))]
+                records = [
+                    item for item in records
+                    if number in number_tokens(item.get("observacao") or item.get("observacaoDocumento"))
+                ]
                 pagination = {str(year): page for year, (_, page) in zip(years, batches)}
                 filter_used = "OBSERVACAO"
         return {"status_consulta": "ENCONTRADO", "status_atualizacao": "ATUALIZADO", "ordens_bancarias": [_order(item) for item in records], "filtro_usado": filter_used, "anos": years, "paginacao": pagination}

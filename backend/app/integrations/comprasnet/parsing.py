@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import date, datetime
 from typing import Any
+
+
+_NUMBER_TOKEN = re.compile(r"(?<![\d-])\d+(?![\d-])")
+_CONTRACT_PAIR = re.compile(r"(?<![\d/])(\d+)\s*/\s*(\d{4})(?!\d)")
 
 
 def parse_number(value: Any) -> float | None:
@@ -43,3 +48,14 @@ def parse_data(value: Any) -> date | None:
         return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
     except ValueError:
         return None
+
+
+def number_tokens(value: Any) -> set[str]:
+    """Return standalone numeric references plus normalized ``NNN/AAAA`` pairs."""
+    text = str(value or "")
+    tokens = {match.group().lstrip("0") or "0" for match in _NUMBER_TOKEN.finditer(text)}
+    tokens.update(
+        (f"{match.group(1)}{match.group(2)}").lstrip("0") or "0"
+        for match in _CONTRACT_PAIR.finditer(text)
+    )
+    return tokens

@@ -6,7 +6,7 @@ import statistics
 from datetime import date
 from typing import Any
 
-from app.integrations.comprasnet.parsing import parse_data, parse_number
+from app.integrations.comprasnet.parsing import number_tokens, parse_data, parse_number
 from app.services.findings.adapters.common import finding
 from app.services.findings.schemas import Confianca, Escopo, Estado
 
@@ -91,8 +91,8 @@ def _installment(operation: dict[str, Any]) -> float | None:
     return value / months if rate == 0 else value * rate / (1 - (1 + rate) ** -months)
 
 
-def _reference_digits(value: Any) -> str:
-    return "".join(char for char in str(value or "") if char.isdigit()).lstrip("0")
+def _reference_tokens(value: Any) -> set[str]:
+    return number_tokens(value)
 
 
 def reconcile_payments(
@@ -106,29 +106,28 @@ def reconcile_payments(
     settled.sort(key=lambda invoice: _date(invoice.get("data_liquidacao")) or date.max)
     used: set[int] = set()
     matched: list[tuple[dict[str, Any], dict[str, Any]]] = []
-    contract_ref = _reference_digits(contract_number)
+    contract_refs = _reference_tokens(contract_number)
     for invoice in settled:
         liquidated = _date(invoice.get("data_liquidacao"))
-        invoice_ref = _reference_digits(
+        invoice_refs = _reference_tokens(
             invoice.get("numero") or invoice.get("numero_fatura") or invoice.get("nota")
         )
         value = _number(invoice.get("valorliquido"))
-        candidates = [
+        candidates = sorted([
             (index, order) for index, order in enumerate(orders)
             if index not in used and _date(order.get("data")) and _date(order.get("data")) >= liquidated
-        ]
-        by_observation = [
+        ], key=lambda item: _date(item[1].get("data")) or date.max)
+        by_invoice = [item for item in candidates if invoice_refs & _reference_tokens(item[1].get("observacao"))]
+        by_contract_and_value = [
             item for item in candidates
-            if (invoice_ref and invoice_ref in _reference_digits(item[1].get("observacao")))
-            or (contract_ref and contract_ref in _reference_digits(item[1].get("observacao")))
+            if contract_refs & _reference_tokens(item[1].get("observacao"))
+            and value is not None and abs((_number(item[1].get("valor")) or 0.0) - value) <= 1.0
         ]
-        chosen = by_observation[0] if by_observation else next(
-            (
-                item for item in candidates
-                if value is not None and abs((_number(item[1].get("valor")) or 0.0) - value) <= 1.0
-            ),
-            None,
-        )
+        by_value = [
+            item for item in candidates
+            if value is not None and abs((_number(item[1].get("valor")) or 0.0) - value) <= 1.0
+        ]
+        chosen = next(iter(by_invoice or by_contract_and_value or by_value), None)
         if chosen:
             used.add(chosen[0])
             matched.append((invoice, chosen[1]))
@@ -188,7 +187,7 @@ def _payment_findings(
         }, **base),
         finding("taxa_conciliacao_pagamentos", Escopo.OPERACAO, round(len(matched) / len(settled), 6) if settled else 0.0, **base),
         finding("pago_portal_vs_comprasnet", Escopo.OPERACAO, {
-            "pago_portal_ano": round(portal_year, 2), "pago_comprasnet_ano": round(comprasnet_year, 2),
+            "pago_portal_ano": round(portal_year, 2), "liquidado_comprasnet_ano": round(comprasnet_year, 2),
             "razao": round(portal_year / comprasnet_year, 6) if comprasnet_year else None,
         }, **base),
     ]
