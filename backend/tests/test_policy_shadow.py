@@ -170,6 +170,11 @@ def test_official_reads_fator_potencial_from_real_regularidade_shape():
     assert official["fator_potencial"] == 0.91
 
 
+def test_date_accepts_iso_and_brazilian_certificate_validity_formats():
+    assert shadow._date("2026-09-16") == date(2026, 9, 16)
+    assert shadow._date("16/09/2026") == date(2026, 9, 16)
+
+
 def test_shadow_uses_eligibility_cap_when_no_official_score(monkeypatch):
     import app.services.eligibility_params_service as eligibility
     monkeypatch.setattr(eligibility, "get_eligibility_config", lambda: {"pct_max_contrato": 0.35})
@@ -242,14 +247,15 @@ def test_shadow_classifies_certificate_expired_after_official_as_temporal_input(
     findings = {
         "certidao_cnd_federal_pendente": FindingValue(
             "certidao_cnd_federal_pendente",
-            {"estado": "ausente", "validade": "2026-01-02"},
+            {"estado": "ausente", "validade": "16/09/2026"},
             "CONFIRMADO",
             "ALTA",
         )
     }
     monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": {}, "regras": []})
     monkeypatch.setattr(shadow, "montar_entrada", lambda *_args, **_kwargs: EntradaPolitica({}, findings, _complete_parity_runs(), set()))
-    monkeypatch.setattr(shadow, "_official", lambda *_args: (official, date(2026, 1, 1)))
+    monkeypatch.setattr(shadow, "_official", lambda *_args: (official, date(2026, 9, 10)))
+    monkeypatch.setattr(shadow, "_today", lambda: date(2026, 9, 16))
     monkeypatch.setattr(shadow, "_set_pct_max_contrato", lambda *_args: None)
     monkeypatch.setattr(shadow, "avaliar", lambda *_args: _shadow_result(values))
 
@@ -261,6 +267,29 @@ def test_shadow_classifies_certificate_expired_after_official_as_temporal_input(
         "fator_regularidade",
         "score",
     }
+
+
+def test_temporal_certificate_must_already_be_expired(monkeypatch):
+    entrada = EntradaPolitica(
+        {},
+        {
+            "certidao_fgts_pendente": FindingValue(
+                "certidao_fgts_pendente",
+                {"estado": "ausente", "validade": "16/09/2026"},
+                "CONFIRMADO",
+                "ALTA",
+            )
+        },
+    )
+    monkeypatch.setattr(shadow, "_today", lambda: date(2026, 9, 15))
+
+    assert not shadow._is_temporal_certificate_input(
+        entrada,
+        {"fator_regularidade": 0.96},
+        {"fator_regularidade": 0.91},
+        date(2026, 9, 10),
+        [{"campo": "fator_regularidade"}],
+    )
 
 
 def test_shadow_effect_with_explicit_parity_field_explains_divergence(monkeypatch):

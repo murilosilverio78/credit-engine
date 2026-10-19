@@ -102,7 +102,14 @@ def _date(value: Any) -> date | None:
     try:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
     except (ValueError, TypeError):
-        return None
+        try:
+            return datetime.strptime(str(value), "%d/%m/%Y").date()
+        except (ValueError, TypeError):
+            return None
+
+
+def _today() -> date:
+    return date.today()
 
 
 def _official(database, operation_id: str) -> tuple[dict[str, Any] | None, date]:
@@ -274,7 +281,7 @@ def _is_temporal_certificate_input(
         return False
     return any(
         (validade := _date(getattr(finding, "valor", {}).get("validade")))
-        and validade > reference
+        and reference < validade <= _today()
         for code, finding in entrada.findings.items()
         if code in _CERTIFICATE_FINDINGS
         and isinstance(getattr(finding, "valor", None), dict)
