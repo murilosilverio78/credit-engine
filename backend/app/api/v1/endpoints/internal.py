@@ -639,6 +639,7 @@ EXECUTABLE_COMPONENTS = frozenset(
     {
         "contratos_pncp",
         "contratos_comprasnet",
+        "pagamentos_portal",
         "brasil_api",
         "recursos_recebidos",
         "web_research",
@@ -710,6 +711,7 @@ async def executar_componente(
     from app.workers.tasks.brasil_api import run_brasil_api
     from app.workers.tasks.contratos_comprasnet import run_contratos_comprasnet
     from app.workers.tasks.contratos_pncp import run_contratos_pncp
+    from app.workers.tasks.pagamentos_portal import run_pagamentos_portal
     from app.workers.tasks.recursos_recebidos import run_recursos_recebidos
     from app.workers.tasks.web_research import run_web_research
     from app.workers.tasks.documentos_financeiros import run_documentos_financeiros
@@ -717,6 +719,7 @@ async def executar_componente(
     runners = {
         "brasil_api": run_brasil_api,
         "contratos_comprasnet": run_contratos_comprasnet,
+        "pagamentos_portal": run_pagamentos_portal,
         "contratos_pncp": run_contratos_pncp,
         "recursos_recebidos": run_recursos_recebidos,
         "web_research": run_web_research,

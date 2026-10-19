@@ -49,9 +49,12 @@ def _median_days(invoices: list[dict[str, Any]], end_key: str) -> float | None:
     return round(float(statistics.median(values)), 2) if values else None
 
 
-def _unverified(code: str, path: str, fingerprint: str, motivo: str):
+def _unverified(
+    code: str, path: str, fingerprint: str, motivo: str,
+    component: str = "contratos_comprasnet",
+):
     return finding(
-        code, Escopo.OPERACAO, None, component="contratos_comprasnet", path=path,
+        code, Escopo.OPERACAO, None, component=component, path=path,
         fingerprint=fingerprint, state=Estado.NAO_VERIFICADO,
         confidence=Confianca.BAIXA,
         pendencia={"motivo": motivo},
@@ -88,6 +91,110 @@ def _installment(operation: dict[str, Any]) -> float | None:
     return value / months if rate == 0 else value * rate / (1 - (1 + rate) ** -months)
 
 
+def _reference_digits(value: Any) -> str:
+    return "".join(char for char in str(value or "") if char.isdigit()).lstrip("0")
+
+
+def reconcile_payments(
+    invoices: list[dict[str, Any]], orders: list[dict[str, Any]], contract_number: Any,
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Match settled invoices to Portal payment orders exactly once, oldest first."""
+    settled = [
+        invoice for invoice in invoices
+        if not _cancelled(invoice) and _date(invoice.get("data_liquidacao"))
+    ]
+    settled.sort(key=lambda invoice: _date(invoice.get("data_liquidacao")) or date.max)
+    used: set[int] = set()
+    matched: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    contract_ref = _reference_digits(contract_number)
+    for invoice in settled:
+        liquidated = _date(invoice.get("data_liquidacao"))
+        invoice_ref = _reference_digits(
+            invoice.get("numero") or invoice.get("numero_fatura") or invoice.get("nota")
+        )
+        value = _number(invoice.get("valorliquido"))
+        candidates = [
+            (index, order) for index, order in enumerate(orders)
+            if index not in used and _date(order.get("data")) and _date(order.get("data")) >= liquidated
+        ]
+        by_observation = [
+            item for item in candidates
+            if (invoice_ref and invoice_ref in _reference_digits(item[1].get("observacao")))
+            or (contract_ref and contract_ref in _reference_digits(item[1].get("observacao")))
+        ]
+        chosen = by_observation[0] if by_observation else next(
+            (
+                item for item in candidates
+                if value is not None and abs((_number(item[1].get("valor")) or 0.0) - value) <= 1.0
+            ),
+            None,
+        )
+        if chosen:
+            used.add(chosen[0])
+            matched.append((invoice, chosen[1]))
+    return matched
+
+
+def _payment_findings(
+    comprasnet: dict[str, Any], payments: dict[str, Any] | None,
+    reference: date, fingerprint: str,
+) -> list:
+    codes = (
+        "prazo_pagamento_dias", "ciclo_caixa_dias", "faturas_liquidadas_sem_pagamento",
+        "taxa_conciliacao_pagamentos", "pago_portal_vs_comprasnet",
+    )
+    if not isinstance(payments, dict):
+        return [_unverified(code, "ordens_bancarias", fingerprint, "pagamentos do Portal indisponíveis", "pagamentos_portal") for code in codes]
+    if payments.get("status_consulta") == "NAO_APLICAVEL":
+        return [_unverified(code, "ordens_bancarias", fingerprint, "pagamentos do Portal não aplicáveis", "pagamentos_portal") for code in codes]
+    if payments.get("status_consulta") != "ENCONTRADO":
+        return [_unverified(code, "ordens_bancarias", fingerprint, "consulta de pagamentos do Portal indisponível", "pagamentos_portal") for code in codes]
+    invoices = [item for item in comprasnet.get("faturas") or [] if isinstance(item, dict) and not _cancelled(item)]
+    settled = [item for item in invoices if _date(item.get("data_liquidacao"))]
+    orders = [item for item in payments.get("ordens_bancarias") or [] if isinstance(item, dict)]
+    contract = comprasnet.get("contrato_comprasnet") or {}
+    matched = reconcile_payments(settled, orders, contract.get("numero"))
+    payment_days = [
+        ((_date(order.get("data")) - _date(invoice.get("data_liquidacao"))).days)
+        for invoice, order in matched
+    ]
+    cycle_days = [
+        ((_date(order.get("data")) - _date(invoice.get("emissao"))).days)
+        for invoice, order in matched
+        if _date(invoice.get("emissao"))
+    ]
+    matched_ids = {id(invoice) for invoice, _ in matched}
+    overdue = [
+        invoice for invoice in settled
+        if id(invoice) not in matched_ids and (reference - _date(invoice.get("data_liquidacao"))).days > 30
+    ]
+    portal_year = sum(
+        _number(order.get("valor")) or 0.0 for order in orders
+        if (_date(order.get("data")) or date.min).year == reference.year
+    )
+    comprasnet_year = sum(
+        _number(invoice.get("valorliquido")) or 0.0 for invoice in settled
+        if (_date(invoice.get("data_liquidacao")) or date.min).year == reference.year
+    )
+    base = dict(component="pagamentos_portal", path="ordens_bancarias", fingerprint=fingerprint)
+    output = [
+        finding("prazo_pagamento_dias", Escopo.OPERACAO, round(float(statistics.median(payment_days)), 2), **base)
+        if payment_days else _unverified("prazo_pagamento_dias", "ordens_bancarias", fingerprint, "nenhuma fatura conciliada", "pagamentos_portal"),
+        finding("ciclo_caixa_dias", Escopo.OPERACAO, round(float(statistics.median(cycle_days)), 2), **base)
+        if cycle_days else _unverified("ciclo_caixa_dias", "ordens_bancarias", fingerprint, "nenhuma fatura conciliada", "pagamentos_portal"),
+        finding("faturas_liquidadas_sem_pagamento", Escopo.OPERACAO, {
+            "quantidade": len(overdue), "valor": round(sum(_number(item.get("valorliquido")) or 0.0 for item in overdue), 2),
+            "mais_antiga_dias": max(((reference - _date(item.get("data_liquidacao"))).days for item in overdue), default=None),
+        }, **base),
+        finding("taxa_conciliacao_pagamentos", Escopo.OPERACAO, round(len(matched) / len(settled), 6) if settled else 0.0, **base),
+        finding("pago_portal_vs_comprasnet", Escopo.OPERACAO, {
+            "pago_portal_ano": round(portal_year, 2), "pago_comprasnet_ano": round(comprasnet_year, 2),
+            "razao": round(portal_year / comprasnet_year, 6) if comprasnet_year else None,
+        }, **base),
+    ]
+    return output
+
+
 def emit_fluxo_caixa(
     snapshots: dict[str, Any], *, fingerprint: str,
     operation: dict[str, Any] | None = None,
@@ -99,11 +206,14 @@ def emit_fluxo_caixa(
         return [_unverified(code, "faturas", fingerprint, "snapshot Comprasnet indisponível") for code in _CASH_CODES]
     raw_invoices = comprasnet.get("faturas")
     invoices = [item for item in raw_invoices if isinstance(item, dict) and not _cancelled(item)] if isinstance(raw_invoices, list) else []
+    reference = _date(operation.get("data_referencia")) or date.today()
     if not invoices:
-        return [_unverified(code, "faturas", fingerprint, "contrato sem faturamento ainda") for code in _CASH_CODES]
+        return [
+            *[_unverified(code, "faturas", fingerprint, "contrato sem faturamento ainda") for code in _CASH_CODES if code not in _PAYMENT_CODES],
+            *_payment_findings(comprasnet, snapshots.get("pagamentos_portal"), reference, fingerprint),
+        ]
 
     contract = comprasnet.get("contrato_comprasnet") or {}
-    reference = _date(operation.get("data_referencia")) or date.today()
     by_month: dict[tuple[int, int], float] = {}
     for invoice in invoices:
         if (competence := _month(invoice)) is not None:
@@ -200,6 +310,7 @@ def emit_fluxo_caixa(
         result.append(finding("execucao_vs_contratado", Escopo.OPERACAO, round(execution or 0.0, 6), component="contratos_comprasnet", path="faturas,contrato_comprasnet", fingerprint=fingerprint))
     else:
         result.append(_unverified("execucao_vs_contratado", "faturas,contrato_comprasnet", fingerprint, "dados do contrato indisponíveis"))
+    result.extend(_payment_findings(comprasnet, snapshots.get("pagamentos_portal"), reference, fingerprint))
     return result
 
 
@@ -207,4 +318,11 @@ _CASH_CODES = (
     "mensalidade_faturada_media", "meses_sem_fatura_12m", "glosa_pct_12m",
     "prazo_ateste_dias", "prazo_liquidacao_dias", "saldo_empenho_ano",
     "empenho_insuficiente", "cobertura_parcela", "execucao_vs_contratado",
+    "prazo_pagamento_dias", "ciclo_caixa_dias", "faturas_liquidadas_sem_pagamento",
+    "taxa_conciliacao_pagamentos", "pago_portal_vs_comprasnet",
 )
+
+_PAYMENT_CODES = frozenset({
+    "prazo_pagamento_dias", "ciclo_caixa_dias", "faturas_liquidadas_sem_pagamento",
+    "taxa_conciliacao_pagamentos", "pago_portal_vs_comprasnet",
+})

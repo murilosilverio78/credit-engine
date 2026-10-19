@@ -141,6 +141,16 @@ def _informative_text(code: str, value: Any, label: str) -> list[str]:
         return [f"Cobertura da parcela estimada: {_percent(value)}"]
     if code == "execucao_vs_contratado":
         return [f"Execução faturada versus contratado: {_percent(value)}"]
+    if code == "prazo_pagamento_dias":
+        return [f"Órgão paga em média {int(_number(value) or 0)} dias após a liquidação"]
+    if code == "ciclo_caixa_dias":
+        return [f"Ciclo total de {int(_number(value) or 0)} dias"]
+    if code == "faturas_liquidadas_sem_pagamento":
+        return [f"{int(_number(data.get('quantidade')) or 0)} faturas liquidadas há mais de 30 dias sem pagamento ({_money(data.get('valor'))})"]
+    if code == "taxa_conciliacao_pagamentos":
+        return [f"Taxa de conciliação de pagamentos: {_percent(value)}"]
+    if code == "pago_portal_vs_comprasnet":
+        return [f"Pagamentos no Portal: {_money(data.get('pago_portal_ano'))} versus {_money(data.get('pago_comprasnet_ano'))} no Comprasnet"]
     return [f"{label}: {_generic_value(value, code)}"]
 
 
@@ -289,4 +299,6 @@ _CASH_FLOW_CODES = frozenset({
     "mensalidade_faturada_media", "meses_sem_fatura_12m", "glosa_pct_12m",
     "prazo_ateste_dias", "prazo_liquidacao_dias", "saldo_empenho_ano",
     "empenho_insuficiente", "cobertura_parcela", "execucao_vs_contratado",
+    "prazo_pagamento_dias", "ciclo_caixa_dias", "faturas_liquidadas_sem_pagamento",
+    "taxa_conciliacao_pagamentos", "pago_portal_vs_comprasnet",
 })

@@ -221,6 +221,8 @@ def _dual_write_findings(
             dispatch_emission(operation_id, especialista)
         if component == "contratos_comprasnet":
             dispatch_emission(operation_id, "fluxo_caixa")
+        if component == "pagamentos_portal":
+            dispatch_emission(operation_id, "fluxo_caixa")
         if component in {
             "documentos_financeiros",
             "recursos_recebidos",

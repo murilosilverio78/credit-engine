@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 16 corrige o fluxo de caixa para o empenho anual e parcela PMT.
+Version 17 adiciona a conciliação informativa de pagamentos do Portal.
 """
 
-EMITTER_VERSION = "16"
+EMITTER_VERSION = "17"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

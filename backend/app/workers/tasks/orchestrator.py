@@ -23,6 +23,7 @@ PHASE2_COMPONENTS = (
     "contrato_extracao",
     "contratos_pncp",
     "contratos_comprasnet",
+    "pagamentos_portal",
     "recursos_recebidos",
     "acordos_leniencia",
     "ceis",
@@ -33,6 +34,7 @@ PHASE2_FUNIL_COMPONENTS = (
     "contratos",
     "contratos_pncp",
     "contratos_comprasnet",
+    "pagamentos_portal",
     "recursos_recebidos",
     "acordos_leniencia",
     "ceis",
@@ -574,6 +576,7 @@ async def _run_analysis(
         run_contratos_comprasnet,
     )
     from app.workers.tasks.pessoa_juridica import run_pessoa_juridica
+    from app.workers.tasks.pagamentos_portal import run_pagamentos_portal
     from app.workers.tasks.recursos_recebidos import run_recursos_recebidos
 
     logger.info("pipeline.started", operation_id=operation_id, ate_fase=ate_fase)
@@ -702,15 +705,22 @@ async def _run_analysis(
         operation_id,
         reusable_components,
     )
+    pagamentos_result = await _run_or_reuse_component(
+        "pagamentos_portal",
+        run_pagamentos_portal,
+        operation_id,
+        reusable_components,
+    )
     parallel_results = await asyncio.gather(*parallel_tasks)
     if partial_until_phase2:
-        phase2_results = (contracts_result, pncp_result, comprasnet_result, *parallel_results)
+        phase2_results = (contracts_result, pncp_result, comprasnet_result, pagamentos_result, *parallel_results)
     else:
         phase2_results = (
             contracts_result,
             parallel_results[0],
             pncp_result,
             comprasnet_result,
+            pagamentos_result,
             *parallel_results[1:],
         )
     _PIPELINE_STAGE.set("phase2_validation")

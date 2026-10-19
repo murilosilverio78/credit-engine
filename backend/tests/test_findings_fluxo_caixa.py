@@ -65,7 +65,8 @@ def test_new_contract_without_invoices_is_unverified_not_negative():
     findings = emit_fluxo_caixa(_snapshots([]), fingerprint="f", operation=_operation())
 
     assert {item.estado for item in findings} == {Estado.NAO_VERIFICADO}
-    assert {item.pendencia["motivo"] for item in findings} == {"contrato sem faturamento ainda"}
+    assert "contrato sem faturamento ainda" in {item.pendencia["motivo"] for item in findings}
+    assert findings[-1].pendencia["motivo"] == "pagamentos do Portal indisponíveis"
 
 
 def test_cancelled_invoice_is_ignored_and_glosa_is_calculated():

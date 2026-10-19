@@ -24,7 +24,7 @@ REQUIRED = {
     "reputacional": ("web_research",),
     "porte": (),
     "financeiro": ("documentos_financeiros",),
-    "fluxo_caixa": ("contratos_comprasnet",),
+    "fluxo_caixa": ("contratos_comprasnet", "pagamentos_portal"),
 }
 OPTIONAL_INPUTS = {
     "cadastro_regularidade": (
