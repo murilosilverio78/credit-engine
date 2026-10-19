@@ -160,6 +160,80 @@ def _load_contracts_snapshot(operation_id: str) -> dict[str, Any]:
     return row.get("parsed_result") or {}
 
 
+def _load_previous_comprasnet_snapshot(operation_id: str) -> dict[str, Any]:
+    """Return a previously found Comprasnet result, including while it is running."""
+    from app.core.database import supabase
+
+    result = _db(
+        operation_id,
+        "load_previous_comprasnet_snapshot",
+        lambda: supabase.table("component_snapshots")
+        .select("parsed_result")
+        .eq("operation_id", operation_id)
+        .eq("component", "contratos_comprasnet")
+        .maybe_single()
+        .execute(),
+    )
+    parsed = (result.data or {}).get("parsed_result") or {}
+    return parsed if parsed.get("status_consulta") == "ENCONTRADO" else {}
+
+
+def _maintain_previous_snapshot(
+    previous: dict[str, Any], reason: str, **details: Any,
+) -> dict[str, Any]:
+    """Keep a verified result intact when refreshing its external source fails."""
+    errors = list(details.get("erros_enriquecimento") or previous.get("erros_enriquecimento") or [])
+    errors.append({"endpoint": "atualizacao", "erro": reason})
+    flags = list(previous.get("flags") or [])
+    if "atualizacao_comprasnet_mantida" not in flags:
+        flags.append("atualizacao_comprasnet_mantida")
+    result = {
+        **previous,
+        "status_consulta": "ENCONTRADO",
+        "status_atualizacao": "MANTIDO",
+        "flags": flags,
+        **details,
+    }
+    result["erros_enriquecimento"] = errors
+    return result
+
+
+def _persist_contract_identity(
+    operation_id: str,
+    operation: dict[str, Any],
+    contract: dict[str, Any],
+) -> None:
+    """Store first verified contract identifiers so refreshes do not need Broadfactor."""
+    updates: dict[str, str] = {}
+    number = contract.get("numero")
+    uasg = contract.get("uasg")
+    # The selected operation always has these keys in production.  Checking key
+    # presence also keeps pure lookup callers free from persistence side effects.
+    if "contrato_id" in operation and not operation.get("contrato_id") and number:
+        updates["contrato_id"] = str(number)
+    if "uasg" in operation and not operation.get("uasg") and uasg:
+        updates["uasg"] = str(uasg)
+    if not updates:
+        return
+    try:
+        from app.core.database import supabase
+
+        _db(
+            operation_id,
+            "save_verified_contract_identity",
+            lambda: supabase.table("operations")
+            .update(updates)
+            .eq("id", operation_id)
+            .execute(),
+        )
+    except Exception as exc:
+        logger.warning(
+            "contratos_comprasnet.contract_identity_persist_failed",
+            operation_id=operation_id,
+            error=str(exc),
+        )
+
+
 @dataclass(frozen=True)
 class _UasgCandidate:
     codigo: str
@@ -761,13 +835,25 @@ def _fetch(
     today = today or date.today()
     operation = _load_operation(operation_id)
     cotacao_id = operation.get("cotacao_id")
+    previous = _load_previous_comprasnet_snapshot(operation_id)
+    previous_contract = previous.get("contrato_comprasnet") or {}
     contract_number_source: str | None = None
     numbers: list[str] = []
     receipts: list[Recebimento] = []
     pdf_candidates: list[_UasgCandidate] = []
     source_errors: list[str] = []
 
-    if not cotacao_id:
+    if previous:
+        number = _normalize_contract_number(previous_contract.get("numero"))
+        uasg = _digits(previous_contract.get("uasg"))
+        if len(number) != 9 or len(uasg) != 6:
+            return _maintain_previous_snapshot(
+                previous,
+                "identificacao_contrato_anterior_indisponivel",
+            )
+        numbers = [number]
+        contract_number_source = "SNAPSHOT_ANTERIOR"
+    elif not cotacao_id:
         number = _normalize_contract_number(operation.get("contrato_id"))
         if len(number) != 9:
             return _failure("cotacao_id_ausente")
@@ -776,13 +862,13 @@ def _fetch(
     else:
         contract_number_source = "BROADFACTOR"
 
-    own_broadfactor = bool(cotacao_id and broadfactor_client is None)
+    own_broadfactor = bool(cotacao_id and not previous and broadfactor_client is None)
     own_comprasnet = comprasnet_client is None
-    if cotacao_id and broadfactor_client is None:
+    if cotacao_id and not previous and broadfactor_client is None:
         broadfactor_client = BroadfactorClient()
     comprasnet_client = comprasnet_client or ComprasnetClient()
     try:
-        if cotacao_id:
+        if cotacao_id and not previous:
             contracts = broadfactor_client.contratos_da_cotacao(cotacao_id)
             for item in contracts:
                 number = _digits(item.numero_contrato)
@@ -800,7 +886,7 @@ def _fetch(
                 contracts,
             )
 
-        contracts_snapshot = _load_contracts_snapshot(operation_id)
+        contracts_snapshot = _load_contracts_snapshot(operation_id) if not previous else {}
         pncp_code = _digits(operation.get("uasg"))
         pncp_candidate = None
         if operation.get("contrato_pncp_controle") and len(pncp_code) == 6:
@@ -809,7 +895,7 @@ def _fetch(
                 origem="PNCP",
                 numero_preferido=numbers[0] if numbers else None,
             )
-        if cotacao_id:
+        if cotacao_id and not previous:
             try:
                 receipts = broadfactor_client.recebimentos(
                     cotacao_id,
@@ -825,13 +911,17 @@ def _fetch(
                     cotacao_id=cotacao_id,
                     error=str(exc),
                 )
-        uasgs = _discover_uasg_candidates(
-            numbers,
-            contracts_snapshot,
-            receipts,
-            pncp_candidate=pncp_candidate,
-            pdf_candidates=pdf_candidates,
-            manual_uasg=operation.get("uasg"),
+        uasgs = (
+            [_UasgCandidate(_digits(previous_contract["uasg"]), "SNAPSHOT_ANTERIOR", numbers[0])]
+            if previous
+            else _discover_uasg_candidates(
+                numbers,
+                contracts_snapshot,
+                receipts,
+                pncp_candidate=pncp_candidate,
+                pdf_candidates=pdf_candidates,
+                manual_uasg=operation.get("uasg"),
+            )
         )
         candidate_sources = [
             {
@@ -842,6 +932,8 @@ def _fetch(
             for candidate in uasgs
         ]
         if not uasgs:
+            if previous:
+                return _maintain_previous_snapshot(previous, "uasg_indisponivel")
             return _failure(
                 "uasg_indisponivel",
                 origem_numero_contrato=contract_number_source,
@@ -860,6 +952,12 @@ def _fetch(
             uasgs,
         )
         if raw_contract is None:
+            if previous:
+                return _maintain_previous_snapshot(
+                    previous,
+                    "falha_consulta_comprasnet",
+                    diagnostico_busca=search,
+                )
             source_failed = bool(source_errors) or bool(search.get("erro_fonte"))
             has_strong_source = any(
                 candidate.origem in STRONG_UASG_SOURCES for candidate in uasgs
@@ -938,10 +1036,21 @@ def _fetch(
             operation.get("margem_disponivel"),
         )
         if enrichment_errors:
+            if previous:
+                return _maintain_previous_snapshot(
+                    previous,
+                    "falha_atualizacao_enriquecimento",
+                    diagnostico_busca=search,
+                    erros_enriquecimento=[
+                        *(previous.get("erros_enriquecimento") or []),
+                        *enrichment_errors,
+                    ],
+                )
             flags.append("enriquecimento_comprasnet_parcial")
 
         result = {
             "status_consulta": "ENCONTRADO",
+            "status_atualizacao": "ATUALIZADO",
             "motivo": None,
             "cotacao_id": cotacao_id,
             "origem_numero_contrato": contract_number_source,
@@ -976,6 +1085,7 @@ def _fetch(
             "erros_enriquecimento": enrichment_errors,
             "flags": flags,
         }
+        _persist_contract_identity(operation_id, operation, contract)
         logger.info(
             "contratos_comprasnet.completed",
             operation_id=operation_id,
@@ -993,6 +1103,12 @@ def _fetch(
             cotacao_id=cotacao_id,
             error=str(exc),
         )
+        if previous:
+            return _maintain_previous_snapshot(
+                previous,
+                "falha_consulta_comprasnet",
+                error=str(exc)[:300],
+            )
         return _failure(
             "falha_consulta_comprasnet",
             origem_numero_contrato=contract_number_source,

@@ -25,6 +25,11 @@ def no_comprasnet_candidate_pause(monkeypatch):
         "COMPRASNET_UASG_INTERVAL_SECONDS",
         0.0,
     )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_previous_comprasnet_snapshot",
+        lambda _operation_id: {},
+    )
 
 
 def text_pdf(text: str = "") -> bytes:
@@ -961,3 +966,144 @@ def test_public_api_failure_is_recorded_instead_of_raised(monkeypatch):
     assert result["status_consulta"] == "NAO_VERIFICADO"
     assert result["motivo"] == "falha_consulta_comprasnet"
     assert "Broadfactor unavailable" in result["error"]
+
+
+def _previous_comprasnet_snapshot():
+    return {
+        "status_consulta": "ENCONTRADO",
+        "contrato_comprasnet": {
+            "contrato_id": 42,
+            "numero": "00042/2026",
+            "uasg": "158132",
+            "match_confianca": "CNPJ_CONFERIDO",
+        },
+        "faturas": [{"id": "anterior"}],
+        "empenhos_detalhe": [{"id": "anterior"}],
+        "erros_enriquecimento": [],
+        "flags": [],
+    }
+
+
+def test_closed_quote_reuses_previous_found_snapshot_without_broadfactor(monkeypatch):
+    class ClosedQuoteBroadfactor:
+        def contratos_da_cotacao(self, _cotacao_id):
+            raise AssertionError("Broadfactor nao deve ser consultada")
+
+    persisted = []
+    client = FakeComprasnet(
+        {
+            "/api/contrato/ugorigem/158132/numeroano/000422026": raw_contract(),
+            "/api/contrato/42/faturas": [{"id": "fatura-atualizada"}],
+            "/api/contrato/42/empenhos": [{"id": "empenho-atualizado"}],
+        }
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_operation",
+        lambda _operation_id: {
+            "cotacao_id": "C-encerrada", "contrato_id": None, "uasg": None,
+            "margem_disponivel": None,
+        },
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_previous_comprasnet_snapshot",
+        lambda _operation_id: _previous_comprasnet_snapshot(),
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_persist_contract_identity",
+        lambda operation_id, operation, contract: persisted.append(contract),
+    )
+
+    result = contratos_comprasnet._fetch(
+        _digits_cnpj(CNPJ), operation_id="op-1", today=TODAY,
+        broadfactor_client=ClosedQuoteBroadfactor(), comprasnet_client=client,
+    )
+
+    assert result["status_consulta"] == "ENCONTRADO"
+    assert result["status_atualizacao"] == "ATUALIZADO"
+    assert result["origem_numero_contrato"] == "SNAPSHOT_ANTERIOR"
+    assert result["faturas"] == [{"id": "fatura-atualizada"}]
+    assert result["empenhos_detalhe"] == [{"id": "empenho-atualizado"}]
+    assert client.calls[0] == "/api/contrato/ugorigem/158132/numeroano/000422026"
+    assert persisted and persisted[0]["numero"] == "00042/2026"
+
+
+def test_comprasnet_refresh_failure_preserves_found_snapshot(monkeypatch):
+    previous = _previous_comprasnet_snapshot()
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_operation",
+        lambda _operation_id: {"cotacao_id": "C-encerrada", "margem_disponivel": None},
+    )
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_previous_comprasnet_snapshot",
+        lambda _operation_id: previous,
+    )
+
+    result = contratos_comprasnet._fetch(
+        _digits_cnpj(CNPJ), operation_id="op-1", today=TODAY,
+        comprasnet_client=FakeComprasnet({
+            "/api/contrato/ugorigem/158132/numeroano/000422026": RuntimeError("indisponível"),
+        }),
+    )
+
+    assert result["status_consulta"] == "ENCONTRADO"
+    assert result["status_atualizacao"] == "MANTIDO"
+    assert result["faturas"] == previous["faturas"]
+    assert result["contrato_comprasnet"] == previous["contrato_comprasnet"]
+    assert result["erros_enriquecimento"][-1] == {
+        "endpoint": "atualizacao", "erro": "falha_consulta_comprasnet",
+    }
+
+
+def test_new_operation_without_contract_number_stays_unverified(monkeypatch):
+    class ClosedQuoteBroadfactor:
+        def contratos_da_cotacao(self, _cotacao_id):
+            return []
+
+    monkeypatch.setattr(
+        contratos_comprasnet,
+        "_load_operation",
+        lambda _operation_id: {"cotacao_id": "C-encerrada", "margem_disponivel": None},
+    )
+
+    result = contratos_comprasnet._fetch(
+        _digits_cnpj(CNPJ), operation_id="op-1",
+        broadfactor_client=ClosedQuoteBroadfactor(), comprasnet_client=FakeComprasnet({}),
+    )
+
+    assert result["status_consulta"] == "NAO_VERIFICADO"
+    assert result["motivo"] == "numero_contrato_indisponivel"
+
+
+def test_found_contract_persists_missing_operation_number_and_uasg(monkeypatch):
+    updates = []
+
+    class Query:
+        def update(self, payload):
+            updates.append(payload)
+            return self
+
+        def eq(self, *_args):
+            return self
+
+        def execute(self):
+            return SimpleNamespace(data={})
+
+    class Database:
+        @staticmethod
+        def table(_name):
+            return Query()
+
+    monkeypatch.setattr(contratos_comprasnet, "_db", lambda _op, _action, request: request())
+    monkeypatch.setattr("app.core.database.supabase", Database())
+
+    contratos_comprasnet._persist_contract_identity(
+        "op-1", {"contrato_id": None, "uasg": None},
+        {"numero": "00042/2026", "uasg": "158132"},
+    )
+
+    assert updates == [{"contrato_id": "00042/2026", "uasg": "158132"}]
