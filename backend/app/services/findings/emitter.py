@@ -62,7 +62,7 @@ def _load_operation(database, operation_id: str) -> dict[str, Any] | None:
     return _first_row(
         database.table("operations")
         .select(
-            "id,cnpj,ambiente,valor_enquadrado,contrato_id,contrato_dedicacao_exclusiva,uasg,valor_global_contrato,cotacao_id,capacidade_memoria,taxa_breakdown"
+            "id,cnpj,ambiente,valor_enquadrado,valor_solicitado,valor_operacao_relatorio,limite_aprovado,contrato_id,contrato_dedicacao_exclusiva,uasg,valor_global_contrato,cotacao_id,capacidade_memoria,taxa_breakdown"
         )
         .eq("id", operation_id)
     )

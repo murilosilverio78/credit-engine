@@ -18,7 +18,8 @@ from pypdf import PdfReader
 import structlog
 
 from app.core.config import settings
-from app.integrations.broadfactor.client import BroadfactorClient, Recebimento, parse_data
+from app.integrations.broadfactor.client import BroadfactorClient, Recebimento
+from app.integrations.comprasnet.parsing import parse_data, parse_number
 from app.workers.base import BaseComponentTask
 from app.workers.base import _execute_snapshot_write as _execute_with_retry
 from app.workers.http_utils import fetch_json_with_retry
@@ -44,17 +45,7 @@ def _digits(value: Any) -> str:
 
 
 def _number(value: Any) -> float:
-    if value in (None, ""):
-        return 0.0
-    if isinstance(value, (int, float)):
-        return float(value)
-    text = str(value).strip().replace("R$", "").replace(" ", "")
-    if "," in text:
-        text = text.replace(".", "").replace(",", ".")
-    try:
-        return float(text)
-    except (TypeError, ValueError):
-        return 0.0
+    return parse_number(value) or 0.0
 
 
 def _optional_number(value: Any) -> float | None:
@@ -73,9 +64,7 @@ def _optional_int(value: Any) -> int | None:
 
 
 def _date(value: Any) -> date | None:
-    if isinstance(value, date):
-        return value
-    return parse_data(str(value)) if value not in (None, "") else None
+    return parse_data(value)
 
 
 def _plain_text(value: Any) -> str:

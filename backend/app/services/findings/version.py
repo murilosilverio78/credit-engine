@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 15 adiciona o especialista de fluxo de caixa do contrato cedido.
+Version 16 corrige o fluxo de caixa para o empenho anual e parcela PMT.
 """
 
-EMITTER_VERSION = "15"
+EMITTER_VERSION = "16"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {
