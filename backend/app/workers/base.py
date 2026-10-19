@@ -219,6 +219,8 @@ def _dual_write_findings(
         especialista = specialists.get(component)
         if especialista:
             dispatch_emission(operation_id, especialista)
+        if component == "contratos_comprasnet":
+            dispatch_emission(operation_id, "fluxo_caixa")
         if component in {
             "documentos_financeiros",
             "recursos_recebidos",

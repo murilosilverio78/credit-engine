@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 14 detalha a proveniência de sanções para revisão de veto.
+Version 15 adiciona o especialista de fluxo de caixa do contrato cedido.
 """
 
-EMITTER_VERSION = "14"
+EMITTER_VERSION = "15"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {
@@ -18,4 +18,5 @@ HASH_EXTRAS = {
         "cotacao_data",
         "parametros_financeiros",
     ),
+    "fluxo_caixa": ("contrato_operacao",),
 }

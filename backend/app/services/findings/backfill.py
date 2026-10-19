@@ -4,7 +4,7 @@ from typing import Any
 
 from app.services.findings.emitter import _load_snapshots, emit_findings, missing_required
 
-SPECIALISTS = ("cadastro_regularidade", "sacado_orgao", "documentos", "reputacional", "porte", "financeiro")
+SPECIALISTS = ("cadastro_regularidade", "sacado_orgao", "documentos", "reputacional", "porte", "financeiro", "fluxo_caixa")
 
 
 def _first_row(query):

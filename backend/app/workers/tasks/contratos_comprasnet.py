@@ -959,6 +959,10 @@ def _fetch(
             "contrato_comprasnet": contract,
             "performance_contratual": performance,
             "empenhos": commitment_metrics,
+            # Persist the payload already fetched above for the informational
+            # cash-flow specialist; no additional Comprasnet request is made.
+            "faturas": invoices,
+            "empenhos_detalhe": commitments,
             "previsibilidade_fluxo": predictability,
             "ritmo_medicao": (
                 _measurement_rhythm(invoices) if predictability == "BAIXA" else None

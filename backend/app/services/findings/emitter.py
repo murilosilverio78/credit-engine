@@ -24,6 +24,7 @@ REQUIRED = {
     "reputacional": ("web_research",),
     "porte": (),
     "financeiro": ("documentos_financeiros",),
+    "fluxo_caixa": ("contratos_comprasnet",),
 }
 OPTIONAL_INPUTS = {
     "cadastro_regularidade": (
@@ -38,6 +39,7 @@ OPTIONAL_INPUTS = {
     "reputacional": (),
     "porte": (),
     "financeiro": ("recursos_recebidos", "contratos_pncp", "brasil_api"),
+    "fluxo_caixa": (),
 }
 TERMINAL = {"completed", "failed"}
 
@@ -60,7 +62,7 @@ def _load_operation(database, operation_id: str) -> dict[str, Any] | None:
     return _first_row(
         database.table("operations")
         .select(
-            "id,cnpj,ambiente,valor_enquadrado,contrato_id,contrato_dedicacao_exclusiva,uasg,valor_global_contrato,cotacao_id"
+            "id,cnpj,ambiente,valor_enquadrado,contrato_id,contrato_dedicacao_exclusiva,uasg,valor_global_contrato,cotacao_id,capacidade_memoria,taxa_breakdown"
         )
         .eq("id", operation_id)
     )

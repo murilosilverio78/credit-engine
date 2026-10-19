@@ -79,6 +79,17 @@ def test_policy_view_formats_real_operation_02295223_informativos():
     assert all("{" not in item["texto"] for item in view["informativos"])
 
 
+def test_policy_view_exposes_fluxo_caixa_as_informative_without_policy_rule():
+    db = _database({"status_decisao": "DECISAO_CALCULADA"})
+    db.tables["finding_runs"] = [{"id": "cash-run", "operation_id": "op-1", "especialista": "fluxo_caixa", "created_at": "2026-10-19"}]
+    db.tables["findings"].append({"operation_id": "op-1", "run_id": "cash-run", "codigo": "empenho_insuficiente", "estado": "CONFIRMADO", "confianca": "ALTA", "valor": {"valor_descoberto": 51_520.26, "meses_descobertos": 2}, "evidencia": []})
+    db.tables["finding_catalog"].append({"codigo": "empenho_insuficiente", "descricao": "Empenho insuficiente"})
+
+    view = latest_policy_view("op-1", database=db)
+
+    assert view["informativos"][0]["texto"] == "Empenho insuficiente: R$ 51.520,26 descobertos em 2 meses"
+
+
 @pytest.mark.parametrize("decision", [
     {"status_decisao": "DADOS_INSUFICIENTES", "faltantes": ["porte"]},
     {"status_decisao": "VETO", "bloqueios": ["capital_social_alterado_recente"]},

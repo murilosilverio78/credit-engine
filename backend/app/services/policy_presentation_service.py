@@ -51,6 +51,11 @@ def _percent(value: Any) -> str:
     return f"{percentage:.{digits}f}%".replace(".", ",")
 
 
+def _quantity(value: Any) -> str:
+    amount = _number(value)
+    return f"{amount:g}".replace(".", ",") if amount is not None else "não informado"
+
+
 def _label(value: Any) -> str:
     raw = str(value or "")
     return _FIELD_LABELS.get(raw, raw.replace("_", " ").capitalize())
@@ -118,6 +123,24 @@ def _informative_text(code: str, value: Any, label: str) -> list[str]:
         return [f"Margem líquida de {_percent(value)}"]
     if code == "receita_declarada_12m":
         return [f"Receita declarada nos últimos 12 meses: {_money(value)}"]
+    if code == "mensalidade_faturada_media":
+        return [f"Mensalidade faturada média: {_money(data.get('valor'))} (CV {_percent(data.get('cv'))})"]
+    if code == "meses_sem_fatura_12m":
+        return [f"{int(_number(value) or 0)} meses sem fatura no histórico de 12 meses"]
+    if code == "glosa_pct_12m":
+        return [f"Glosa de {_percent(value)} das faturas"]
+    if code == "prazo_ateste_dias":
+        return [f"Prazo mediano de ateste: {int(_number(value) or 0)} dias"]
+    if code == "prazo_liquidacao_dias":
+        return [f"Prazo mediano de liquidação: {int(_number(value) or 0)} dias"]
+    if code == "saldo_empenho_ano":
+        return [f"Saldo de empenho no exercício: {_money(data.get('saldo'))} ({_quantity(data.get('meses_cobertos'))} meses cobertos)"]
+    if code == "empenho_insuficiente":
+        return [f"Empenho insuficiente: {_money(data.get('valor_descoberto'))} descobertos em {_quantity(data.get('meses_descobertos'))} meses"]
+    if code == "cobertura_parcela":
+        return [f"Cobertura da parcela estimada: {_percent(value)}"]
+    if code == "execucao_vs_contratado":
+        return [f"Execução faturada versus contratado: {_percent(value)}"]
     return [f"{label}: {_generic_value(value, code)}"]
 
 
@@ -204,6 +227,14 @@ def latest_policy_view(operation_id: str, *, database=None, operation: dict[str,
     result = _record(shadow.get("resultado"))
     used_runs = set(_codes(shadow.get("runs_usados")))
     findings = _rows(database.table("findings").select("codigo,estado,confianca,valor,evidencia,run_id").eq("operation_id", operation_id))
+    # Cash-flow findings are informational even while policy v2 stays frozen.
+    # They may have been emitted after the selected shadow run, so include the
+    # newest fluxo_caixa run explicitly rather than changing policy inputs.
+    try:
+        cash_runs = _rows(database.table("finding_runs").select("id").eq("operation_id", operation_id).eq("especialista", "fluxo_caixa").order("created_at", desc=True).limit(1))
+        used_runs.update(str(row.get("id")) for row in cash_runs if row.get("id"))
+    except Exception:
+        pass
     if used_runs:
         findings = [row for row in findings if str(row.get("run_id")) in used_runs]
     finding_by_code = {str(row.get("codigo")): row for row in findings}
@@ -244,5 +275,18 @@ def latest_policy_view(operation_id: str, *, database=None, operation: dict[str,
         "oficial": {"rating": oficial.get("rating", operation.get("rating")), "limite": oficial.get("limite_aprovado_rs", oficial.get("limite", operation.get("limite_aprovado")))},
         "condicoes_precedentes": enrich(result.get("condicoes_precedentes")),
         "ajustes": {"limite_multiplicadores": enrich(result.get("limite_multiplicadores")), "taxa_ajuste_pp": result.get("taxa_ajuste_pp", 0.0)},
-        "informativos": enrich(result.get("informativos"), kind="informativo"),
+        "informativos": enrich(
+            [
+                *(result.get("informativos") or []),
+                *({"codigo": code, "valor": row.get("valor")} for code, row in finding_by_code.items() if code in _CASH_FLOW_CODES),
+            ],
+            kind="informativo",
+        ),
     }
+
+
+_CASH_FLOW_CODES = frozenset({
+    "mensalidade_faturada_media", "meses_sem_fatura_12m", "glosa_pct_12m",
+    "prazo_ateste_dias", "prazo_liquidacao_dias", "saldo_empenho_ano",
+    "empenho_insuficiente", "cobertura_parcela", "execucao_vs_contratado",
+})
