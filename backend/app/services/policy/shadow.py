@@ -337,6 +337,7 @@ def _hash(
     runs: dict[str, dict[str, str]],
     operation: dict[str, Any],
     policy_id: str,
+    policy_content_hash: str,
     ref: date,
 ) -> str:
     context = {
@@ -355,7 +356,30 @@ def _hash(
             "runs": runs,
             "contexto": context,
             "policy_version_id": policy_id,
+            "policy_content_hash": policy_content_hash,
             "data_referencia": ref.isoformat(),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _policy_content_hash(
+    parametros: dict[str, Any], regras: list[dict[str, Any]],
+) -> str:
+    """Fingerprint policy content independently of its persisted version id."""
+
+    def rule_key(rule: dict[str, Any]) -> tuple[int, int | str, str]:
+        try:
+            return (0, int(rule.get("ordem")), str(rule.get("id") or ""))
+        except (TypeError, ValueError):
+            return (1, str(rule.get("ordem") or ""), str(rule.get("id") or ""))
+
+    raw = json.dumps(
+        {
+            "parametros": parametros,
+            "regras": sorted(regras, key=rule_key),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -375,6 +399,9 @@ def avaliar_sombra(
 
         database = supabase
     policy = load_policy(database=database, versao=versao, status="SOMBRA")
+    policy_content_hash = _policy_content_hash(
+        policy["parametros"], policy["regras"]
+    )
     entrada = montar_entrada(operation_id, database=database)
     official, ref = _official(database, operation_id)
     insumos_posteriores = (
@@ -499,7 +526,11 @@ def avaliar_sombra(
         "policy_version_id": policy["version"]["id"],
         "policy_version": policy["version"],
         "entrada_hash": _hash(
-            entrada.runs_usados, entrada.operation, str(policy["version"]["id"]), ref
+            entrada.runs_usados,
+            entrada.operation,
+            str(policy["version"]["id"]),
+            policy_content_hash,
+            ref,
         ),
         "data_referencia": ref.isoformat(),
         "runs_usados": entrada.runs_usados,
