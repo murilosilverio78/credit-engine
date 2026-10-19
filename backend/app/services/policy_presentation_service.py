@@ -12,11 +12,18 @@ _MISSING_TEXT = {
 }
 _FIELD_LABELS = {
     "capital_social": "Capital social",
-    "participacao_socio_capital_social": "Participação societária no capital social",
+    "participacao_socio_capital_social": "Participação do sócio no capital",
+    "participacao_socio_capital": "Participação do sócio no capital",
     "margem_liquida": "Margem líquida",
     "receita": "Receita",
 }
-_SOURCE_LABELS = {"balanco": "balanço", "irpf": "IRPF", "sped_ecd": "SPED ECD"}
+_SOURCE_LABELS = {
+    "irpf": "IRPF do sócio",
+    "contrato_social": "contrato social",
+    "balanco": "balanço",
+    "dre": "DRE",
+    "sped_ecd": "SPED ECD",
+}
 
 
 def _number(value: Any) -> float | None:
@@ -66,6 +73,16 @@ def _generic_value(value: Any, key: str = "") -> str:
     return str(value)
 
 
+def _divergence_value(value: Any, field: Any) -> str:
+    """Formats documented divergence values by their field semantics."""
+    name = str(field or "").lower()
+    if name.endswith("_pct") or "percentual" in name or "%" in name:
+        return _percent(value)
+    if any(term in name for term in ("capital", "participacao", "receita", "patrimonio")):
+        return _money(value)
+    return _generic_value(value, name)
+
+
 def _informative_text(code: str, value: Any, label: str) -> list[str]:
     data = _record(value)
     if code == "aval_cobertura":
@@ -77,19 +94,24 @@ def _informative_text(code: str, value: Any, label: str) -> list[str]:
         ]
     if code == "aval_patrimonio_nao_verificavel":
         people = value if isinstance(value, list) else []
-        return [
-            f"Patrimônio do aval não verificável: {item.get('nome') or 'Avalista'} "
-            f"(CPF final {item.get('cpf_final') or 'não informado'})"
-            for item in map(_record, people)
-            if _number(item.get("pct_total")) == 0 or _number(item.get("pct_especie")) == 0
-        ]
+        texts = []
+        for item in map(_record, people):
+            person = f"{item.get('nome') or 'Avalista'} (CPF final {item.get('cpf_final') or 'não informado'})"
+            if _number(item.get("pct_total")) == 0:
+                reason = "sem patrimônio comprovado"
+            elif (_number(item.get("pct_quotas_cedente")) or 0) >= 0.5:
+                reason = f"{_percent(item.get('pct_quotas_cedente'))} do patrimônio são quotas da própria empresa"
+            else:
+                reason = "patrimônio majoritariamente não líquido"
+            texts.append(f"{person}: {reason}")
+        return texts
     if code == "dependencia_publica":
         return [f"{_percent(value)} da receita vem de pagamentos públicos"]
     if code == "divergencia_documental":
         items = value if isinstance(value, list) else [data]
         return [
-            f"{_label(item.get('campo'))}: {_SOURCE_LABELS.get(str(item.get('fonte_a')), str(item.get('fonte_a') or 'Fonte A'))} diz {_generic_value(item.get('valor_a'), str(item.get('campo') or ''))}, "
-            f"{_SOURCE_LABELS.get(str(item.get('fonte_b')), str(item.get('fonte_b') or 'Fonte B'))} diz {_generic_value(item.get('valor_b'), str(item.get('campo') or ''))}"
+            f"{_label(item.get('campo'))}: {_SOURCE_LABELS.get(str(item.get('fonte_a')), str(item.get('fonte_a') or 'Fonte A'))} diz {_divergence_value(item.get('valor_a'), item.get('campo'))}, "
+            f"{_SOURCE_LABELS.get(str(item.get('fonte_b')), str(item.get('fonte_b') or 'Fonte B'))} diz {_divergence_value(item.get('valor_b'), item.get('campo'))}"
             for item in map(_record, items)
         ]
     if code == "margem_liquida":

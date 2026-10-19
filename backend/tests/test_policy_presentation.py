@@ -44,9 +44,9 @@ def test_policy_view_formats_real_operation_02295223_informativos():
         "condicoes_precedentes": [{"codigo": "capital_social_alterado_recente", "descricao": "Comprovar integralização do capital", "documento_exigido": "Comprovante"}],
         "informativos": [
             {"codigo": "aval_cobertura", "valor": {"cobertura": 0.085, "pl_ajustado": 8_180_000, "pl_declarado": 9_000_000}},
-            {"codigo": "aval_patrimonio_nao_verificavel", "valor": [{"nome": "Ana", "cpf_final": "1234", "pct_total": 0, "pct_especie": 0}, {"nome": "Bia", "cpf_final": "5678", "pct_total": 0.5, "pct_especie": 0.2}]},
+            {"codigo": "aval_patrimonio_nao_verificavel", "valor": [{"nome": "Ana", "cpf_final": "1234", "pct_total": 0, "pct_especie": 0}, {"nome": "Bia", "cpf_final": "5678", "pct_total": 0.5, "pct_especie": 0.2, "pct_quotas_cedente": 0.6}, {"nome": "Caio", "cpf_final": "9012", "pct_total": 0.5, "pct_especie": 0.2, "pct_quotas_cedente": 0.2}]},
             {"codigo": "dependencia_publica", "valor": 0.625},
-            {"codigo": "divergencia_documental", "valor": [{"campo": "capital_social", "fonte_a": "balanco", "valor_a": 1_000_000, "fonte_b": "irpf", "valor_b": 900_000}]},
+            {"codigo": "divergencia_documental", "valor": [{"campo": "participacao_socio_capital_social", "fonte_a": "irpf", "valor_a": 480_000, "fonte_b": "contrato_social", "valor_b": 2_000_000}, {"campo": "margem_pct", "fonte_a": "dre", "valor_a": 0.084, "fonte_b": "balanco", "valor_b": 0.1}]},
             {"codigo": "margem_liquida", "valor": 0.084},
             {"codigo": "receita_declarada_12m", "valor": 8_180_000},
         ],
@@ -67,9 +67,12 @@ def test_policy_view_formats_real_operation_02295223_informativos():
     assert view["condicoes_precedentes"][0]["texto"] == "Comprovar integralização do capital"
     assert [item["texto"] for item in view["informativos"]] == [
         "Aval cobre 8,5% da operação (patrimônio ajustado R$ 8,18 mi de R$ 9,00 mi declarados)",
-        "Patrimônio do aval não verificável: Ana (CPF final 1234)",
+        "Ana (CPF final 1234): sem patrimônio comprovado",
+        "Bia (CPF final 5678): 60% do patrimônio são quotas da própria empresa",
+        "Caio (CPF final 9012): patrimônio majoritariamente não líquido",
         "62% da receita vem de pagamentos públicos",
-        "Capital social: balanço diz R$ 1,00 mi, IRPF diz R$ 900.000,00",
+        "Participação do sócio no capital: IRPF do sócio diz R$ 480.000,00, contrato social diz R$ 2,00 mi",
+        "Margem pct: DRE diz 8,4%, balanço diz 10,0%",
         "Margem líquida de 8,4%",
         "Receita declarada nos últimos 12 meses: R$ 8,18 mi",
     ]
