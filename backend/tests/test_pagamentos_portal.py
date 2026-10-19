@@ -69,6 +69,22 @@ def test_cancelled_order_is_removed_and_reissued_order_matches_black_rock_invoic
     assert [(invoice["numero"], order["documento"]) for invoice, order in matches] == [("29", "2026OB000125")]
 
 
+def test_cancellation_citing_short_code_removes_order_with_full_portal_code():
+    invoice = _invoice("29", liquidated="2026-07-06", value="68.953,20")
+    orders = [
+        {"documento": "154069152762026OB003452", "data": "14/07/2026", "valor": "58644.69",
+         "observacao": "PGTO NF/FATURA  2026/29 BLACK ROCK - CT 2026/018 - 1A MEDICAO"},
+        {"documento": "154069152762026OB003484", "data": "15/07/2026", "valor": "59058.41",
+         "observacao": "PGTO NF/FATURA  2026/29 BLACK ROCK - CT 2026/018 - 1A MEDICAO"},
+        {"documento": "154069152762026OB003480", "data": "15/07/2026", "valor": "-58644.69",
+         "observacao": "10 - CANCELAMENTO DA 2026OB003452 - POR COMANDO DO GESTOR"},
+    ]
+
+    matches = reconcile_payments([invoice], orders, "00018/2026")
+
+    assert [order["documento"] for _, order in matches] == ["154069152762026OB003484"]
+
+
 def test_orders_for_another_contract_are_not_candidates_even_in_same_uasg():
     invoice = _invoice("29", value="59.058,41")
     orders = [

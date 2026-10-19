@@ -3,7 +3,7 @@
 Version 19 filtra cancelamentos, contratos concorrentes e retenções na conciliação de pagamentos.
 """
 
-EMITTER_VERSION = "19"
+EMITTER_VERSION = "20"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

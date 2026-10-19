@@ -134,7 +134,10 @@ def _active_payment_orders(orders: list[dict[str, Any]], contract_number: Any) -
         cited = _cited_contracts(order.get("observacao"))
         if value is None or value <= 0:
             continue
-        if _document_key(order.get("documento")) in cancelled_documents:
+        # The Portal returns the full code (UG + gestão + 2026OB003452) while the
+        # cancellation text cites only the short form (2026OB003452).
+        document = _document_key(order.get("documento"))
+        if document and any(document.endswith(cancelled) for cancelled in cancelled_documents if cancelled):
             continue
         if _CANCELS_ORDER.search(str(order.get("observacao") or "")):
             continue
