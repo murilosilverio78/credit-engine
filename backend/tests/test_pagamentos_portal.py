@@ -112,6 +112,65 @@ def test_retained_value_matches_only_without_other_contract_and_keeps_invoice_pr
     ]
 
 
+def test_one_order_settles_all_fourteen_explicit_invoices_and_ignores_tax_other_ug_and_contract():
+    invoices = [_invoice(str(number), "2026-09-10", "100,00") for number in range(1, 15)]
+    orders = [
+        {
+            "documento": "12345600000001", "data": "2026-09-15", "valor": "1.400,00",
+            "observacao": "CT 04/2025 " + " ".join(f"NF {number}" for number in range(1, 15)),
+        },
+        {"documento": "12345600000002", "data": "2026-09-14", "valor": "100,00", "observacao": "INSS NF 1"},
+        {"documento": "12345600000003", "data": "2026-09-14", "valor": "100,00", "observacao": "IRPJ NF 2"},
+        {"documento": "99999900000001", "data": "2026-09-11", "valor": "100,00", "observacao": "CT 04/2025 NF 3"},
+        {"documento": "12345600000004", "data": "2026-09-11", "valor": "100,00", "observacao": "CONTRATO: 027/2025 NF 4"},
+    ]
+
+    matches = reconcile_payments(invoices, orders, "00004/2025", "123456")
+
+    assert [invoice["numero"] for invoice, _ in matches] == [str(number) for number in range(1, 15)]
+    assert {order["documento"] for _, order in matches} == {"12345600000001"}
+
+
+def test_contract_reference_variants_exclude_another_contract():
+    invoice = _invoice("1", value="100,00")
+    variants = [
+        "CONTRATO: 027/2025", "CONTRATO Nº: 027/2025", "CONT Nº: 027/2025",
+        "CONT. Nº: 027/2025", "CONT N : 027/2025", "CONT 027/2025",
+    ]
+    orders = [
+        {"documento": f"1234560000000{index}", "data": "2026-09-11", "valor": "100,00", "observacao": f"{text} NF 1"}
+        for index, text in enumerate(variants, start=1)
+    ]
+
+    assert reconcile_payments([invoice], orders, "00004/2025", "123456") == []
+
+
+def test_antecipacao_concorrente_includes_other_ug_and_extracts_operation_and_bank():
+    snapshots = {
+        "contratos_comprasnet": {
+            "status_consulta": "ENCONTRADO",
+            "contrato_comprasnet": {"numero": "00004/2025", "uasg": "123456"},
+            "faturas": [_invoice("1")],
+        },
+        "pagamentos_portal": {
+            "status_consulta": "ENCONTRADO",
+            "ordens_bancarias": [{
+                "documento": "99999900000001", "codigoUg": "999999", "data": "2026-09-20",
+                "valor": "1.200,00", "observacao": "ANTECIPAGOV Nº OP. 5043 BANCO 274",
+            }],
+        },
+    }
+
+    findings = {item.codigo: item for item in emit_fluxo_caixa(
+        snapshots, fingerprint="f", operation={"data_referencia": "19/10/2026"},
+    )}
+
+    assert findings["antecipacao_concorrente"].valor == {
+        "quantidade": 1, "valor": 1200.0, "ugs": ["999999"],
+        "numeros_operacao": ["5043"], "bancos": ["274"], "ultima_data": "2026-09-20",
+    }
+
+
 def test_funai_payment_findings_are_informative_and_use_liquid_value():
     snapshots = {
         "contratos_comprasnet": {
@@ -204,6 +263,25 @@ def test_portal_falls_back_without_uasg_and_filters_contract_observation(monkeyp
     assert result["filtro_usado"] == "OBSERVACAO"
     assert len(result["ordens_bancarias"]) == 2
     assert calls == [(2026, "194004"), (2025, "194004"), (2026, None), (2025, None)]
+
+
+def test_portal_uses_documented_ug_filter_and_persists_ug_payload_fields(monkeypatch):
+    urls = []
+    monkeypatch.setattr(
+        pagamentos_portal,
+        "fetch_json_with_retry",
+        lambda _client, url, **_kwargs: urls.append(url) or [],
+    )
+
+    records, _pagination = pagamentos_portal._pages(
+        object(), "02955426000124", 2026, "194004", deadline=pagamentos_portal.time.monotonic() + 10,
+    )
+    order = pagamentos_portal._order({"codigoUg": "194004", "ug": "FUNAI", "documento": "19400400000001"})
+
+    assert records == []
+    assert "&ug=194004" in urls[0]
+    assert order["codigoUg"] == "194004"
+    assert order["ug"] == "FUNAI"
 
 
 def test_portal_marks_partial_result_instead_of_raising_at_total_timeout(monkeypatch):

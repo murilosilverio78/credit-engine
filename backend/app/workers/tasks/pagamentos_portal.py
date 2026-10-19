@@ -63,7 +63,8 @@ def _pages(
             break
         query = f"?codigoPessoa={cnpj}&fase=3&ano={year}&pagina={page}"
         if uasg:
-            query += f"&unidadeGestora={uasg}"
+            # The documented filter for documentos-por-favorecido is ``ug``.
+            query += f"&ug={uasg}"
         try:
             payload = fetch_json_with_retry(
                 client,
@@ -95,7 +96,8 @@ def _order(payload: dict[str, Any]) -> dict[str, Any]:
         "documento": payload.get("documento") or payload.get("numeroDocumento") or payload.get("codigoDocumento"),
         "data": (parse_data(payload.get("data")) or parse_data(payload.get("dataDocumento")) or parse_data(payload.get("dataPagamento"))).isoformat() if (parse_data(payload.get("data")) or parse_data(payload.get("dataDocumento")) or parse_data(payload.get("dataPagamento"))) else None,
         "valor": parse_number(payload.get("valor")) or parse_number(payload.get("valorDocumento")) or 0.0,
-        "ug": payload.get("unidadeGestora") or payload.get("codigoUnidadeGestora"),
+        "codigoUg": payload.get("codigoUg") or payload.get("codigoUnidadeGestora"),
+        "ug": payload.get("ug") or payload.get("unidadeGestora"),
         "observacao": payload.get("observacao") or payload.get("observacaoDocumento") or "",
     }
 

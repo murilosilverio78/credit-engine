@@ -1,6 +1,6 @@
 """Version of the deterministic finding-emission rules.
 
-Version 19 filtra cancelamentos, contratos concorrentes e retenções na conciliação de pagamentos.
+Version 20 adiciona escopo de UG, conciliação 1:N e antecipações concorrentes.
 """
 
 EMITTER_VERSION = "20"

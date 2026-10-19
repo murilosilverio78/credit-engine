@@ -151,6 +151,11 @@ def _informative_text(code: str, value: Any, label: str) -> list[str]:
         return [f"Taxa de conciliação de pagamentos: {_percent(value)}"]
     if code == "pago_portal_vs_comprasnet":
         return [f"Pagamentos no Portal: {_money(data.get('pago_portal_ano'))} versus {_money(data.get('liquidado_comprasnet_ano'))} liquidados no Comprasnet"]
+    if code == "antecipacao_concorrente":
+        return [
+            f"{int(_number(data.get('quantidade')) or 0)} antecipações ou cessões concorrentes identificadas "
+            f"({_money(data.get('valor'))}); operações {', '.join(map(str, data.get('numeros_operacao') or [])) or 'não informadas'}"
+        ]
     return [f"{label}: {_generic_value(value, code)}"]
 
 
@@ -300,5 +305,5 @@ _CASH_FLOW_CODES = frozenset({
     "prazo_ateste_dias", "prazo_liquidacao_dias", "saldo_empenho_ano",
     "empenho_insuficiente", "cobertura_parcela", "execucao_vs_contratado",
     "prazo_pagamento_dias", "ciclo_caixa_dias", "faturas_liquidadas_sem_pagamento",
-    "taxa_conciliacao_pagamentos", "pago_portal_vs_comprasnet",
+    "taxa_conciliacao_pagamentos", "pago_portal_vs_comprasnet", "antecipacao_concorrente",
 })
