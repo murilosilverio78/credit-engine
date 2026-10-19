@@ -76,6 +76,38 @@ _PIPELINE_STAGE: ContextVar[str] = ContextVar(
     "pipeline_stage",
     default="pipeline_initialization",
 )
+_BACKGROUND_SHADOW_TASKS: set[asyncio.Task] = set()
+
+
+async def _run_automatic_shadow(operation_id: str) -> None:
+    """Keep policy observation fully outside the official decision path."""
+    try:
+        from app.services.policy.shadow import executar_sombra_automatica
+
+        await asyncio.to_thread(
+            executar_sombra_automatica, operation_id, database=supabase
+        )
+    except Exception as exc:
+        # The synchronous helper already protects normal shadow failures; this
+        # guard also covers task scheduling/import failures.
+        logger.warning(
+            "pipeline.policy_shadow_background_failed",
+            operation_id=operation_id,
+            error=str(exc),
+        )
+
+
+def _schedule_automatic_shadow(operation_id: str) -> None:
+    try:
+        task = asyncio.create_task(_run_automatic_shadow(operation_id))
+        _BACKGROUND_SHADOW_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_SHADOW_TASKS.discard)
+    except Exception as exc:
+        logger.warning(
+            "pipeline.policy_shadow_schedule_failed",
+            operation_id=operation_id,
+            error=str(exc),
+        )
 
 
 def _execute_db(operation_id: str, action: str, request):
@@ -1210,6 +1242,10 @@ async def _complete_analysis(operation_id: str):
         .eq("id", operation_id)
         .execute(),
     )
+
+    # The official operation was persisted above.  Shadow evaluation is
+    # asynchronous, append-only, and cannot change this completed decision.
+    _schedule_automatic_shadow(operation_id)
 
     logger.info(
         "pipeline.completed",

@@ -751,6 +751,63 @@ def test_policy_shadow_returns_409_without_shadow_version(monkeypatch):
     assert response.status_code == 409
 
 
+def test_explicit_operation_ids_are_not_truncated_by_limit(monkeypatch):
+    ids = [
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-000000000002",
+        "00000000-0000-0000-0000-000000000003",
+    ]
+    reemitted = []
+    automatic_shadow = []
+    shadowed = []
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    from app.core import database
+
+    monkeypatch.setattr(database, "supabase", Postgrest())
+    monkeypatch.setattr(
+        internal,
+        "reemitir_operacao",
+        lambda operation_id, **_kwargs: reemitted.append(operation_id)
+        or {"operation_id": operation_id, "especialistas": {}},
+    )
+    monkeypatch.setattr(
+        internal,
+        "executar_sombra_automatica",
+        lambda operation_id, **_kwargs: automatic_shadow.append(operation_id),
+    )
+
+    findings_response = make_client().post(
+        "/api/v1/internal/findings/reemitir",
+        json={"operation_ids": ids, "limite": 1},
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert findings_response.status_code == 200
+    assert reemitted == ids
+    assert automatic_shadow == ids
+
+    monkeypatch.setattr(
+        internal,
+        "load_policy",
+        lambda **_kwargs: {"version": {"id": "shadow", "versao": 1, "status": "SOMBRA"}},
+    )
+    monkeypatch.setattr(
+        internal,
+        "avaliar_sombra",
+        lambda operation_id, **_kwargs: shadowed.append(operation_id)
+        or {"classe_geral": "IGUAL", "divergencias": []},
+    )
+
+    policy_response = make_client().post(
+        "/api/v1/internal/politica/sombra",
+        json={"operation_ids": ids, "limite": 1},
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert policy_response.status_code == 200
+    assert shadowed == ids
+
+
 def test_policy_shadow_compares_requested_draft_without_official_decision(monkeypatch):
     monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
     from app.core import database

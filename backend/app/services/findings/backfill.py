@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Any
 
-from app.services.findings.emitter import REQUIRED, _load_snapshots, emit_findings, missing_required
+from app.services.findings.emitter import _load_snapshots, emit_findings, missing_required
 
 SPECIALISTS = ("cadastro_regularidade", "sacado_orgao", "documentos", "reputacional", "porte", "financeiro")
 
@@ -45,6 +45,8 @@ def select_operations(*, operation_ids: list[str] | None = None, ambiente: str =
         from app.core.database import supabase
         database = supabase
     if operation_ids is not None:
-        return operation_ids[:limite]
+        # An explicit list is an operator instruction, not an automatic
+        # selection.  ``limite`` protects only the latter.
+        return operation_ids
     response = database.table("operations").select("id").eq("ambiente", ambiente).order("created_at", desc=True).limit(limite).execute()
     return [str(row["id"]) for row in (response.data or []) if row.get("id")]

@@ -1,5 +1,6 @@
 import asyncio
 import os
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -204,3 +205,62 @@ def test_completion_caps_capacity_term_at_default(monkeypatch):
     asyncio.run(orchestrator._complete_analysis("op-1"))
 
     assert calls == [12]
+
+
+def test_completed_report_runs_shadow_in_background_after_persisting_score(monkeypatch):
+    from app.services.policy import shadow
+
+    database = PricingSupabase({
+        "valor_solicitado": 500_000,
+        "valor_enquadrado": 400_000,
+        "prazo_final_meses": 12,
+    })
+    shadow_runs = []
+    completed = Event()
+    monkeypatch.setattr(orchestrator, "supabase", database)
+
+    def fake_shadow(operation_id, *, database, aplicar):
+        assert aplicar is True
+        assert database.completed_payload["status"] == "completed"
+        shadow_runs.append({"operation_id": operation_id})
+        completed.set()
+
+    monkeypatch.setattr(shadow, "avaliar_sombra", fake_shadow)
+
+    async def complete_report():
+        result = await orchestrator._complete_analysis("op-1")
+        await asyncio.wait_for(asyncio.to_thread(completed.wait), timeout=1)
+        return result
+
+    result = asyncio.run(complete_report())
+
+    assert result["status"] == "completed"
+    assert shadow_runs == [{"operation_id": "op-1"}]
+
+
+def test_shadow_failure_does_not_fail_completed_report(monkeypatch):
+    from app.services.policy import shadow
+
+    database = PricingSupabase({
+        "valor_solicitado": 500_000,
+        "valor_enquadrado": 400_000,
+        "prazo_final_meses": 12,
+    })
+    attempted = Event()
+    monkeypatch.setattr(orchestrator, "supabase", database)
+
+    def failing_shadow(*_args, **_kwargs):
+        attempted.set()
+        raise RuntimeError("shadow offline")
+
+    monkeypatch.setattr(shadow, "avaliar_sombra", failing_shadow)
+
+    async def complete_report():
+        result = await orchestrator._complete_analysis("op-1")
+        await asyncio.wait_for(asyncio.to_thread(attempted.wait), timeout=1)
+        return result
+
+    result = asyncio.run(complete_report())
+
+    assert result["status"] == "completed"
+    assert database.completed_payload["status"] == "completed"

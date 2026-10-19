@@ -57,7 +57,8 @@ def test_reemissao_includes_financeiro_after_documentos_financeiros_is_terminal(
 
 def test_emitter_all_outcomes(monkeypatch):
     db = _ready_db()
-    pending = _ready_db(); pending.tables["component_snapshots"][0]["status"] = "pending"
+    pending = _ready_db()
+    pending.tables["component_snapshots"][0]["status"] = "pending"
     assert emitter.emit_findings("op", "cadastro_regularidade", database=pending).desfecho == "aguardando"
     monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: None)
     assert emitter.emit_findings("op", "cadastro_regularidade", database=db).desfecho == "sem_catalogo"
@@ -66,3 +67,9 @@ def test_emitter_all_outcomes(monkeypatch):
     assert emitter.emit_findings("op", "cadastro_regularidade", database=db).desfecho == "deduplicado"
     db.rpc = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("offline"))
     assert emitter.emit_findings("op", "cadastro_regularidade", database=db).desfecho == "erro"
+
+
+def test_explicit_operation_ids_ignore_automatic_selection_limit():
+    operation_ids = ["op-1", "op-2", "op-3"]
+
+    assert select_operations(operation_ids=operation_ids, limite=1) == operation_ids

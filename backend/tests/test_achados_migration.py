@@ -70,3 +70,13 @@ def test_policy_v2_draft_seeds_generic_effects_without_promoting_it():
     for target in ("'cp'", "'alcada'", "'limite_mult'", "'taxa_pp'", "'info'"):
         assert target in sql
     assert "NOTIFY pgrst, 'reload schema';" in sql
+
+
+def test_shadow_temporal_input_class_is_delivered_as_unapplied_migration():
+    sql = (MIGRATION.parent / "057_policy_shadow_insumo_temporal.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "DROP CONSTRAINT IF EXISTS policy_shadow_runs_classe_geral_check" in sql
+    assert "'INSUMO_TEMPORAL'" in sql
+    assert "NOTIFY pgrst, 'reload schema';" in sql

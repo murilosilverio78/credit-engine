@@ -7,6 +7,8 @@ import json
 from datetime import date, datetime, timezone
 from typing import Any
 
+import structlog
+
 from app.services.policy.engine import avaliar
 from app.services.policy.inputs import montar_entrada
 from app.services.policy.loader import load_policy
@@ -51,6 +53,27 @@ _INPUT_COMPONENTS = frozenset(
         "web_research",
     }
 )
+_CERTIFICATE_FINDINGS = frozenset(
+    {
+        "certidao_cnd_federal_pendente",
+        "certidao_cndt_pendente",
+        "certidao_fgts_pendente",
+    }
+)
+# These are direct consequences of a regularity factor.  Any divergence in a
+# merit, balance or block field is independent evidence and must not be
+# hidden as a temporal certificate input.
+_TEMPORAL_CERTIFICATE_CASCADE_FIELDS = frozenset(
+    {
+        "fator_regularidade",
+        "fator_potencial",
+        "score",
+        "rating",
+        "limite_aprovado_rs",
+    }
+)
+
+logger = structlog.get_logger()
 
 
 def _rows(query) -> list[dict[str, Any]]:
@@ -71,6 +94,15 @@ def _timestamp(value: Any) -> datetime | None:
     except (ValueError, TypeError):
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _date(value: Any) -> date | None:
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+    except (ValueError, TypeError):
+        return None
 
 
 def _official(database, operation_id: str) -> tuple[dict[str, Any] | None, date]:
@@ -212,6 +244,55 @@ def _effects_explain(
     return bool(fields) and fields <= explained
 
 
+def _is_temporal_certificate_input(
+    entrada,
+    official: dict[str, Any],
+    computed: dict[str, Any],
+    reference: date,
+    divergencias: list[dict[str, Any]],
+) -> bool:
+    """Whether an expired certificate is the sole source of parity drift.
+
+    Findings preserve each certificate's validity date.  A certificate that
+    was still valid at the official decision but is expired when findings are
+    re-emitted is an input-time difference, rather than an unexpected policy
+    result.  Score/rating/limit changes are accepted only as downstream
+    consequences of that lower regularity factor.
+    """
+    fields = {str(item.get("campo")) for item in divergencias}
+    if (
+        "fator_regularidade" not in fields
+        or not fields <= _TEMPORAL_CERTIFICATE_CASCADE_FIELDS
+    ):
+        return False
+    try:
+        if float(computed.get("fator_regularidade")) >= float(
+            official.get("fator_regularidade")
+        ):
+            return False
+    except (TypeError, ValueError):
+        return False
+    return any(
+        (validade := _date(getattr(finding, "valor", {}).get("validade")))
+        and validade > reference
+        for code, finding in entrada.findings.items()
+        if code in _CERTIFICATE_FINDINGS
+        and isinstance(getattr(finding, "valor", None), dict)
+    )
+
+
+def executar_sombra_automatica(operation_id: str, *, database=None) -> None:
+    """Run automatic shadow safely; it must never affect the official flow."""
+    try:
+        avaliar_sombra(operation_id, database=database, aplicar=True)
+    except Exception as exc:
+        logger.warning(
+            "policy_shadow.automatic_failed",
+            operation_id=operation_id,
+            error=str(exc),
+        )
+
+
 def _non_comparable(
     field: str, policy_value: Any, official_value: Any, reason: str
 ) -> dict[str, Any]:
@@ -342,7 +423,14 @@ def avaliar_sombra(
             elif isinstance(policy_value, (int, float)) and isinstance(
                 official_value, (int, float)
             ):
-                different = abs(policy_value - official_value) > 0.05
+                # Regularity factors are already rounded to two decimals; a
+                # 0.96 -> 0.91 certificate haircut is material even though
+                # binary floating point can make it appear just below 0.05.
+                different = (
+                    abs(policy_value - official_value) > 0.000001
+                    if field in {"fator_regularidade", "fator_potencial"}
+                    else abs(policy_value - official_value) > 0.05
+                )
             else:
                 different = policy_value != official_value
             if different:
@@ -363,6 +451,12 @@ def avaliar_sombra(
     parity_divergencias = [
         item for item in divergencias if item["classe"] == "PARIDADE"
     ]
+    temporal_certificate_input = bool(
+        official
+        and _is_temporal_certificate_input(
+            entrada, official, computed, ref, parity_divergencias
+        )
+    )
     if parity_divergencias and insumos_posteriores:
         for divergence in parity_divergencias:
             divergence.update(
@@ -370,6 +464,14 @@ def avaliar_sombra(
                     "classe": "INSUMO_POSTERIOR",
                     "motivo": "insumos refeitos apos o score oficial",
                     "componentes_posteriores": insumos_posteriores,
+                }
+            )
+    if temporal_certificate_input and not insumos_posteriores:
+        for divergence in parity_divergencias:
+            divergence.update(
+                {
+                    "classe": "INSUMO_TEMPORAL",
+                    "motivo": "certidao vencida apos a decisao oficial",
                 }
             )
     if (
@@ -381,6 +483,8 @@ def avaliar_sombra(
         classe = "SEM_DADOS"
     elif not parity_divergencias:
         classe = "IGUAL"
+    elif temporal_certificate_input:
+        classe = "INSUMO_TEMPORAL"
     elif _effects_explain(
         parity_divergencias,
         result.efeitos_novos,

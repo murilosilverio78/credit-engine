@@ -14,7 +14,11 @@ from app.services.analysis_runtime import is_shutting_down
 from app.services.operation_watchdog_service import run_operation_watchdog
 from app.services.findings.backfill import reemitir_operacao, select_operations
 from app.services.policy.loader import load_policy
-from app.services.policy.shadow import avaliar_sombra, comparar_sombra
+from app.services.policy.shadow import (
+    avaliar_sombra,
+    comparar_sombra,
+    executar_sombra_automatica,
+)
 from app.workers.http_utils import (
     acquire_portal_call,
     portal_api_url,
@@ -150,7 +154,9 @@ async def trigger_operation_watchdog(
 
 @router.post("/findings/reemitir")
 async def reemitir_findings(
-    request: FindingsReemitRequest, _: None = Depends(verify_internal_token)
+    request: FindingsReemitRequest,
+    background_tasks: BackgroundTasks,
+    _: None = Depends(verify_internal_token),
 ):
     from app.core.database import supabase
 
@@ -171,6 +177,11 @@ async def reemitir_findings(
             break
         result = await asyncio.to_thread(
             reemitir_operacao, operation_id, aplicar=request.aplicar, database=supabase
+        )
+        # The automatic comparison is deliberately detached from the
+        # re-emission result; it is observational and failure-safe.
+        background_tasks.add_task(
+            executar_sombra_automatica, operation_id, database=supabase
         )
         processed += 1
         operations.append(result)

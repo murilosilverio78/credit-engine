@@ -2,7 +2,7 @@ from datetime import date
 
 from app.services.policy import shadow
 from app.services.policy.engine import _limit
-from app.services.policy.types import EntradaPolitica
+from app.services.policy.types import EntradaPolitica, FindingValue
 from tests.fakes.postgrest import Postgrest
 
 
@@ -192,6 +192,38 @@ def test_shadow_effects_without_parity_field_do_not_explain_divergence(monkeypat
     })())
 
     assert shadow.avaliar_sombra("op", database=_Db())["classe_geral"] == "INESPERADA"
+
+
+def test_shadow_classifies_certificate_expired_after_official_as_temporal_input(monkeypatch):
+    values = {field: None for field in shadow._FIELDS}
+    values.update({
+        "fator_regularidade": 0.91,
+        "score": 65,
+        "bloqueios": [],
+    })
+    official = {**values, "fator_regularidade": 0.96, "score": 70}
+    findings = {
+        "certidao_cnd_federal_pendente": FindingValue(
+            "certidao_cnd_federal_pendente",
+            {"estado": "ausente", "validade": "2026-01-02"},
+            "CONFIRMADO",
+            "ALTA",
+        )
+    }
+    monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": {}, "regras": []})
+    monkeypatch.setattr(shadow, "montar_entrada", lambda *_args, **_kwargs: EntradaPolitica({}, findings, _complete_parity_runs(), set()))
+    monkeypatch.setattr(shadow, "_official", lambda *_args: (official, date(2026, 1, 1)))
+    monkeypatch.setattr(shadow, "_set_pct_max_contrato", lambda *_args: None)
+    monkeypatch.setattr(shadow, "avaliar", lambda *_args: _shadow_result(values))
+
+    payload = shadow.avaliar_sombra("op", database=_Db())
+
+    assert payload["classe_geral"] == "INSUMO_TEMPORAL"
+    assert {item["classe"] for item in payload["divergencias"]} == {"INSUMO_TEMPORAL"}
+    assert {item["campo"] for item in payload["divergencias"]} == {
+        "fator_regularidade",
+        "score",
+    }
 
 
 def test_shadow_effect_with_explicit_parity_field_explains_divergence(monkeypatch):
