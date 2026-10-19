@@ -372,6 +372,31 @@ def test_executar_componente_permite_web_research_sem_cache(monkeypatch):
     assert calls == [(operation["id"], False)]
 
 
+def test_executar_pagamentos_portal_is_accepted_in_background(monkeypatch):
+    from app.workers.tasks import pagamentos_portal
+
+    _db, _calls, operation = _setup_component_execution(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        pagamentos_portal,
+        "run_pagamentos_portal",
+        lambda operation_id, *, use_cache: calls.append((operation_id, use_cache)),
+    )
+
+    response = make_client().post(
+        f"/api/v1/internal/operations/{operation['id']}/componentes/pagamentos_portal/executar?use_cache=false",
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "operation_id": operation["id"],
+        "component": "pagamentos_portal",
+        "status": "accepted",
+    }
+    assert calls == [(operation["id"], False)]
+
+
 def test_executar_componente_retorna_failed_de_fonte_sem_erro_500(monkeypatch):
     db, _calls, operation = _setup_component_execution(monkeypatch)
     from app.workers.tasks import contratos_pncp

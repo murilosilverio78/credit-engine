@@ -56,6 +56,46 @@ def test_contract_observations_require_value_and_choose_oldest_matching_order():
     ]
 
 
+def test_cancelled_order_is_removed_and_reissued_order_matches_black_rock_invoice_29():
+    invoice = _invoice("29", value="59.058,41")
+    orders = [
+        {"documento": "2026OB000123", "data": "15/09/2026", "valor": "58.644,69", "observacao": "CT 17/2026 NF 29"},
+        {"documento": "2026OB000124", "data": "16/09/2026", "valor": "0,00", "observacao": "CANCELAMENTO DA 2026OB000123"},
+        {"documento": "2026OB000125", "data": "17/09/2026", "valor": "59.058,41", "observacao": "CT 17/2026 NF 29"},
+    ]
+
+    matches = reconcile_payments([invoice], orders, "00017/2026")
+
+    assert [(invoice["numero"], order["documento"]) for invoice, order in matches] == [("29", "2026OB000125")]
+
+
+def test_orders_for_another_contract_are_not_candidates_even_in_same_uasg():
+    invoice = _invoice("29", value="59.058,41")
+    orders = [
+        {"documento": "OB-other", "data": "15/09/2026", "valor": "59.058,41", "observacao": "CT 2026/017 NF 29"},
+        {"documento": "OB-own", "data": "16/09/2026", "valor": "59.000,00", "observacao": "CONTRATO Nº 00016/2026"},
+    ]
+
+    matches = reconcile_payments([invoice], orders, "00016/2026")
+
+    assert [order["documento"] for _, order in matches] == ["OB-own"]
+
+
+def test_retained_value_matches_only_without_other_contract_and_keeps_invoice_priority():
+    invoices = [_invoice("29", value="100,00"), _invoice("30", "2026-09-13", "200,00")]
+    orders = [
+        {"documento": "OB-30", "data": "16/09/2026", "valor": "140,00", "observacao": "CT 17/2026 NF 30"},
+        {"documento": "OB-29", "data": "15/09/2026", "valor": "70,00", "observacao": "sem contrato"},
+        {"documento": "OB-other", "data": "14/09/2026", "valor": "100,00", "observacao": "CT 18/2026 NF 29"},
+    ]
+
+    matches = reconcile_payments(invoices, orders, "00017/2026")
+
+    assert [(invoice["numero"], order["documento"]) for invoice, order in matches] == [
+        ("29", "OB-29"), ("30", "OB-30"),
+    ]
+
+
 def test_funai_payment_findings_are_informative_and_use_liquid_value():
     snapshots = {
         "contratos_comprasnet": {
@@ -77,7 +117,33 @@ def test_funai_payment_findings_are_informative_and_use_liquid_value():
     assert findings["ciclo_caixa_dias"].valor == 15.0
     assert findings["taxa_conciliacao_pagamentos"].valor == 1.0
     assert findings["pago_portal_vs_comprasnet"].valor["pago_portal_ano"] == 19_457.17
+    assert findings["pago_portal_vs_comprasnet"].valor["ordens_nao_conciliadas"] == {"quantidade": 0, "valor": 0}
     assert findings["faturas_liquidadas_sem_pagamento"].valor["quantidade"] == 0
+
+
+def test_paid_portal_total_uses_only_reconciled_orders_and_reports_the_rest():
+    snapshots = {
+        "contratos_comprasnet": {
+            "status_consulta": "ENCONTRADO",
+            "contrato_comprasnet": {"numero": "00017/2026"},
+            "faturas": [_invoice("29", value="100,00")],
+        },
+        "pagamentos_portal": {
+            "status_consulta": "ENCONTRADO",
+            "ordens_bancarias": [
+                {"documento": "OB-match", "data": "20/09/2026", "valor": "100,00", "observacao": "CT 17/2026 NF 29"},
+                {"documento": "OB-open", "data": "21/09/2026", "valor": "50,00", "observacao": "CT 17/2026"},
+                {"documento": "OB-other", "data": "21/09/2026", "valor": "900,00", "observacao": "CT 18/2026"},
+            ],
+        },
+    }
+    findings = {item.codigo: item for item in emit_fluxo_caixa(
+        snapshots, fingerprint="f", operation={"data_referencia": "19/10/2026"},
+    )}
+
+    value = findings["pago_portal_vs_comprasnet"].valor
+    assert value["pago_portal_ano"] == 100.0
+    assert value["ordens_nao_conciliadas"] == {"quantidade": 1, "valor": 50.0}
 
 
 def test_payment_findings_are_unverified_when_not_applicable():
@@ -110,7 +176,7 @@ def test_portal_falls_back_without_uasg_and_filters_contract_observation(monkeyp
     monkeypatch.setattr(pagamentos_portal, "_context", lambda _op: ({"cnpj": "02955426000124"}, comprasnet, {}))
     monkeypatch.setattr(pagamentos_portal.httpx, "Client", lambda **_kwargs: _Client())
 
-    def pages(_client, _cnpj, year, uasg):
+    def pages(_client, _cnpj, year, uasg, **_kwargs):
         calls.append((year, uasg))
         if uasg:
             return [], {"registros": 0}
@@ -122,6 +188,24 @@ def test_portal_falls_back_without_uasg_and_filters_contract_observation(monkeyp
     assert result["filtro_usado"] == "OBSERVACAO"
     assert len(result["ordens_bancarias"]) == 2
     assert calls == [(2026, "194004"), (2025, "194004"), (2026, None), (2025, None)]
+
+
+def test_portal_marks_partial_result_instead_of_raising_at_total_timeout(monkeypatch):
+    moments = iter((0.0, 0.0, 121.0))
+    monkeypatch.setattr(pagamentos_portal.time, "monotonic", lambda: next(moments))
+    monkeypatch.setattr(
+        pagamentos_portal,
+        "fetch_json_with_retry",
+        lambda *_args, **_kwargs: [{"documento": "OB-1"}],
+    )
+
+    records, pagination = pagamentos_portal._pages(
+        object(), "02955426000124", 2026, "194004", deadline=120.0,
+    )
+
+    assert records == [{"documento": "OB-1"}]
+    assert pagination["parcial"] is True
+    assert pagination["paginas_lidas"] == 1
 
 
 def test_portal_failure_preserves_previous_snapshot(monkeypatch):

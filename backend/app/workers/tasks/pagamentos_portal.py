@@ -15,7 +15,7 @@ from app.workers.http_utils import fetch_json_with_retry, portal_api_url, portal
 
 
 MAX_PAGES = 300
-MAX_SECONDS = 180
+MAX_SECONDS = 120
 
 
 def _digits(value: Any) -> str:
@@ -49,30 +49,45 @@ def _context(operation_id: str) -> tuple[dict[str, Any], dict[str, Any], dict[st
     return operation, by_component.get("contratos_comprasnet", {}), by_component.get("pagamentos_portal", {})
 
 
-def _pages(client: httpx.Client, cnpj: str, year: int, uasg: str | None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _pages(
+    client: httpx.Client, cnpj: str, year: int, uasg: str | None, *, deadline: float,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    started = time.monotonic()
     page = 1
+    partial = False
     while True:
-        if time.monotonic() - started > MAX_SECONDS:
-            raise TimeoutError(f"pagamentos_portal excedeu {MAX_SECONDS}s na pagina {page}")
+        if time.monotonic() >= deadline:
+            partial = True
+            break
         if page > MAX_PAGES:
             break
         query = f"?codigoPessoa={cnpj}&fase=3&ano={year}&pagina={page}"
         if uasg:
             query += f"&unidadeGestora={uasg}"
-        payload = fetch_json_with_retry(
-            client,
-            portal_api_url("/despesas/documentos-por-favorecido") + query,
-            headers=portal_headers(),
-        )
+        try:
+            payload = fetch_json_with_retry(
+                client,
+                portal_api_url("/despesas/documentos-por-favorecido") + query,
+                headers=portal_headers(),
+                total_timeout_seconds=deadline - time.monotonic(),
+            )
+        except httpx.TimeoutException:
+            if time.monotonic() >= deadline:
+                partial = True
+                break
+            raise
         if not payload:
             break
         if not isinstance(payload, list):
             raise ValueError("Resposta inesperada do Portal da Transparência")
         records.extend(item for item in payload if isinstance(item, dict))
         page += 1
-    return records, {"paginas_lidas": page - 1, "registros": len(records), "atingiu_cap": page > MAX_PAGES}
+    return records, {
+        "paginas_lidas": page - 1,
+        "registros": len(records),
+        "atingiu_cap": page > MAX_PAGES,
+        "parcial": partial,
+    }
 
 
 def _order(payload: dict[str, Any]) -> dict[str, Any]:
@@ -112,19 +127,33 @@ def _fetch(cnpj: str, *, operation_id: str | None = None, today: date | None = N
     try:
         from app.core.config import settings
         with httpx.Client(timeout=20, verify=settings.HTTPX_VERIFY_SSL) as client:
-            batches = [_pages(client, cnpj or operation.get("cnpj") or "", year, uasg) for year in years]
+            deadline = time.monotonic() + MAX_SECONDS
+            batches = []
+            for year in years:
+                batch = _pages(client, cnpj or operation.get("cnpj") or "", year, uasg, deadline=deadline)
+                batches.append(batch)
+                if batch[1].get("parcial"):
+                    break
             records = [item for batch, _ in batches for item in batch]
             pagination = {str(year): page for year, (_, page) in zip(years, batches)}
+            partial = any(page.get("parcial") for _, page in batches)
             filter_used = "UASG"
-            if not records:
-                batches = [_pages(client, cnpj or operation.get("cnpj") or "", year, None) for year in years]
+            if not records and not partial:
+                batches = []
+                for year in years:
+                    batch = _pages(client, cnpj or operation.get("cnpj") or "", year, None, deadline=deadline)
+                    batches.append(batch)
+                    if batch[1].get("parcial"):
+                        break
                 records = [item for batch, _ in batches for item in batch]
                 records = [
                     item for item in records
                     if number in number_tokens(item.get("observacao") or item.get("observacaoDocumento"))
                 ]
                 pagination = {str(year): page for year, (_, page) in zip(years, batches)}
+                partial = any(page.get("parcial") for _, page in batches)
                 filter_used = "OBSERVACAO"
+        pagination["parcial"] = partial
         return {"status_consulta": "ENCONTRADO", "status_atualizacao": "ATUALIZADO", "ordens_bancarias": [_order(item) for item in records], "filtro_usado": filter_used, "anos": years, "paginacao": pagination}
     except Exception as exc:
         if previous.get("ordens_bancarias"):

@@ -670,6 +670,7 @@ def _component_result_summary(component: str, parsed_result: dict) -> dict:
 async def executar_componente(
     operation_id: UUID,
     component: str,
+    background_tasks: BackgroundTasks,
     use_cache: bool = Query(default=True),
     reavaliar_funil: bool = Query(default=False),
     _: None = Depends(verify_internal_token),
@@ -725,6 +726,18 @@ async def executar_componente(
         "web_research": run_web_research,
         "documentos_financeiros": run_documentos_financeiros,
     }
+    if component == "pagamentos_portal":
+        background_tasks.add_task(
+            runners[component], operation_id_text, use_cache=use_cache,
+        )
+        return JSONResponse(
+            status_code=202,
+            content={
+                "operation_id": operation_id_text,
+                "component": component,
+                "status": "accepted",
+            },
+        )
     execution_error: Exception | None = None
     try:
         await asyncio.to_thread(

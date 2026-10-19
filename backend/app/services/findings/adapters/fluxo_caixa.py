@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import statistics
 from datetime import date
 from typing import Any
@@ -95,6 +96,63 @@ def _reference_tokens(value: Any) -> set[str]:
     return number_tokens(value)
 
 
+_CANCELS_ORDER = re.compile(r"\bCANCELAMENTO\s+DA\s+([A-Z0-9]+)\b", re.IGNORECASE)
+_CITED_CONTRACT = re.compile(
+    r"\b(?:CT|CONTRATO)\s*(?:N[º°O.]?\s*)?"
+    r"(?:(\d{4})\s*/\s*(\d+)|(\d+)\s*/\s*(\d{4}))\b",
+    re.IGNORECASE,
+)
+
+
+def _document_key(value: Any) -> str:
+    return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+
+
+def _cited_contracts(observation: Any) -> set[str]:
+    """Return contract references explicitly introduced by CT or CONTRATO."""
+    cited: set[str] = set()
+    for match in _CITED_CONTRACT.finditer(str(observation or "")):
+        if match.group(1):  # YYYY/NNN
+            year, number = match.group(1), match.group(2)
+        else:  # NNN/YYYY
+            number, year = match.group(3), match.group(4)
+        cited.add((f"{number}{year}").lstrip("0") or "0")
+    return cited
+
+
+def _active_payment_orders(orders: list[dict[str, Any]], contract_number: Any) -> list[dict[str, Any]]:
+    """Exclude reversals and payment orders explicitly assigned to another contract."""
+    cancelled_documents = {
+        _document_key(match.group(1))
+        for order in orders
+        for match in _CANCELS_ORDER.finditer(str(order.get("observacao") or ""))
+    }
+    contract_refs = _reference_tokens(contract_number)
+    active: list[dict[str, Any]] = []
+    for order in orders:
+        value = _number(order.get("valor"))
+        cited = _cited_contracts(order.get("observacao"))
+        if value is None or value <= 0:
+            continue
+        if _document_key(order.get("documento")) in cancelled_documents:
+            continue
+        if _CANCELS_ORDER.search(str(order.get("observacao") or "")):
+            continue
+        if cited and any(reference not in contract_refs for reference in cited):
+            continue
+        active.append(order)
+    return active
+
+
+def _within_liquid_value(order: dict[str, Any], liquid_value: float | None) -> bool:
+    value = _number(order.get("valor"))
+    return (
+        liquid_value is not None
+        and value is not None
+        and liquid_value * 0.70 <= value <= liquid_value * 1.005
+    )
+
+
 def reconcile_payments(
     invoices: list[dict[str, Any]], orders: list[dict[str, Any]], contract_number: Any,
 ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
@@ -104,6 +162,7 @@ def reconcile_payments(
         if not _cancelled(invoice) and _date(invoice.get("data_liquidacao"))
     ]
     settled.sort(key=lambda invoice: _date(invoice.get("data_liquidacao")) or date.max)
+    eligible_orders = _active_payment_orders(orders, contract_number)
     used: set[int] = set()
     matched: list[tuple[dict[str, Any], dict[str, Any]]] = []
     contract_refs = _reference_tokens(contract_number)
@@ -114,18 +173,19 @@ def reconcile_payments(
         )
         value = _number(invoice.get("valorliquido"))
         candidates = sorted([
-            (index, order) for index, order in enumerate(orders)
+            (index, order) for index, order in enumerate(eligible_orders)
             if index not in used and _date(order.get("data")) and _date(order.get("data")) >= liquidated
         ], key=lambda item: _date(item[1].get("data")) or date.max)
         by_invoice = [item for item in candidates if invoice_refs & _reference_tokens(item[1].get("observacao"))]
         by_contract_and_value = [
             item for item in candidates
-            if contract_refs & _reference_tokens(item[1].get("observacao"))
-            and value is not None and abs((_number(item[1].get("valor")) or 0.0) - value) <= 1.0
+            if contract_refs & _cited_contracts(item[1].get("observacao"))
+            and _within_liquid_value(item[1], value)
         ]
         by_value = [
             item for item in candidates
-            if value is not None and abs((_number(item[1].get("valor")) or 0.0) - value) <= 1.0
+            if _within_liquid_value(item[1], value)
+            and not _cited_contracts(item[1].get("observacao"))
         ]
         chosen = next(iter(by_invoice or by_contract_and_value or by_value), None)
         if chosen:
@@ -152,7 +212,8 @@ def _payment_findings(
     settled = [item for item in invoices if _date(item.get("data_liquidacao"))]
     orders = [item for item in payments.get("ordens_bancarias") or [] if isinstance(item, dict)]
     contract = comprasnet.get("contrato_comprasnet") or {}
-    matched = reconcile_payments(settled, orders, contract.get("numero"))
+    eligible_orders = _active_payment_orders(orders, contract.get("numero"))
+    matched = reconcile_payments(settled, eligible_orders, contract.get("numero"))
     payment_days = [
         ((_date(order.get("data")) - _date(invoice.get("data_liquidacao"))).days)
         for invoice, order in matched
@@ -167,10 +228,16 @@ def _payment_findings(
         invoice for invoice in settled
         if id(invoice) not in matched_ids and (reference - _date(invoice.get("data_liquidacao"))).days > 30
     ]
-    portal_year = sum(
-        _number(order.get("valor")) or 0.0 for order in orders
-        if (_date(order.get("data")) or date.min).year == reference.year
-    )
+    matched_order_ids = {id(order) for _, order in matched}
+    matched_orders_year = [
+        order for order in eligible_orders
+        if id(order) in matched_order_ids and (_date(order.get("data")) or date.min).year == reference.year
+    ]
+    unmatched_orders_year = [
+        order for order in eligible_orders
+        if id(order) not in matched_order_ids and (_date(order.get("data")) or date.min).year == reference.year
+    ]
+    portal_year = sum(_number(order.get("valor")) or 0.0 for order in matched_orders_year)
     comprasnet_year = sum(
         _number(invoice.get("valorliquido")) or 0.0 for invoice in settled
         if (_date(invoice.get("data_liquidacao")) or date.min).year == reference.year
@@ -189,6 +256,10 @@ def _payment_findings(
         finding("pago_portal_vs_comprasnet", Escopo.OPERACAO, {
             "pago_portal_ano": round(portal_year, 2), "liquidado_comprasnet_ano": round(comprasnet_year, 2),
             "razao": round(portal_year / comprasnet_year, 6) if comprasnet_year else None,
+            "ordens_nao_conciliadas": {
+                "quantidade": len(unmatched_orders_year),
+                "valor": round(sum(_number(order.get("valor")) or 0.0 for order in unmatched_orders_year), 2),
+            },
         }, **base),
     ]
     return output

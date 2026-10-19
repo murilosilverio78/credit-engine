@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 18 corrige os tokens e prioridades da conciliação de pagamentos.
+Version 19 filtra cancelamentos, contratos concorrentes e retenções na conciliação de pagamentos.
 """
 
-EMITTER_VERSION = "18"
+EMITTER_VERSION = "19"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {
