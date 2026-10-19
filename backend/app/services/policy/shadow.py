@@ -13,6 +13,8 @@ from app.services.policy.engine import avaliar
 from app.services.policy.inputs import montar_entrada
 from app.services.policy.loader import load_policy
 
+# Bump whenever shadow comparison or classification semantics change.
+SHADOW_LOGIC_VERSION = "2"
 _FIELDS = (
     "merit",
     "merit_potencial",
@@ -364,6 +366,7 @@ def _hash(
             "contexto": context,
             "policy_version_id": policy_id,
             "policy_content_hash": policy_content_hash,
+            "shadow_logic_version": SHADOW_LOGIC_VERSION,
             "data_referencia": ref.isoformat(),
         },
         sort_keys=True,
@@ -541,7 +544,10 @@ def avaliar_sombra(
         ),
         "data_referencia": ref.isoformat(),
         "runs_usados": entrada.runs_usados,
-        "resultado": result.as_dict(),
+        "resultado": {
+            **result.as_dict(),
+            "shadow_logic_version": SHADOW_LOGIC_VERSION,
+        },
         "oficial": official or {},
         "divergencias": divergencias,
         "classe_geral": classe,

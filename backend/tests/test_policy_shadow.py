@@ -100,6 +100,33 @@ def test_shadow_hash_includes_canonical_policy_content(monkeypatch):
     assert len(db.inserted) == 2
 
 
+def test_shadow_hash_includes_logic_version(monkeypatch):
+    policy = {"version": {"id": "policy"}, "parametros": {}, "regras": []}
+    monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: policy)
+    monkeypatch.setattr(
+        shadow,
+        "montar_entrada",
+        lambda *_args, **_kwargs: EntradaPolitica({}, {}, {}, {"cadastro_regularidade"}),
+    )
+    monkeypatch.setattr(shadow, "_official", lambda *_args: ({}, date(2026, 1, 1)))
+    monkeypatch.setattr(shadow, "_set_pct_max_contrato", lambda *_args: None)
+    monkeypatch.setattr(
+        shadow,
+        "avaliar",
+        lambda *_args: _shadow_result({field: None for field in shadow._FIELDS}),
+    )
+    db = _Db()
+
+    first = shadow.avaliar_sombra("op", database=db, aplicar=True)
+    monkeypatch.setattr(shadow, "SHADOW_LOGIC_VERSION", "3")
+    changed_logic = shadow.avaliar_sombra("op", database=db, aplicar=True)
+
+    assert first["entrada_hash"] != changed_logic["entrada_hash"]
+    assert first["resultado"]["shadow_logic_version"] == "2"
+    assert changed_logic["resultado"]["shadow_logic_version"] == "3"
+    assert len(db.inserted) == 2
+
+
 def test_shadow_does_not_require_documentos_run_for_score_parity(monkeypatch):
     monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": {}, "regras": []})
     runs = {name: {"run_id": name, "status": "COMPLETO"} for name in (
