@@ -14,6 +14,8 @@ from app.utils.encoding import fix_dict_encoding
 import structlog
 
 logger = structlog.get_logger()
+LLM_CONTEXT_SOFT_TOKENS = 150_000
+LLM_CONTEXT_HARD_TOKENS = 180_000
 
 SYSTEM_PROMPT = """Você é um analista de risco de crédito especializado em fornecedores do governo brasileiro.
 Sua tarefa é pesquisar a reputação de uma empresa PJ e retornar um relatório estruturado em JSON.
@@ -211,6 +213,51 @@ def _mark_degraded_without_company_name(result: dict, razao_social: str) -> dict
     return degraded
 
 
+def _compact_socios_for_prompt(socios) -> list:
+    """Keep the web-research prompt bounded when registry data has many partners."""
+    records = socios if isinstance(socios, list) else []
+
+    def bounded(value, text_limit: int):
+        if isinstance(value, dict):
+            return {
+                str(key): bounded(item, text_limit)
+                for key, item in list(value.items())[:10]
+            }
+        if isinstance(value, list):
+            return [bounded(item, text_limit) for item in value[:5]]
+        if isinstance(value, str) and len(value) > text_limit:
+            return f"{value[:text_limit - 1]}…"
+        return value
+
+    def project(limit: int, text_limit: int) -> list:
+        compact = []
+        for socio in records[:limit]:
+            if isinstance(socio, dict):
+                compact.append({
+                    str(key): bounded(value, text_limit)
+                    for key, value in list(socio.items())[:20]
+                })
+            else:
+                compact.append(bounded(socio, text_limit))
+        return compact
+
+    compact = project(20, 500)
+    estimated = len(json.dumps(compact, ensure_ascii=False, separators=(",", ":"), default=str)) / 3.5
+    if estimated > LLM_CONTEXT_SOFT_TOKENS:
+        logger.warning(
+            "web_research.context_reduced",
+            estimated_tokens=round(estimated),
+            socios=len(records),
+        )
+        compact = project(5, 200)
+    # The last cap is structural, so this LLM call cannot exceed the context
+    # bound through an unbounded QSA list or its free-text fields.
+    if len(json.dumps(compact, ensure_ascii=False, separators=(",", ":"), default=str)) / 3.5 > LLM_CONTEXT_HARD_TOKENS:
+        logger.warning("web_research.context_hard_cap", socios=len(records))
+        compact = project(2, 50)
+    return compact
+
+
 def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
     from app.core.config import settings
     from app.core.database import supabase
@@ -242,6 +289,7 @@ def _fetch(cnpj: str, token: str = None, operation_id: str = None) -> dict:
     capital_fmt = _format_brl(capital_social)
     idade_anos = _company_age_years(data_abertura)
     idade_fmt = f"{idade_anos} anos" if idade_anos is not None else "não informado"
+    socios_context = _compact_socios_for_prompt(socios)
 
     prompt = f"""Pesquise a reputação desta empresa no mercado brasileiro.
 
@@ -249,7 +297,7 @@ IDENTIFICAÇÃO DA EMPRESA:
 - Razão Social: {razao_social}
 - CNPJ: {_format_cnpj(cnpj)}
 - CNAE principal: {cnae}
-- Sócios: {json.dumps(socios, ensure_ascii=False)}
+- Sócios: {json.dumps(socios_context, ensure_ascii=False, separators=(',', ':'))}
 
 DADOS CADASTRAIS OFICIAIS (fonte de verdade — use SOMENTE estes para qualquer
 número cadastral; NÃO pesquise nem infira esses fatos):

@@ -503,6 +503,32 @@ def _payment_findings(
         for index in range(1, len(payment_dates))
     ]
     base = dict(component="pagamentos_portal", path="ordens_bancarias", fingerprint=fingerprint)
+    anticipation_value = {
+        "quantidade": len(anticipation_orders),
+        "valor": round(sum(_number(order.get("valor")) or 0.0 for order in anticipation_orders), 2),
+        "ugs": sorted({_document_ug(order) or _digits(order.get("codigoUg")) for order in anticipation_orders} - {""}),
+        "numeros_operacao": operation_numbers,
+        "bancos": banks,
+        "ultima_data": max(anticipation_dates).isoformat() if anticipation_dates else None,
+        "ativa_mesmo_contrato": active_same_contract,
+        "encerrada_mesmo_contrato": closed_same_contract and not active_same_contract,
+        "ativa_outro_contrato": active_other_contract,
+        "operacoes": anticipation_operations,
+    }
+    pagination = payments.get("paginacao")
+    if isinstance(pagination, dict) and pagination.get("parcial") is True:
+        # A partial listing cannot prove an absence (or a ratio) of payments.
+        # A positive active anticipation on this contract is an exception: the
+        # received payment order itself is sufficient evidence for the alert.
+        output = [
+            _unverified(code, "ordens_bancarias", fingerprint, "leitura parcial do Portal", "pagamentos_portal")
+            for code in codes
+        ]
+        if active_same_contract:
+            output[codes.index("antecipacao_concorrente")] = finding(
+                "antecipacao_concorrente", Escopo.OPERACAO, anticipation_value, **base
+            )
+        return output
     output = [
         finding("prazo_pagamento_dias", Escopo.OPERACAO, round(float(statistics.median(payment_days)), 2), **base)
         if payment_days else _unverified("prazo_pagamento_dias", "ordens_bancarias", fingerprint, "nenhuma fatura conciliada", "pagamentos_portal"),
@@ -526,18 +552,7 @@ def _payment_findings(
                 "pct_sobre_pago": round(deposit_value / (portal_year + deposit_value), 6) if portal_year + deposit_value else None,
             },
         }, **base),
-        finding("antecipacao_concorrente", Escopo.OPERACAO, {
-            "quantidade": len(anticipation_orders),
-            "valor": round(sum(_number(order.get("valor")) or 0.0 for order in anticipation_orders), 2),
-            "ugs": sorted({_document_ug(order) or _digits(order.get("codigoUg")) for order in anticipation_orders} - {""}),
-            "numeros_operacao": operation_numbers,
-            "bancos": banks,
-            "ultima_data": max(anticipation_dates).isoformat() if anticipation_dates else None,
-            "ativa_mesmo_contrato": active_same_contract,
-            "encerrada_mesmo_contrato": closed_same_contract and not active_same_contract,
-            "ativa_outro_contrato": active_other_contract,
-            "operacoes": anticipation_operations,
-        }, **base),
+        finding("antecipacao_concorrente", Escopo.OPERACAO, anticipation_value, **base),
         finding("pagamentos_contrato_12m", Escopo.OPERACAO, {
             "valor": round(sum(_number(order.get("valor")) or 0.0 for order in payments_12m), 2),
             "quantidade": len(payments_12m),

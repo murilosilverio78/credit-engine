@@ -494,6 +494,44 @@ def test_phase2_finalize_failure_does_not_interrupt_pipeline(monkeypatch):
     assert after_phase2_calls == ["op-1"]
 
 
+def test_pagamentos_portal_starts_only_after_recursos_recebidos(monkeypatch):
+    calls = []
+    recursos_finished = False
+
+    async def fake_component(component, *_args, **_kwargs):
+        nonlocal recursos_finished
+        calls.append(f"inicio:{component}")
+        if component == "recursos_recebidos":
+            await asyncio.sleep(0)
+            recursos_finished = True
+            calls.append("fim:recursos_recebidos")
+        if component == "pagamentos_portal":
+            assert recursos_finished is True
+        return {"component": component, "status": "completed"}
+
+    async def fake_after_phase2(*_args, **_kwargs):
+        return {"status": "completed"}
+
+    monkeypatch.setattr(orchestrator, "_execute_db", lambda *_args, **_kwargs: SimpleNamespace(data=[]))
+    monkeypatch.setattr(orchestrator, "_reusable_components_for_run", lambda *_args, **_kwargs: set())
+    monkeypatch.setattr(orchestrator, "_run_or_reuse_component", fake_component)
+    monkeypatch.setattr(orchestrator, "refresh_degraded_registry_flag", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(orchestrator, "_update_operation_razao_social", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(orchestrator, "_update_heartbeat", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(orchestrator, "_finalize_phase2_snapshots", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(orchestrator, "_incomplete_components", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(orchestrator, "_after_phase2", fake_after_phase2)
+    monkeypatch.setattr(
+        "app.workers.tasks.contratos_comprasnet.apply_contract_source_precedence",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = asyncio.run(orchestrator._run_analysis("op-1"))
+
+    assert result == {"operation_id": "op-1", "status": "pipeline_started"}
+    assert calls.index("fim:recursos_recebidos") < calls.index("inicio:pagamentos_portal")
+
+
 def test_score_preconditions_retry_transient_disconnect(monkeypatch):
     snapshots = [
         {"component": component, "status": "completed", "started_at": None}

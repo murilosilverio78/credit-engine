@@ -106,6 +106,8 @@ PHASE2_COMPONENTS = (
 RUNNING_STALE_MINUTES = 15
 DEFAULT_PD_MIN_COMPLETE_YEARS = 2
 DEFAULT_HHI_MIN_RECEIPT_MONTHS = 6
+LLM_CONTEXT_SOFT_TOKENS = 150_000
+LLM_CONTEXT_HARD_TOKENS = 180_000
 
 COMPONENT_DIMENSION_MAP = {
     "brasil_api": "saude_cadastral",
@@ -1252,6 +1254,166 @@ def _run_async(coro):
         return executor.submit(lambda: asyncio.run(coro)).result()
 
 
+def _context_number(value: Any) -> float:
+    """Returns a sortable finite amount for an LLM-context projection."""
+    parsed = _as_float(value)
+    return parsed if parsed is not None else 0.0
+
+
+def _context_text(value: Any, limit: int = 200) -> str | None:
+    if value in (None, ""):
+        return None
+    text = str(value)
+    return text if len(text) <= limit else f"{text[:limit - 1]}…"
+
+
+def _compact_receipts_for_porte(receipts: dict[str, Any], top_limit: int) -> dict[str, Any]:
+    details = receipts.get("recursos_detalhe")
+    totals_by_org: dict[tuple[str, str], float] = {}
+    if isinstance(details, list):
+        for item in details:
+            if not isinstance(item, dict):
+                continue
+            orgao = str(item.get("orgao") or item.get("orgao_superior") or "Órgão não informado")
+            codigo = str(item.get("codigo_orgao") or "")
+            key = (orgao, codigo)
+            totals_by_org[key] = totals_by_org.get(key, 0.0) + _context_number(item.get("valor"))
+    top_organs = [
+        {"orgao": orgao, "codigo": codigo or None, "valor": round(valor, 2)}
+        for (orgao, codigo), valor in sorted(
+            totals_by_org.items(), key=lambda item: (-item[1], item[0][0], item[0][1])
+        )[:top_limit]
+    ]
+    return {
+        "serie_anual": receipts.get("serie_anual"),
+        "valor_por_ano": receipts.get("valor_por_ano"),
+        "faturamento_verificado_12m": receipts.get("faturamento_verificado_12m"),
+        "valor_total_recebido": receipts.get("valor_total_recebido"),
+        "concentracao": receipts.get("concentracao"),
+        "volatilidade": receipts.get("volatilidade"),
+        "total_registros": receipts.get("total_registros"),
+        "meses_com_recebimento": receipts.get("meses_com_recebimento"),
+        "periodo": {
+            "inicio": receipts.get("periodo_inicio") or receipts.get("primeira_competencia"),
+            "fim": receipts.get("periodo_fim") or receipts.get("ultima_competencia"),
+        },
+        "reconciliacao": receipts.get("reconciliacao"),
+        "top_orgaos_por_valor": top_organs,
+    }
+
+
+def _compact_contracts_for_porte(contracts: dict[str, Any], top_limit: int) -> dict[str, Any]:
+    details = contracts.get("contratos_detalhe") or contracts.get("contratos") or []
+    records = [item for item in details if isinstance(item, dict)] if isinstance(details, list) else []
+
+    def amount(item: dict[str, Any]) -> float:
+        return max(
+            _context_number(item.get(field))
+            for field in ("valor", "valor_inicial", "valor_final", "valor_global")
+        )
+
+    top_contracts = [
+        {
+            "orgao": item.get("orgao") or item.get("orgao_nome") or item.get("contratante"),
+            "numero": item.get("numero") or item.get("numero_contrato"),
+            "objeto": _context_text(item.get("objeto"), 200),
+            "valor": round(amount(item), 2),
+            "vigencia_inicio": item.get("data_inicio") or item.get("inicio_vigencia"),
+            "vigencia_fim": item.get("data_fim") or item.get("fim_vigencia"),
+            "situacao": item.get("situacao") or item.get("status"),
+        }
+        for item in sorted(records, key=lambda item: (-amount(item), str(item.get("numero") or "")))[:top_limit]
+    ]
+    return {
+        "total_contratos": contracts.get("total_contratos"),
+        "contratos_ativos": contracts.get("contratos_ativos"),
+        "contratos_encerrados": contracts.get("contratos_encerrados"),
+        "valor_total_ativo": contracts.get("valor_total_ativo"),
+        "valor_total_historico": contracts.get("valor_total_historico"),
+        "total_orgaos": len(contracts.get("orgaos_contratantes") or []),
+        "maiores_contratos": top_contracts,
+    }
+
+
+def _bound_llm_context(value: Any, *, list_limit: int, text_limit: int, dict_limit: int) -> Any:
+    """Last-resort structural cap that keeps a valid JSON payload."""
+    if isinstance(value, dict):
+        return {
+            str(key): _bound_llm_context(item, list_limit=list_limit, text_limit=text_limit, dict_limit=dict_limit)
+            for key, item in list(value.items())[:dict_limit]
+        }
+    if isinstance(value, list):
+        return [
+            _bound_llm_context(item, list_limit=list_limit, text_limit=text_limit, dict_limit=dict_limit)
+            for item in value[:list_limit]
+        ]
+    if isinstance(value, str):
+        return _context_text(value, text_limit)
+    return value
+
+
+def _porte_payload(snapshots: dict[str, Any], faturamento: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """Build a bounded, deterministic payload for the sole score-engine LLM call."""
+    receipts = _first_snapshot(snapshots, "recursos_recebidos")
+    contracts = _first_snapshot(snapshots, "contratos")
+
+    def build(organs: int, contracts_top: int) -> dict[str, Any]:
+        return {
+            "brasil_api": snapshots.get("brasil_api"),
+            "pessoa_juridica": snapshots.get("pessoa_juridica"),
+            "contratos": _compact_contracts_for_porte(contracts, contracts_top),
+            "recursos_recebidos": _compact_receipts_for_porte(receipts, organs),
+            "faturamento_para_analise": faturamento,
+        }
+
+    payload = build(10, 15)
+    serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
+    if len(serialized) / 3.5 > LLM_CONTEXT_SOFT_TOKENS:
+        logger.warning(
+            "score_engine.porte_context_reduced",
+            estimated_tokens=round(len(serialized) / 3.5),
+            top_orgaos=5,
+            top_contratos=5,
+        )
+        payload = build(5, 5)
+        serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
+    if len(serialized) / 3.5 > LLM_CONTEXT_HARD_TOKENS:
+        logger.warning(
+            "score_engine.porte_context_hard_cap",
+            estimated_tokens=round(len(serialized) / 3.5),
+        )
+        for list_limit, text_limit, dict_limit in ((20, 500, 100), (10, 200, 50), (5, 100, 25)):
+            payload = _bound_llm_context(
+                payload, list_limit=list_limit, text_limit=text_limit, dict_limit=dict_limit,
+            )
+            serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
+            if len(serialized) / 3.5 <= LLM_CONTEXT_HARD_TOKENS:
+                break
+    if len(serialized) / 3.5 > LLM_CONTEXT_HARD_TOKENS:
+        # This only applies to pathological source payloads (for example a
+        # single oversized registry field).  Keep the deterministic aggregates
+        # and replace the oversized source blocks with bounded summaries.
+        logger.warning(
+            "score_engine.porte_context_minimal_fallback",
+            estimated_tokens=round(len(serialized) / 3.5),
+        )
+        payload = {
+            "brasil_api": _bound_llm_context(
+                snapshots.get("brasil_api"), list_limit=2, text_limit=50, dict_limit=10,
+            ),
+            "pessoa_juridica": _bound_llm_context(
+                snapshots.get("pessoa_juridica"), list_limit=2, text_limit=50, dict_limit=10,
+            ),
+            "contratos": payload.get("contratos"),
+            "recursos_recebidos": payload.get("recursos_recebidos"),
+            "faturamento_para_analise": _bound_llm_context(
+                faturamento, list_limit=2, text_limit=50, dict_limit=10,
+            ),
+        }
+        serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
+    return payload, serialized
+
+
 def score_porte_llm(
     cnpj: str,
     snapshots: dict[str, Any],
@@ -1262,13 +1424,7 @@ def score_porte_llm(
 
     client = client or anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     faturamento = _faturamento_context(snapshots)
-    payload = {
-        "brasil_api": snapshots.get("brasil_api"),
-        "pessoa_juridica": snapshots.get("pessoa_juridica"),
-        "contratos": snapshots.get("contratos"),
-        "recursos_recebidos": snapshots.get("recursos_recebidos"),
-        "faturamento_para_analise": faturamento,
-    }
+    _payload, payload_json = _porte_payload(snapshots, faturamento)
     logger.info(
         "score_engine.calling_opus",
         operation_id=operation_id,
@@ -1288,7 +1444,7 @@ def score_porte_llm(
                             "role": "user",
                             "content": (
                                 f"Avalie Porte e Operacionalidade da empresa CNPJ {cnpj}.\n\n"
-                                f"DADOS ESTRUTURADOS:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
+                                f"DADOS ESTRUTURADOS:\n{payload_json}"
                             ),
                         }
                     ],

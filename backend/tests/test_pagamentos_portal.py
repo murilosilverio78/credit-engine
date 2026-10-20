@@ -1,7 +1,7 @@
 from datetime import date
 
 from app.services.findings.adapters.fluxo_caixa import emit_fluxo_caixa, reconcile_payments
-from app.services.findings.schemas import Estado
+from app.services.findings.schemas import Confianca, Estado
 from app.workers.tasks import pagamentos_portal
 
 
@@ -331,6 +331,61 @@ def test_payment_findings_are_unverified_when_not_applicable():
     assert findings["prazo_pagamento_dias"].pendencia["motivo"] == "pagamentos do Portal não aplicáveis"
 
 
+def test_partial_portal_listing_makes_payment_findings_unverified():
+    snapshots = {
+        "contratos_comprasnet": {
+            "status_consulta": "ENCONTRADO",
+            "contrato_comprasnet": {"numero": "00004/2025", "uasg": "123456"},
+            "faturas": [_invoice("1")],
+        },
+        "pagamentos_portal": {
+            "status_consulta": "ENCONTRADO",
+            "paginacao": {"parcial": True},
+            "ordens_bancarias": [],
+        },
+    }
+
+    findings = {item.codigo: item for item in emit_fluxo_caixa(
+        snapshots, fingerprint="f", operation={"data_referencia": "19/10/2026"},
+    )}
+
+    for code in (
+        "antecipacao_concorrente", "pagamentos_contrato_12m",
+        "faturas_liquidadas_sem_pagamento", "taxa_conciliacao_pagamentos",
+        "prazo_pagamento_dias", "ciclo_caixa_dias", "pago_portal_vs_comprasnet",
+    ):
+        assert findings[code].estado == Estado.NAO_VERIFICADO
+        assert findings[code].confianca == Confianca.BAIXA
+        assert findings[code].pendencia == {"motivo": "leitura parcial do Portal"}
+
+
+def test_partial_portal_listing_keeps_active_same_contract_anticipation_confirmed():
+    snapshots = {
+        "contratos_comprasnet": {
+            "status_consulta": "ENCONTRADO",
+            "contrato_comprasnet": {"numero": "00004/2025", "uasg": "123456"},
+            "faturas": [_invoice("1")],
+        },
+        "pagamentos_portal": {
+            "status_consulta": "ENCONTRADO",
+            "paginacao": {"parcial": True},
+            "ordens_bancarias": [{
+                "documento": "12345600000001", "data": "2026-10-01", "valor": "100,00",
+                "observacao": "ANTECIPAGOV Nº 4903, ATIVA PARA O CONTRATO Nº 00004/2025",
+            }],
+        },
+    }
+
+    findings = {item.codigo: item for item in emit_fluxo_caixa(
+        snapshots, fingerprint="f", operation={"data_referencia": "19/10/2026"},
+    )}
+
+    anticipation = findings["antecipacao_concorrente"]
+    assert anticipation.estado == Estado.CONFIRMADO
+    assert anticipation.valor["ativa_mesmo_contrato"] is True
+    assert findings["pago_portal_vs_comprasnet"].estado == Estado.NAO_VERIFICADO
+
+
 class _Client:
     def __enter__(self):
         return self
@@ -399,6 +454,37 @@ def test_portal_marks_partial_result_instead_of_raising_at_total_timeout(monkeyp
     assert records == [{"documento": "OB-1"}]
     assert pagination["parcial"] is True
     assert pagination["paginas_lidas"] == 1
+
+
+def test_partial_portal_retry_is_scheduled_once_after_five_minutes(monkeypatch):
+    timers = []
+
+    class Timer:
+        def __init__(self, delay, callback, args=()):
+            self.delay = delay
+            self.callback = callback
+            self.args = args
+            self.daemon = False
+            timers.append(self)
+
+        def start(self):
+            return None
+
+    operation_id = "partial-retry-op"
+    with pagamentos_portal._PARTIAL_RETRY_LOCK:
+        pagamentos_portal._PARTIAL_RETRY_OPERATIONS.discard(operation_id)
+    monkeypatch.setattr(pagamentos_portal.threading, "Timer", Timer)
+
+    pagamentos_portal._schedule_partial_retry(operation_id)
+    pagamentos_portal._schedule_partial_retry(operation_id)
+
+    assert len(timers) == 1
+    assert timers[0].delay == 5 * 60
+    assert timers[0].callback is pagamentos_portal._run_partial_retry
+    assert timers[0].args == (operation_id,)
+    assert timers[0].daemon is True
+    with pagamentos_portal._PARTIAL_RETRY_LOCK:
+        pagamentos_portal._PARTIAL_RETRY_OPERATIONS.discard(operation_id)
 
 
 def test_portal_failure_preserves_previous_snapshot(monkeypatch):

@@ -9,6 +9,7 @@ _MISSING_TEXT = {
     "porte": "porte e operacionalidade (sai no relatório completo)",
     "sacado_orgao": "sacado e órgão",
     "cadastro_regularidade": "cadastro e regularidade",
+    "antecipacao_concorrente": "Verificação de antecipação concorrente pendente",
 }
 _FIELD_LABELS = {
     "capital_social": "Capital social",
@@ -288,11 +289,20 @@ def latest_policy_view(operation_id: str, *, database=None, operation: dict[str,
     bloqueios = []
     for code in result.get("bloqueios") or []:
         bloqueios.append({"codigo": code, "finding": _finding_projection(finding_by_code.get(str(code)), labels, docs_by_hash)})
+    faltantes = [str(code) for code in result.get("faltantes") or []]
+    anticipation = finding_by_code.get("antecipacao_concorrente") or {}
+    if (
+        str(anticipation.get("estado") or "").upper() == "NAO_VERIFICADO"
+        and "antecipacao_concorrente" not in faltantes
+    ):
+        # This is a report-only pendency.  It does not change a frozen policy
+        # rule, but makes a partial Portal reading visible to the analyst.
+        faltantes.append("antecipacao_concorrente")
     oficial = _record(shadow.get("oficial"))
     return {
         "status": "OK",
         "politica": {"versao": version.get("versao"), "status": version.get("status"), "data_referencia": shadow.get("data_referencia"), "shadow_logic_version": result.get("shadow_logic_version")},
-        "decisao": {"status_decisao": result.get("status_decisao"), "rating": result.get("rating"), "limite": result.get("limite_aprovado_rs"), "alcada_minima": result.get("alcada_minima", 1), "alcada_motivos": enrich(result.get("alcada_motivos"), kind="alcada"), "faltantes": [{"codigo": str(code), "texto": _MISSING_TEXT.get(str(code), _label(code))} for code in result.get("faltantes") or []], "bloqueios": bloqueios},
+        "decisao": {"status_decisao": result.get("status_decisao"), "rating": result.get("rating"), "limite": result.get("limite_aprovado_rs"), "alcada_minima": result.get("alcada_minima", 1), "alcada_motivos": enrich(result.get("alcada_motivos"), kind="alcada"), "faltantes": [{"codigo": code, "texto": _MISSING_TEXT.get(code, _label(code))} for code in faltantes], "bloqueios": bloqueios},
         "oficial": {"rating": oficial.get("rating", operation.get("rating")), "limite": oficial.get("limite_aprovado_rs", oficial.get("limite", operation.get("limite_aprovado")))},
         "condicoes_precedentes": enrich(result.get("condicoes_precedentes")),
         "ajustes": {"limite_multiplicadores": enrich(result.get("limite_multiplicadores")), "taxa_ajuste_pp": result.get("taxa_ajuste_pp", 0.0)},

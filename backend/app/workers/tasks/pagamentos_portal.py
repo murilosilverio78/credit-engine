@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import time
+import threading
 from datetime import date
 from typing import Any
 
 import httpx
+import structlog
 
 from app.integrations.comprasnet.parsing import number_tokens, parse_data, parse_number
 from app.workers.base import BaseComponentTask
@@ -16,6 +18,11 @@ from app.workers.http_utils import fetch_json_with_retry, portal_api_url, portal
 
 MAX_PAGES = 300
 MAX_SECONDS = 120
+PARTIAL_RETRY_DELAY_SECONDS = 5 * 60
+
+logger = structlog.get_logger()
+_PARTIAL_RETRY_LOCK = threading.Lock()
+_PARTIAL_RETRY_OPERATIONS: set[str] = set()
 
 
 def _digits(value: Any) -> str:
@@ -114,7 +121,10 @@ def _maintain(previous: dict[str, Any], error: Exception) -> dict[str, Any]:
     }
 
 
-def _fetch(cnpj: str, *, operation_id: str | None = None, today: date | None = None) -> dict[str, Any]:
+def _fetch(
+    cnpj: str, *, operation_id: str | None = None, today: date | None = None,
+    retry_attempt: bool = False,
+) -> dict[str, Any]:
     if not operation_id:
         raise ValueError("operation_id_ausente")
     today = today or date.today()
@@ -156,7 +166,10 @@ def _fetch(cnpj: str, *, operation_id: str | None = None, today: date | None = N
                 partial = any(page.get("parcial") for _, page in batches)
                 filter_used = "OBSERVACAO"
         pagination["parcial"] = partial
-        return {"status_consulta": "ENCONTRADO", "status_atualizacao": "ATUALIZADO", "ordens_bancarias": [_order(item) for item in records], "filtro_usado": filter_used, "anos": years, "paginacao": pagination}
+        result = {"status_consulta": "ENCONTRADO", "status_atualizacao": "ATUALIZADO", "ordens_bancarias": [_order(item) for item in records], "filtro_usado": filter_used, "anos": years, "paginacao": pagination}
+        if partial and not retry_attempt:
+            _schedule_partial_retry(operation_id)
+        return result
     except Exception as exc:
         if previous.get("ordens_bancarias"):
             return _maintain(previous, exc)
@@ -164,6 +177,46 @@ def _fetch(cnpj: str, *, operation_id: str | None = None, today: date | None = N
 
 
 _task = BaseComponentTask()
+
+
+def _run_partial_retry(operation_id: str) -> None:
+    try:
+        _ensure_snapshot(operation_id)
+        _task.execute(
+            operation_id,
+            component="pagamentos_portal",
+            handler=lambda cnpj, operation_id=None: _fetch(
+                cnpj, operation_id=operation_id, retry_attempt=True,
+            ),
+            use_cache=False,
+        )
+    except Exception as exc:
+        logger.warning(
+            "pagamentos_portal.partial_retry_failed",
+            operation_id=operation_id,
+            error=str(exc),
+        )
+    finally:
+        with _PARTIAL_RETRY_LOCK:
+            _PARTIAL_RETRY_OPERATIONS.discard(operation_id)
+
+
+def _schedule_partial_retry(operation_id: str) -> None:
+    """Schedule exactly one non-blocking retry for a partial Portal listing."""
+    if not operation_id:
+        return
+    with _PARTIAL_RETRY_LOCK:
+        if operation_id in _PARTIAL_RETRY_OPERATIONS:
+            return
+        _PARTIAL_RETRY_OPERATIONS.add(operation_id)
+    timer = threading.Timer(PARTIAL_RETRY_DELAY_SECONDS, _run_partial_retry, args=(operation_id,))
+    timer.daemon = True
+    timer.start()
+    logger.warning(
+        "pagamentos_portal.partial_retry_scheduled",
+        operation_id=operation_id,
+        delay_seconds=PARTIAL_RETRY_DELAY_SECONDS,
+    )
 
 
 def _ensure_snapshot(operation_id: str) -> None:

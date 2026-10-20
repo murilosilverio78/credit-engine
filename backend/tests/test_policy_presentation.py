@@ -90,6 +90,23 @@ def test_policy_view_exposes_fluxo_caixa_as_informative_without_policy_rule():
     assert view["informativos"][0]["texto"] == "Empenho insuficiente: R$ 51.520,26 descobertos em 2 meses"
 
 
+def test_policy_view_exposes_unverified_competing_anticipation_as_missing():
+    db = _database({"status_decisao": "DECISAO_CALCULADA"})
+    db.tables["finding_runs"] = [{"id": "cash-run", "operation_id": "op-1", "especialista": "fluxo_caixa", "created_at": "2026-10-19"}]
+    db.tables["findings"].append({
+        "operation_id": "op-1", "run_id": "cash-run", "codigo": "antecipacao_concorrente",
+        "estado": "NAO_VERIFICADO", "confianca": "BAIXA", "valor": None, "evidencia": [],
+    })
+    db.tables["finding_catalog"].append({"codigo": "antecipacao_concorrente", "descricao": "Antecipação concorrente"})
+
+    view = latest_policy_view("op-1", database=db)
+
+    assert view["decisao"]["faltantes"] == [{
+        "codigo": "antecipacao_concorrente",
+        "texto": "Verificação de antecipação concorrente pendente",
+    }]
+
+
 @pytest.mark.parametrize("decision", [
     {"status_decisao": "DADOS_INSUFICIENTES", "faltantes": ["porte"]},
     {"status_decisao": "VETO", "bloqueios": ["capital_social_alterado_recente"]},

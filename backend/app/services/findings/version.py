@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 26 registra fontes padrão de fator líquido e parcela para cobertura do contrato.
+Version 27 registra a degradação de achados de pagamentos quando o Portal foi lido parcialmente.
 """
 
-EMITTER_VERSION = "26"
+EMITTER_VERSION = "27"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

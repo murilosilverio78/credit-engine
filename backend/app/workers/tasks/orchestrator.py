@@ -667,15 +667,15 @@ async def _run_analysis(
                 )
             )
         )
+    recursos_task = asyncio.create_task(
+        _run_or_reuse_component(
+            "recursos_recebidos",
+            run_recursos_recebidos,
+            operation_id,
+            reusable_components,
+        )
+    )
     parallel_tasks.extend([
-        asyncio.create_task(
-            _run_or_reuse_component(
-                "recursos_recebidos",
-                run_recursos_recebidos,
-                operation_id,
-                reusable_components,
-            )
-        ),
         asyncio.create_task(
             _run_or_reuse_component(
                 "acordos_leniencia",
@@ -705,6 +705,9 @@ async def _run_analysis(
         operation_id,
         reusable_components,
     )
+    # Both components consume the Portal da Transparência quota.  Do not
+    # overlap their pagination; payments only starts after receipts completes.
+    recursos_result = await recursos_task
     pagamentos_result = await _run_or_reuse_component(
         "pagamentos_portal",
         run_pagamentos_portal,
@@ -713,7 +716,10 @@ async def _run_analysis(
     )
     parallel_results = await asyncio.gather(*parallel_tasks)
     if partial_until_phase2:
-        phase2_results = (contracts_result, pncp_result, comprasnet_result, pagamentos_result, *parallel_results)
+        phase2_results = (
+            contracts_result, pncp_result, comprasnet_result, pagamentos_result,
+            recursos_result, *parallel_results,
+        )
     else:
         phase2_results = (
             contracts_result,
@@ -721,6 +727,7 @@ async def _run_analysis(
             pncp_result,
             comprasnet_result,
             pagamentos_result,
+            recursos_result,
             *parallel_results[1:],
         )
     _PIPELINE_STAGE.set("phase2_validation")
