@@ -168,6 +168,70 @@ def test_antecipacao_concorrente_includes_other_ug_and_extracts_operation_and_ba
     assert findings["antecipacao_concorrente"].valor == {
         "quantidade": 1, "valor": 1200.0, "ugs": ["999999"],
         "numeros_operacao": ["5043"], "bancos": ["274"], "ultima_data": "2026-09-20",
+        "operacoes": [{
+            "numero_op": "5043", "data_op": None, "contrato_vinculado": None,
+            "mesmo_contrato": False, "ultima_data": "2026-09-20", "ativa": True,
+        }],
+    }
+
+
+def test_anticipations_detail_contract_link_and_active_status_and_exclude_guarantee_deposit():
+    snapshots = {
+        "contratos_comprasnet": {
+            "status_consulta": "ENCONTRADO",
+            "contrato_comprasnet": {"numero": "00004/2025", "uasg": "123456"},
+            "faturas": [_invoice("1", "2026-09-10", "900,00")],
+        },
+        "pagamentos_portal": {
+            "status_consulta": "ENCONTRADO",
+            "ordens_bancarias": [
+                {"documento": "99999900000001", "data": "2026-09-20", "valor": "100,00", "observacao": "VINCULADO A OPERACAO DE CREDITO ANTECIPAGOV Nº 4701, DE 09/02/2026, ATIVA PARA O CONTRATO Nº 00015/2025"},
+                {"documento": "12345600000001", "data": "2026-10-01", "valor": "100,00", "observacao": "ANTECIPAGOV Nº 4903, DE 01/10/2026, ATIVA PARA O CONTRATO Nº 00004/2025"},
+                {"documento": "12345600000002", "data": "2026-07-01", "valor": "100,00", "observacao": "ANTECIPAGOV Nº 4223, DE 01/01/2026, ATIVA PARA O CONTRATO Nº 00004/2025"},
+                {"documento": "12345600000003", "data": "2026-08-01", "valor": "100,00", "observacao": "CONTRATO Nº 00004/2025 pagamento normal"},
+                {"documento": "12345600000004", "data": "2026-09-15", "valor": "900,00", "observacao": "CT 04/2025 NF 1"},
+                {"documento": "12345600000005", "data": "2026-09-16", "valor": "100,00", "observacao": "DEPOSITO GARANTIA - CONTA VINCULADA CT 04/2025"},
+            ],
+        },
+    }
+    findings = {item.codigo: item for item in emit_fluxo_caixa(
+        snapshots, fingerprint="f", operation={"data_referencia": "19/10/2026"},
+    )}
+
+    anticipation = findings["antecipacao_concorrente"].valor["operacoes"]
+    assert anticipation == [
+        {"numero_op": "4223", "data_op": "2026-01-01", "contrato_vinculado": "00004/2025", "mesmo_contrato": True, "ultima_data": "2026-07-01", "ativa": False},
+        {"numero_op": "4701", "data_op": "2026-02-09", "contrato_vinculado": "00015/2025", "mesmo_contrato": False, "ultima_data": "2026-09-20", "ativa": True},
+        {"numero_op": "4903", "data_op": "2026-10-01", "contrato_vinculado": "00004/2025", "mesmo_contrato": True, "ultima_data": "2026-10-01", "ativa": True},
+    ]
+    paid = findings["pago_portal_vs_comprasnet"].valor
+    assert paid["pago_portal_ano"] == 900.0
+    assert paid["deposito_conta_vinculada"] == {"valor": 100.0, "pct_sobre_pago": 0.1}
+
+
+def test_payment_rate_is_unverified_without_settled_invoices_and_reports_contract_payments_12m():
+    snapshots = {
+        "contratos_comprasnet": {
+            "status_consulta": "ENCONTRADO",
+            "contrato_comprasnet": {"numero": "00004/2025", "uasg": "123456"},
+            "faturas": [],
+        },
+        "pagamentos_portal": {
+            "status_consulta": "ENCONTRADO",
+            "ordens_bancarias": [
+                {"documento": "12345600000001", "data": "2026-01-10", "valor": "100,00", "observacao": "CT 04/2025"},
+                {"documento": "12345600000002", "data": "2026-03-11", "valor": "200,00", "observacao": "CT 04/2025"},
+            ],
+        },
+    }
+    findings = {item.codigo: item for item in emit_fluxo_caixa(
+        snapshots, fingerprint="f", operation={"data_referencia": "19/10/2026"},
+    )}
+
+    assert findings["taxa_conciliacao_pagamentos"].estado == Estado.NAO_VERIFICADO
+    assert findings["taxa_conciliacao_pagamentos"].pendencia == {"motivo": "sem faturas liquidadas"}
+    assert findings["pagamentos_contrato_12m"].valor == {
+        "valor": 300.0, "quantidade": 2, "ultima_data": "2026-03-11", "intervalo_medio_dias": 60.0,
     }
 
 
@@ -322,10 +386,10 @@ def test_portal_is_not_applicable_without_found_comprasnet(monkeypatch):
     assert result["status_consulta"] == "NAO_APLICAVEL"
 
 
-def test_supplier_payment_mentioning_withholding_later_is_not_a_tax_order():
+def test_supplier_payment_mentioning_withholding_is_excluded_anywhere_in_observation():
     from app.services.findings.adapters.fluxo_caixa import _is_tax_or_withholding
 
     payment = {"observacao": "LIQUIDACAO DE NF(S): 38, 42, 43, CONTRATO Nº: 00004/2025 - DIRETIVA PATRIMONIAL LTDA - RETENCAO DE INSS CONFORME IN 971"}
-    assert not _is_tax_or_withholding(payment)
+    assert _is_tax_or_withholding(payment)
     for text in ("INSS NF(S): 105, 108", "IRPJ DE NF.(S): 105", "INSS-NFS(S) 3906", "RETENCAO DO ISS, CONFORME LC 116/2003", "ISS S/ SERVICO DE RECEPCAO"):
         assert _is_tax_or_withholding({"observacao": text}), text

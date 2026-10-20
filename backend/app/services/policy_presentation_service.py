@@ -156,6 +156,11 @@ def _informative_text(code: str, value: Any, label: str) -> list[str]:
             f"{int(_number(data.get('quantidade')) or 0)} antecipações ou cessões concorrentes identificadas "
             f"({_money(data.get('valor'))}); operações {', '.join(map(str, data.get('numeros_operacao') or [])) or 'não informadas'}"
         ]
+    if code == "pagamentos_contrato_12m":
+        return [
+            f"Pagamentos do contrato nos últimos 12 meses: {_money(data.get('valor'))} em "
+            f"{int(_number(data.get('quantidade')) or 0)} ordens"
+        ]
     return [f"{label}: {_generic_value(value, code)}"]
 
 
@@ -306,4 +311,5 @@ _CASH_FLOW_CODES = frozenset({
     "empenho_insuficiente", "cobertura_parcela", "execucao_vs_contratado",
     "prazo_pagamento_dias", "ciclo_caixa_dias", "faturas_liquidadas_sem_pagamento",
     "taxa_conciliacao_pagamentos", "pago_portal_vs_comprasnet", "antecipacao_concorrente",
+    "pagamentos_contrato_12m",
 })

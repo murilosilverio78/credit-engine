@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import statistics
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 from unicodedata import combining, normalize
 
@@ -103,11 +103,11 @@ _CITED_CONTRACT = re.compile(
     r"(?:(\d{4})\s*/\s*(\d+)|(\d+)\s*/\s*(\d{4}))\b",
     re.IGNORECASE,
 )
-# Only orders whose observation STARTS with a tax keyword are tax payments.
-# Supplier payments routinely mention "RETENCAO DE INSS" further in the text.
-_TRIBUTARY_ORDER = re.compile(r"^\W*(?:\d+\s*-\s*)?(?:INSS|IRPJ|IRRF|CSLL|PIS|COFINS|ISS|DARF|RETENCAO)\b")
+_TRIBUTARY_ORDER = re.compile(r"\b(?:INSS|IRPJ|IRRF|CSLL|PIS|COFINS|ISS|DARF|RETENCAO)\b")
 _OPERATION_NUMBER = re.compile(r"\b(?:N\s*[º°O.]?\s*)?OP\.?\s*(\d+)\b")
 _BANK_NUMBER = re.compile(r"\b(?:BANCO|BCO)\s*(?:N\s*[º°O.]?\s*)?(\d+)\b")
+_ANTICIPATION_NUMBER = re.compile(r"\bANTECIPAGOV\s+(?:N\s*[º°O.]?\s*)?(?:OP\.?\s*)?(\d+)\b")
+_ANTICIPATION_DATE = re.compile(r"\bDE\s*(\d{2}/\d{2}/\d{4})\b")
 
 
 def _document_key(value: Any) -> str:
@@ -122,6 +122,15 @@ def _normalized_observation(value: Any) -> str:
 
 def _is_tax_or_withholding(order: dict[str, Any]) -> bool:
     return bool(_TRIBUTARY_ORDER.search(_normalized_observation(order.get("observacao"))))
+
+
+def _is_deposit_guarantee(order: dict[str, Any]) -> bool:
+    observation = _normalized_observation(order.get("observacao"))
+    return (
+        observation.startswith("DEPOSITO GARANTIA")
+        or "CONTA VINCULADA" in observation
+        or "CONTA DEPOSITO VINCULADA" in observation
+    )
 
 
 def _document_ug(order: dict[str, Any]) -> str:
@@ -145,7 +154,7 @@ def _cited_contracts(observation: Any) -> set[str]:
     return cited
 
 
-def _valid_payment_orders(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _base_payment_orders(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Exclude cancelled, non-positive and tributary payment orders."""
     cancelled_documents = {
         _document_key(match.group(1))
@@ -170,21 +179,33 @@ def _valid_payment_orders(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return active
 
 
-def _active_payment_orders(
+def _valid_payment_orders(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Payment orders usable in findings, excluding guarantee deposits."""
+    return [order for order in _base_payment_orders(orders) if not _is_deposit_guarantee(order)]
+
+
+def _contract_scoped_orders(
     orders: list[dict[str, Any]], contract_number: Any, contract_uasg: Any = None,
 ) -> list[dict[str, Any]]:
-    """Return valid orders for the operation's contract and issuing UG."""
+    """Apply operation contract and issuing-UG filters to already-valid orders."""
     contract_refs = _reference_tokens(contract_number)
     uasg = _digits(contract_uasg)
-    active: list[dict[str, Any]] = []
-    for order in _valid_payment_orders(orders):
+    scoped: list[dict[str, Any]] = []
+    for order in orders:
         cited = _cited_contracts(order.get("observacao"))
         if cited and any(reference not in contract_refs for reference in cited):
             continue
         if len(uasg) == 6 and _document_ug(order) != uasg:
             continue
-        active.append(order)
-    return active
+        scoped.append(order)
+    return scoped
+
+
+def _active_payment_orders(
+    orders: list[dict[str, Any]], contract_number: Any, contract_uasg: Any = None,
+) -> list[dict[str, Any]]:
+    """Return valid orders for the operation's contract and issuing UG."""
+    return _contract_scoped_orders(_valid_payment_orders(orders), contract_number, contract_uasg)
 
 
 def _within_liquid_value(order: dict[str, Any], liquid_value: float | None) -> bool:
@@ -194,6 +215,75 @@ def _within_liquid_value(order: dict[str, Any], liquid_value: float | None) -> b
         and value is not None
         and liquid_value * 0.70 <= value <= liquid_value * 1.005
     )
+
+
+def _linked_contract(observation: Any) -> str | None:
+    match = _CITED_CONTRACT.search(str(observation or ""))
+    if not match:
+        return None
+    if match.group(1):
+        number, year = match.group(2), match.group(1)
+    else:
+        number, year = match.group(3), match.group(4)
+    return f"{number}/{year}"
+
+
+def _contract_identity(value: Any) -> str | None:
+    text = str(value or "")
+    pair = re.search(r"(?<![\d/])(\d+)\s*/\s*(\d{4})(?!\d)", text)
+    if pair:
+        return (f"{pair.group(1)}{pair.group(2)}").lstrip("0") or "0"
+    tokens = _reference_tokens(text)
+    return max(tokens, key=len, default=None)
+
+
+def _anticipation_number(observation: Any) -> str | None:
+    text = str(observation or "")
+    match = _ANTICIPATION_NUMBER.search(text) or _OPERATION_NUMBER.search(text)
+    return (match.group(1).lstrip("0") or "0") if match else None
+
+
+def _anticipation_operations(
+    orders: list[dict[str, Any]], *, contract_number: Any, reference: date,
+) -> list[dict[str, Any]]:
+    """Summarize diverted payment orders by active Anticipagov operation."""
+    diverted = [
+        order for order in orders
+        if any(marker in _normalized_observation(order.get("observacao")) for marker in ("ANTECIPAGOV", "DOMICILIO BANCARIO"))
+    ]
+    by_operation: dict[str, list[dict[str, Any]]] = {}
+    for order in diverted:
+        number = _anticipation_number(order.get("observacao"))
+        if number:
+            by_operation.setdefault(number, []).append(order)
+
+    normal_orders = [order for order in orders if order not in diverted]
+    contract_identity = _contract_identity(contract_number)
+    result: list[dict[str, Any]] = []
+    for number, operation_orders in sorted(by_operation.items(), key=lambda item: int(item[0])):
+        latest = max((_date(order.get("data")) for order in operation_orders if _date(order.get("data"))), default=None)
+        sample = max(operation_orders, key=lambda order: _date(order.get("data")) or date.min)
+        observation = sample.get("observacao")
+        linked_contract = _linked_contract(observation)
+        linked_identity = _contract_identity(linked_contract)
+        data_match = _ANTICIPATION_DATE.search(str(observation or ""))
+        data_op = _date(data_match.group(1)) if data_match else None
+        normal_after = any(
+            latest is not None
+            and (_date(order.get("data")) or date.min) > latest
+            and linked_identity
+            and _contract_identity(_linked_contract(order.get("observacao"))) == linked_identity
+            for order in normal_orders
+        )
+        result.append({
+            "numero_op": number,
+            "data_op": data_op.isoformat() if data_op else None,
+            "contrato_vinculado": linked_contract,
+            "mesmo_contrato": linked_identity is not None and linked_identity == contract_identity,
+            "ultima_data": latest.isoformat() if latest else None,
+            "ativa": bool(latest and 0 <= (reference - latest).days <= 60 and not normal_after),
+        })
+    return result
 
 
 def reconcile_payments(
@@ -272,6 +362,7 @@ def _payment_findings(
     codes = (
         "prazo_pagamento_dias", "ciclo_caixa_dias", "faturas_liquidadas_sem_pagamento",
         "taxa_conciliacao_pagamentos", "pago_portal_vs_comprasnet", "antecipacao_concorrente",
+        "pagamentos_contrato_12m",
     )
     if not isinstance(payments, dict):
         return [_unverified(code, "ordens_bancarias", fingerprint, "pagamentos do Portal indisponíveis", "pagamentos_portal") for code in codes]
@@ -285,6 +376,10 @@ def _payment_findings(
     contract = comprasnet.get("contrato_comprasnet") or {}
     eligible_orders = _active_payment_orders(orders, contract.get("numero"), contract.get("uasg"))
     matched = reconcile_payments(settled, eligible_orders, contract.get("numero"), contract.get("uasg"))
+    deposit_orders = _contract_scoped_orders(
+        [order for order in _base_payment_orders(orders) if _is_deposit_guarantee(order)],
+        contract.get("numero"), contract.get("uasg"),
+    )
     payment_days = [
         ((_date(order.get("data")) - _date(invoice.get("data_liquidacao"))).days)
         for invoice, order in matched
@@ -313,21 +408,39 @@ def _payment_findings(
         _number(invoice.get("valorliquido")) or 0.0 for invoice in settled
         if (_date(invoice.get("data_liquidacao")) or date.min).year == reference.year
     )
+    deposits_year = [
+        order for order in deposit_orders
+        if (_date(order.get("data")) or date.min).year == reference.year
+    ]
+    deposit_value = sum(_number(order.get("valor")) or 0.0 for order in deposits_year)
+    all_valid_orders = _valid_payment_orders(orders)
     anticipation_orders = [
-        order for order in _valid_payment_orders(orders)
+        order for order in all_valid_orders
         if any(marker in _normalized_observation(order.get("observacao")) for marker in ("ANTECIPAGOV", "DOMICILIO BANCARIO"))
     ]
-    operation_numbers = sorted({
-        match.group(1).lstrip("0") or "0"
-        for order in anticipation_orders
-        for match in _OPERATION_NUMBER.finditer(str(order.get("observacao") or ""))
-    }, key=int)
+    anticipation_operations = _anticipation_operations(
+        all_valid_orders, contract_number=contract.get("numero"), reference=reference,
+    )
+    operation_numbers = [operation["numero_op"] for operation in anticipation_operations]
     banks = sorted({
         match.group(1).lstrip("0") or "0"
         for order in anticipation_orders
         for match in _BANK_NUMBER.finditer(str(order.get("observacao") or ""))
     }, key=int)
     anticipation_dates = [_date(order.get("data")) for order in anticipation_orders if _date(order.get("data"))]
+    payments_12m = sorted(
+        [
+            order for order in eligible_orders
+            if (order_date := _date(order.get("data")))
+            and reference - timedelta(days=365) <= order_date <= reference
+        ],
+        key=lambda order: _date(order.get("data")) or date.max,
+    )
+    payment_dates = [_date(order.get("data")) for order in payments_12m]
+    intervals = [
+        (payment_dates[index] - payment_dates[index - 1]).days
+        for index in range(1, len(payment_dates))
+    ]
     base = dict(component="pagamentos_portal", path="ordens_bancarias", fingerprint=fingerprint)
     output = [
         finding("prazo_pagamento_dias", Escopo.OPERACAO, round(float(statistics.median(payment_days)), 2), **base)
@@ -338,13 +451,18 @@ def _payment_findings(
             "quantidade": len(overdue), "valor": round(sum(_number(item.get("valorliquido")) or 0.0 for item in overdue), 2),
             "mais_antiga_dias": max(((reference - _date(item.get("data_liquidacao"))).days for item in overdue), default=None),
         }, **base),
-        finding("taxa_conciliacao_pagamentos", Escopo.OPERACAO, round(len(matched) / len(settled), 6) if settled else 0.0, **base),
+        finding("taxa_conciliacao_pagamentos", Escopo.OPERACAO, round(len(matched) / len(settled), 6), **base)
+        if settled else _unverified("taxa_conciliacao_pagamentos", "faturas", fingerprint, "sem faturas liquidadas", "pagamentos_portal"),
         finding("pago_portal_vs_comprasnet", Escopo.OPERACAO, {
             "pago_portal_ano": round(portal_year, 2), "liquidado_comprasnet_ano": round(comprasnet_year, 2),
             "razao": round(portal_year / comprasnet_year, 6) if comprasnet_year else None,
             "ordens_nao_conciliadas": {
                 "quantidade": len(unmatched_orders_year),
                 "valor": round(sum(_number(order.get("valor")) or 0.0 for order in unmatched_orders_year), 2),
+            },
+            "deposito_conta_vinculada": {
+                "valor": round(deposit_value, 2),
+                "pct_sobre_pago": round(deposit_value / (portal_year + deposit_value), 6) if portal_year + deposit_value else None,
             },
         }, **base),
         finding("antecipacao_concorrente", Escopo.OPERACAO, {
@@ -354,6 +472,13 @@ def _payment_findings(
             "numeros_operacao": operation_numbers,
             "bancos": banks,
             "ultima_data": max(anticipation_dates).isoformat() if anticipation_dates else None,
+            "operacoes": anticipation_operations,
+        }, **base),
+        finding("pagamentos_contrato_12m", Escopo.OPERACAO, {
+            "valor": round(sum(_number(order.get("valor")) or 0.0 for order in payments_12m), 2),
+            "quantidade": len(payments_12m),
+            "ultima_data": payment_dates[-1].isoformat() if payment_dates else None,
+            "intervalo_medio_dias": round(sum(intervals) / len(intervals), 2) if intervals else None,
         }, **base),
     ]
     return output
@@ -484,9 +609,11 @@ _CASH_CODES = (
     "empenho_insuficiente", "cobertura_parcela", "execucao_vs_contratado",
     "prazo_pagamento_dias", "ciclo_caixa_dias", "faturas_liquidadas_sem_pagamento",
     "taxa_conciliacao_pagamentos", "pago_portal_vs_comprasnet", "antecipacao_concorrente",
+    "pagamentos_contrato_12m",
 )
 
 _PAYMENT_CODES = frozenset({
     "prazo_pagamento_dias", "ciclo_caixa_dias", "faturas_liquidadas_sem_pagamento",
     "taxa_conciliacao_pagamentos", "pago_portal_vs_comprasnet", "antecipacao_concorrente",
+    "pagamentos_contrato_12m",
 })

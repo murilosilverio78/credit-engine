@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 20 adiciona escopo de UG, conciliação 1:N e antecipações concorrentes.
+Version 23 detalha antecipações concorrentes e separa depósitos de garantia.
 """
 
-EMITTER_VERSION = "22"
+EMITTER_VERSION = "23"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {
