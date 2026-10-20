@@ -593,6 +593,22 @@ def _remaining_months(end: date | None, today: date) -> int | None:
     return max(months, 0)
 
 
+def _is_on_demand(objeto: Any, num_parcelas: int | None) -> bool:
+    """Classify contracts whose cash flow depends on orders, not a monthly fee.
+
+    Explicit on-demand wording wins. Continuous services and dedicated labour
+    ("fornecimento de mão de obra") are monthly even with a single installment.
+    """
+    text = _plain_text(objeto)
+    if any(term in text for term in ("sob demanda", "registro de preco", "ata de registro")):
+        return True
+    if any(term in text for term in ("continu", "mao de obra", "dedicacao exclusiva")):
+        return False
+    return num_parcelas == 1 and any(
+        term in text for term in ("aquisicao", "fornecimento de materia", "fornecimento de equipamento", "fornecimento de bens")
+    )
+
+
 def _normalize_contract(
     contract: dict[str, Any],
     today: date,
@@ -602,10 +618,7 @@ def _normalize_contract(
     renewable = _plain_text(contract.get("prorrogavel"))
     objeto = contract.get("objeto")
     num_parcelas = _optional_int(contract.get("num_parcelas"))
-    sob_demanda = num_parcelas == 1 and any(
-        term in _plain_text(objeto)
-        for term in ("aquisicao", "fornecimento", "registro de preco")
-    )
+    sob_demanda = _is_on_demand(objeto, num_parcelas)
     return {
         "contrato_id": contract.get("id"),
         "numero": contract.get("numero"),
@@ -674,7 +687,19 @@ def _history_item(item: dict[str, Any]) -> dict[str, Any]:
 
 def _history_summary(contract: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
     ordered = sorted(history, key=lambda item: item.get("data_assinatura") or "")
-    extensions = [item for item in history if "prorrog" in _plain_text(item.get("tipo"))]
+    # Comprasnet labels most extensions as a generic "Termo Aditivo"; the
+    # prorrogation is described in the observation or visible as a later end date.
+    extensions = []
+    previous_end = None
+    for item in ordered:
+        end = item.get("vigencia_fim")
+        is_contract = _plain_text(item.get("tipo")).startswith("contrato")
+        text = f"{_plain_text(item.get('tipo'))} {_plain_text(item.get('observacao'))}"
+        extended_end = bool(previous_end and end and str(end) > str(previous_end))
+        if not is_contract and ("prorrog" in text or extended_end):
+            extensions.append(item)
+        if end and (previous_end is None or str(end) > str(previous_end)):
+            previous_end = end
     values = [item.get("valor_global") for item in ordered if item.get("valor_global") is not None]
     original_value = values[0] if values else contract.get("valor_inicial") or contract.get("valor_global")
     increments = [max(float(current) - float(previous), 0) for previous, current in zip(values, values[1:])]
@@ -686,7 +711,11 @@ def _history_summary(contract: dict[str, Any], history: list[dict[str, Any]]) ->
     return {
         "n_prorrogacoes": len(extensions),
         "ultima_prorrogacao": latest.get("data_assinatura") if latest else None,
-        "vigencia_original_fim": min(ends) if ends else None,
+        "vigencia_original_fim": next(
+            (item.get("vigencia_fim") for item in ordered
+             if _plain_text(item.get("tipo")).startswith("contrato") and item.get("vigencia_fim")),
+            min(ends) if ends else None,
+        ),
         "acrescimos_valor": round(sum(increments), 2),
         "valor_original": original_value,
         "valor_vigente": contract.get("valor_global"),

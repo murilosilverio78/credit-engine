@@ -1150,3 +1150,32 @@ def test_found_contract_persists_missing_operation_number_and_uasg(monkeypatch):
     )
 
     assert updates == [{"contrato_id": "00042/2026", "uasg": "158132"}]
+
+
+def test_history_summary_detects_extensions_described_in_generic_amendments():
+    from app.workers.tasks.contratos_comprasnet import _history_summary
+
+    history = [
+        {"tipo": "Contrato", "data_assinatura": "2023-08-01", "vigencia_fim": "2024-08-01", "valor_global": 100.0},
+        {"tipo": "Termo Aditivo", "data_assinatura": "2024-07-20", "vigencia_fim": "2025-08-01",
+         "observacao": "PRORROGAR O PRAZO DE VIGÊNCIA DO CONTRATO Nº 45/2023, POR MAIS 12 (DOZE) MESES", "valor_global": 100.0},
+        {"tipo": "Termo de Apostilamento", "data_assinatura": "2024-09-01", "vigencia_fim": "2025-08-01",
+         "observacao": "REAJUSTE DO VALOR DO CONTRATO", "valor_global": 110.0},
+        {"tipo": "Termo Aditivo", "data_assinatura": "2025-07-15", "vigencia_fim": "2026-08-01",
+         "observacao": "SEGUNDO TERMO ADITIVO", "valor_global": 110.0},
+    ]
+    summary = _history_summary({"vigencia_fim": "2026-08-01", "valor_global": 110.0}, history)
+
+    assert summary["n_prorrogacoes"] == 2
+    assert summary["ultima_prorrogacao"] == "2025-07-15"
+    assert summary["vigencia_original_fim"] == "2024-08-01"
+    assert summary["acrescimos_valor"] == 10.0
+
+
+def test_on_demand_classification_with_real_objects():
+    from app.workers.tasks.contratos_comprasnet import _is_on_demand
+
+    assert not _is_on_demand("CONTRATAÇÃO DE SERVIÇOS CONTÍNUOS DE FORNECIMENTO DE MÃO DE OBRA ADMINISTRATIVA E OPERACIONAL", 1)
+    assert _is_on_demand("CONTRATAÇÃO DE SERVIÇOS COMUNS DE ENGENHARIA, SOB DEMANDA, ATRAVÉS DE ATA DE REGISTRO DE PREÇOS", 12)
+    assert _is_on_demand("É A AQUISIÇÃO DE MATERIAIS E EQUIPAMENTOS PARA MANUTENÇÃO DOS BENS IMÓVEIS", 1)
+    assert not _is_on_demand("PRESTAÇÃO DE SERVIÇOS DE LIMPEZA", 12)
