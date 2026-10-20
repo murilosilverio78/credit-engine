@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 23 detalha antecipações concorrentes e separa depósitos de garantia.
+Version 25 expõe o estado agregado das antecipações concorrentes para a política v3.
 """
 
-EMITTER_VERSION = "24"
+EMITTER_VERSION = "25"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

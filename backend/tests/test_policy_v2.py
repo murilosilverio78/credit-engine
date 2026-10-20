@@ -232,3 +232,110 @@ def test_veto_e_dados_insuficientes_preservam_efeitos_documentais():
     assert insufficient.rating is None and insufficient.limite_aprovado_rs is None
     assert veto.status_decisao == "VETO"
     assert veto.rating == "E" and veto.limite_aprovado_rs == 0
+
+
+def _v3_rules():
+    return [
+        _rule(
+            "antecipacao_concorrente", None, None,
+            {"estados": ["CONFIRMADO"], "comparacao": {"campo": "ativa_mesmo_contrato", "op": "==", "ref": True}},
+            "VETO",
+        ),
+        _rule(
+            "antecipacao_concorrente", "cp", None,
+            {
+                "estados": ["CONFIRMADO"],
+                "comparacao": {"campo": "encerrada_mesmo_contrato", "op": "==", "ref": True},
+                "mensagem": "Declaração de quitação da antecipação anterior no mesmo contrato",
+                "documento_exigido": "Declaração de quitação / extrato da conta vinculada",
+            },
+            "CONDICAO",
+        ),
+        _rule(
+            "empenho_insuficiente", "cp", None,
+            {"estados": ["CONFIRMADO"], "mensagem": "Empenho insuficiente para as parcelas: apresentar reforço de empenho"},
+            "CONDICAO",
+        ),
+        _rule(
+            "antecipacao_concorrente", "alcada", 2,
+            {"estados": ["CONFIRMADO"], "comparacao": {"campo": "ativa_outro_contrato", "op": "==", "ref": True}},
+        ),
+        _rule(
+            "cobertura_parcela", "alcada", 2,
+            {"estados": ["CONFIRMADO"], "comparacao": {"campo": "", "op": "<", "ref": 1.25}},
+        ),
+    ]
+
+
+def _evaluate_v3(findings):
+    return avaliar(
+        EntradaPolitica({}, findings, _rating_runs()),
+        _params() | {"limite_fator_minimo": 0.4},
+        _v3_rules(),
+        date(2026, 10, 19),
+    )
+
+
+def test_v3_93ca0242_active_4903_on_same_contract_is_veto():
+    result = _evaluate_v3({
+        "antecipacao_concorrente": _finding(
+            "antecipacao_concorrente",
+            {"ativa_mesmo_contrato": True, "encerrada_mesmo_contrato": False, "ativa_outro_contrato": False},
+        )
+    })
+
+    assert result.status_decisao == "VETO"
+    assert result.bloqueios == ["antecipacao_concorrente"]
+
+
+def test_v3_e91e6e07_closed_4223_on_same_contract_requires_settlement_declaration():
+    result = _evaluate_v3({
+        "antecipacao_concorrente": _finding(
+            "antecipacao_concorrente",
+            {"ativa_mesmo_contrato": False, "encerrada_mesmo_contrato": True, "ativa_outro_contrato": False},
+        )
+    })
+
+    assert result.status_decisao != "VETO"
+    assert result.condicoes_precedentes == [{
+        "codigo": "antecipacao_concorrente",
+        "descricao": "Declaração de quitação da antecipação anterior no mesmo contrato",
+        "documento_exigido": "Declaração de quitação / extrato da conta vinculada",
+    }]
+
+
+def test_v3_271d9f08_other_contract_4701_and_coverage_apply_authority_only_when_matched():
+    other_contract = _evaluate_v3({
+        "antecipacao_concorrente": _finding(
+            "antecipacao_concorrente",
+            {"ativa_mesmo_contrato": False, "encerrada_mesmo_contrato": False, "ativa_outro_contrato": True},
+        ),
+    })
+    low_coverage = _evaluate_v3({"cobertura_parcela": _finding("cobertura_parcela", 1.10)})
+    no_anticipation = _evaluate_v3({
+        "antecipacao_concorrente": _finding(
+            "antecipacao_concorrente",
+            {"ativa_mesmo_contrato": False, "encerrada_mesmo_contrato": False, "ativa_outro_contrato": False},
+        ),
+        "cobertura_parcela": _finding("cobertura_parcela", 1.30),
+    })
+
+    assert other_contract.alcada_minima == 2
+    assert low_coverage.alcada_minima == 2
+    assert no_anticipation.alcada_minima == 1
+    assert no_anticipation.condicoes_precedentes == []
+
+
+def test_veto_comparison_is_not_bypassed_by_a_truthy_value_and_v2_effects_keep_parity():
+    v2_rules = [_rule("rating", "limite_mult", 0.85, {"rating_in": ["D"]})]
+    findings = {
+        "antecipacao_concorrente": _finding(
+            "antecipacao_concorrente",
+            {"ativa_mesmo_contrato": False, "encerrada_mesmo_contrato": False, "ativa_outro_contrato": False},
+        )
+    }
+    v2 = avaliar(EntradaPolitica({}, findings, _rating_runs()), _params() | {"limite_fator_minimo": 0.4}, v2_rules, date(2026, 10, 19))
+    v3_without_matches = _evaluate_v3(findings)
+
+    assert v3_without_matches.status_decisao != "VETO"
+    assert v2.limite_multiplicadores == [{"codigo": "rating", "fator": 0.85}]

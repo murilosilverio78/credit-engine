@@ -429,6 +429,18 @@ def _payment_findings(
     anticipation_operations = _anticipation_operations(
         all_valid_orders, contract_number=contract.get("numero"), reference=reference,
     )
+    active_same_contract = any(
+        operation["mesmo_contrato"] and operation["ativa"]
+        for operation in anticipation_operations
+    )
+    closed_same_contract = any(
+        operation["mesmo_contrato"] and not operation["ativa"]
+        for operation in anticipation_operations
+    )
+    active_other_contract = any(
+        not operation["mesmo_contrato"] and operation["ativa"]
+        for operation in anticipation_operations
+    )
     operation_numbers = [operation["numero_op"] for operation in anticipation_operations]
     banks = sorted({
         match.group(1).lstrip("0") or "0"
@@ -480,6 +492,9 @@ def _payment_findings(
             "numeros_operacao": operation_numbers,
             "bancos": banks,
             "ultima_data": max(anticipation_dates).isoformat() if anticipation_dates else None,
+            "ativa_mesmo_contrato": active_same_contract,
+            "encerrada_mesmo_contrato": closed_same_contract and not active_same_contract,
+            "ativa_outro_contrato": active_other_contract,
             "operacoes": anticipation_operations,
         }, **base),
         finding("pagamentos_contrato_12m", Escopo.OPERACAO, {
