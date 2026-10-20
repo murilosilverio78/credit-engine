@@ -128,6 +128,74 @@ def test_comparar_sombra_persists_comparative_only_on_primary_run(monkeypatch):
     assert compared["shadow"]["comparativo"] == persisted["comparativo"]
 
 
+def test_automatic_shadow_compares_against_nearest_archived_version(monkeypatch):
+    database = Postgrest({"policy_versions": [
+        {"versao": 2, "status": "ARQUIVADA"},
+        {"versao": 1, "status": "ARQUIVADA"},
+    ]})
+    calls = []
+    monkeypatch.setattr(
+        shadow, "load_policy",
+        lambda **_kwargs: {"version": {"versao": 3, "status": "SOMBRA"}},
+    )
+    monkeypatch.setattr(
+        shadow, "comparar_sombra",
+        lambda operation_id, **kwargs: calls.append((operation_id, kwargs)),
+    )
+    monkeypatch.setattr(
+        shadow, "avaliar_sombra",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("não deve rodar isolada")),
+    )
+
+    shadow.executar_sombra_automatica("op", database=database)
+
+    assert calls == [("op", {
+        "database": database, "aplicar": True, "versao": 3, "comparar_com": 2,
+    })]
+
+
+def test_automatic_shadow_without_archived_predecessor_persists_only_primary_run(monkeypatch):
+    database = Postgrest({"policy_versions": []})
+    calls = []
+    monkeypatch.setattr(
+        shadow, "load_policy",
+        lambda **_kwargs: {"version": {"versao": 3, "status": "SOMBRA"}},
+    )
+    monkeypatch.setattr(
+        shadow, "avaliar_sombra",
+        lambda operation_id, **kwargs: calls.append((operation_id, kwargs)),
+    )
+    monkeypatch.setattr(
+        shadow, "comparar_sombra",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("não deve comparar")),
+    )
+
+    shadow.executar_sombra_automatica("op", database=database)
+
+    assert calls == [("op", {"database": database, "aplicar": True})]
+
+
+def test_automatic_comparison_failure_preserves_primary_shadow_run(monkeypatch):
+    database = Postgrest({"policy_versions": [{"versao": 2, "status": "ARQUIVADA"}]})
+    calls = []
+    monkeypatch.setattr(
+        shadow, "load_policy",
+        lambda **_kwargs: {"version": {"versao": 3, "status": "SOMBRA"}},
+    )
+    monkeypatch.setattr(
+        shadow, "comparar_sombra",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("referência indisponível")),
+    )
+    monkeypatch.setattr(
+        shadow, "avaliar_sombra",
+        lambda operation_id, **kwargs: calls.append((operation_id, kwargs)),
+    )
+
+    shadow.executar_sombra_automatica("op", database=database)
+
+    assert calls == [("op", {"database": database, "aplicar": True})]
+
+
 def test_shadow_classifies_missing_runs_and_dry_run_does_not_persist(monkeypatch):
     params = {"score_bloqueio": 20}
     monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": params, "regras": []})
@@ -199,12 +267,12 @@ def test_shadow_hash_includes_logic_version(monkeypatch):
     db = _Db()
 
     first = shadow.avaliar_sombra("op", database=db, aplicar=True)
-    monkeypatch.setattr(shadow, "SHADOW_LOGIC_VERSION", "5")
+    monkeypatch.setattr(shadow, "SHADOW_LOGIC_VERSION", "6")
     changed_logic = shadow.avaliar_sombra("op", database=db, aplicar=True)
 
     assert first["entrada_hash"] != changed_logic["entrada_hash"]
-    assert first["resultado"]["shadow_logic_version"] == "4"
-    assert changed_logic["resultado"]["shadow_logic_version"] == "5"
+    assert first["resultado"]["shadow_logic_version"] == "5"
+    assert changed_logic["resultado"]["shadow_logic_version"] == "6"
     assert len(db.inserted) == 2
 
 

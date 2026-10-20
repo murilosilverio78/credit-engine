@@ -18,6 +18,7 @@ from app.services.policy.shadow import (
     avaliar_sombra,
     comparar_sombra,
     executar_sombra_automatica,
+    versao_arquivada_anterior,
 )
 from app.workers.http_utils import (
     acquire_portal_call,
@@ -222,12 +223,19 @@ async def executar_politica_sombra(
             status_code=422,
             detail="Apenas politicas SOMBRA ou RASCUNHO podem rodar em sombra.",
         )
-    if request.comparar_com is not None:
+    comparar_com = request.comparar_com
+    if comparar_com is None:
+        comparar_com = await asyncio.to_thread(
+            versao_arquivada_anterior,
+            selected["version"].get("versao"),
+            database=supabase,
+        )
+    if comparar_com is not None and request.comparar_com is not None:
         try:
             await asyncio.to_thread(
                 load_policy,
                 database=supabase,
-                versao=request.comparar_com,
+                versao=comparar_com,
             )
         except LookupError:
             raise HTTPException(
@@ -248,14 +256,14 @@ async def executar_politica_sombra(
         if _monotonic() - started >= 45:
             remaining = operation_ids[index:]
             break
-        if request.comparar_com is not None:
+        if comparar_com is not None:
             result = await asyncio.to_thread(
                 comparar_sombra,
                 operation_id,
                 database=supabase,
                 aplicar=request.aplicar,
                 versao=selected["version"].get("versao"),
-                comparar_com=request.comparar_com,
+                comparar_com=comparar_com,
             )
             shadow_result = result["shadow"]
             operations.append(

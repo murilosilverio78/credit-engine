@@ -906,6 +906,41 @@ def test_policy_shadow_compares_requested_draft_without_official_decision(monkey
     }
 
 
+def test_policy_shadow_uses_nearest_archived_version_when_comparison_is_omitted(monkeypatch):
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    from app.core import database
+
+    monkeypatch.setattr(
+        database,
+        "supabase",
+        Postgrest({"operations": [{"id": "00000000-0000-0000-0000-000000000001", "ambiente": "PRODUCAO"}]}),
+    )
+    monkeypatch.setattr(
+        internal,
+        "load_policy",
+        lambda **_kwargs: {"version": {"id": "p3", "versao": 3, "status": "SOMBRA"}},
+    )
+    monkeypatch.setattr(internal, "versao_arquivada_anterior", lambda *_args, **_kwargs: 2)
+    calls = []
+    monkeypatch.setattr(
+        internal,
+        "comparar_sombra",
+        lambda operation_id, **kwargs: calls.append((operation_id, kwargs)) or {
+            "operation_id": operation_id, "versao": {}, "comparar_com": {}, "diff": {},
+            "shadow": {"classe_geral": "IGUAL"},
+        },
+    )
+
+    response = make_client().post(
+        "/api/v1/internal/politica/sombra",
+        json={"operation_ids": ["00000000-0000-0000-0000-000000000001"]},
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert response.status_code == 200
+    assert calls[0][1]["comparar_com"] == 2
+
+
 def test_live_ingestion_returns_202_and_uses_background_task(monkeypatch):
     calls = []
 

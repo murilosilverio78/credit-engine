@@ -14,7 +14,7 @@ from app.services.policy.inputs import montar_entrada
 from app.services.policy.loader import load_policy
 
 # Bump whenever shadow comparison or classification semantics change.
-SHADOW_LOGIC_VERSION = "4"
+SHADOW_LOGIC_VERSION = "5"
 _FIELDS = (
     "merit",
     "merit_potencial",
@@ -290,10 +290,69 @@ def _is_temporal_certificate_input(
     )
 
 
+def versao_arquivada_anterior(
+    versao: int | None, *, database=None
+) -> int | None:
+    """Return the nearest archived predecessor eligible for a policy comparison."""
+    if versao is None or database is None:
+        return None
+    try:
+        rows = _rows(
+            database.table("policy_versions")
+            .select("versao")
+            .eq("status", "ARQUIVADA")
+            .lt("versao", versao)
+            .order("versao", desc=True)
+            .limit(1)
+        )
+        return int(rows[0]["versao"]) if rows else None
+    except Exception as exc:
+        logger.warning("policy_shadow.previous_version_failed", versao=versao, error=str(exc))
+        return None
+
+
 def executar_sombra_automatica(operation_id: str, *, database=None) -> None:
     """Run automatic shadow safely; it must never affect the official flow."""
     try:
-        avaliar_sombra(operation_id, database=database, aplicar=True)
+        if database is None:
+            from app.core.database import supabase
+
+            database = supabase
+        try:
+            policy = load_policy(database=database, status="SOMBRA")
+            version = policy["version"].get("versao")
+        except Exception as exc:
+            # The primary run has always been best-effort and does not need a
+            # predecessor lookup.  Keep it available if the optional version
+            # query is unavailable (including a transient database failure).
+            logger.warning(
+                "policy_shadow.automatic_reference_lookup_failed",
+                operation_id=operation_id,
+                error=str(exc),
+            )
+            avaliar_sombra(operation_id, database=database, aplicar=True)
+            return
+        previous = versao_arquivada_anterior(version, database=database)
+        if previous is None:
+            avaliar_sombra(operation_id, database=database, aplicar=True)
+            return
+        try:
+            comparar_sombra(
+                operation_id,
+                database=database,
+                aplicar=True,
+                versao=version,
+                comparar_com=previous,
+            )
+        except Exception as exc:
+            logger.warning(
+                "policy_shadow.automatic_comparison_failed",
+                operation_id=operation_id,
+                versao=version,
+                comparar_com=previous,
+                error=str(exc),
+            )
+            avaliar_sombra(operation_id, database=database, aplicar=True)
     except Exception as exc:
         logger.warning(
             "policy_shadow.automatic_failed",

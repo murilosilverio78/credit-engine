@@ -23,3 +23,25 @@ def test_coverage_v2_catalog_and_draft_v3_rule_migration_are_delivered():
     assert "p.versao = 3" in sql and "p.status = 'RASCUNHO'" in sql
     assert '"campo":"indice","op":"<","ref":1.25' in sql
     assert "UPDATE policy_versions" not in sql
+
+
+def test_v3_shadow_promotion_aborts_when_rule_or_parameter_counts_do_not_match():
+    sql = (ROOT / "066_politica_v3_sombra.sql").read_text(encoding="utf-8")
+
+    assert "IF regras_v3 <> 36 THEN" in sql  # includes the 35-rule abort path
+    assert "IF parametros_v3 <> 34 THEN" in sql
+    assert "condicao -> 'comparacao' = '{\"campo\":\"indice\",\"op\":\"<\",\"ref\":1.25}'::JSONB" in sql
+    assert "magnitude = 0.85" in sql
+    assert "versao = 2 AND status = 'SOMBRA'" in sql
+    assert "UPDATE policy_versions SET status = 'ARQUIVADA'" in sql
+    assert "status = 'SOMBRA', sombra_desde = now()" in sql
+
+
+def test_shadow_activation_view_exposes_latest_runs_and_comparative_alerts():
+    sql = (ROOT / "067_vw_policy_sombra_ativacao.sql").read_text(encoding="utf-8")
+
+    assert "CREATE OR REPLACE VIEW vw_policy_sombra_ativacao" in sql
+    assert "row_number() OVER" in sql
+    assert "operation.created_at >= policy.sombra_desde" in sql
+    assert "classe_comparativo = 'INESPERADA'" in sql
+    assert "regras_novas_disparadas" in sql
