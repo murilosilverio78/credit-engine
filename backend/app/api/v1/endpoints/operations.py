@@ -10,6 +10,7 @@ from app.services.analysis_runtime import is_shutting_down
 from app.services.audit_service import AuditService
 from app.services.report_pdf_service import ReportPdfService
 from app.services.policy_presentation_service import latest_policy_view
+from app.services.contrato_cedido_service import contrato_cedido_view
 
 router = APIRouter()
 audit = AuditService()
@@ -346,6 +347,18 @@ async def get_operation_policy(
 ):
     """Informational v2 policy projection; never affects the official score."""
     return latest_policy_view(operation_id)
+
+
+@router.get("/{operation_id}/contrato-cedido")
+async def get_operation_assigned_contract(
+    operation_id: str,
+    _current_user: dict = Depends(get_current_user),
+):
+    """Read-only contract projection from persisted snapshots and findings."""
+    try:
+        return contrato_cedido_view(operation_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Operação não encontrada") from exc
 
 
 @router.get("/{operation_id}/documentos/{documento_id}/url")

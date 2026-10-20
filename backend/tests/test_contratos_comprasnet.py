@@ -1030,6 +1030,47 @@ def test_closed_quote_reuses_previous_found_snapshot_without_broadfactor(monkeyp
     assert persisted and persisted[0]["numero"] == "00042/2026"
 
 
+def test_history_is_persisted_and_derives_extensions_and_on_demand_mode(monkeypatch):
+    raw = raw_contract()
+    raw.update({"num_parcelas": 1, "objeto": "Aquisição por registro de preços"})
+    monkeypatch.setattr(contratos_comprasnet, "_load_operation", lambda _id: {"cotacao_id": None, "contrato_id": "00042/2026", "uasg": "158132", "margem_disponivel": None})
+    monkeypatch.setattr(contratos_comprasnet, "_load_contracts_snapshot", lambda _id: {})
+    result = contratos_comprasnet._fetch(
+        _digits_cnpj(CNPJ), operation_id="op", today=TODAY,
+        comprasnet_client=FakeComprasnet({
+            "/api/contrato/ugorigem/158132/numeroano/000422026": raw,
+            "/api/contrato/42/faturas": [], "/api/contrato/42/empenhos": [],
+            "/api/contrato/42/historico": [
+                {"tipo": "Prorrogação", "numero": "1", "dataAssinatura": "01/01/2027", "dataFimVigencia": "2028-03-15"},
+                {"tipo": "Acréscimo de valor", "numero": "2", "valor": "20.000,00"},
+            ],
+        }),
+    )
+
+    assert result["contrato_comprasnet"]["modalidade_execucao"] == "SOB_DEMANDA"
+    assert result["n_prorrogacoes"] == 1
+    assert result["ultima_prorrogacao"] == "2027-01-01"
+    assert result["acrescimos_valor"] == 20_000.0
+    assert result["historico"][0]["vigencia_fim"] == "2028-03-15"
+
+
+def test_history_failure_preserves_previous_found_snapshot(monkeypatch):
+    previous = _previous_comprasnet_snapshot()
+    monkeypatch.setattr(contratos_comprasnet, "_load_operation", lambda _id: {"cotacao_id": "C", "margem_disponivel": None})
+    monkeypatch.setattr(contratos_comprasnet, "_load_previous_comprasnet_snapshot", lambda _id: previous)
+    result = contratos_comprasnet._fetch(
+        _digits_cnpj(CNPJ), operation_id="op", today=TODAY,
+        comprasnet_client=FakeComprasnet({
+            "/api/contrato/ugorigem/158132/numeroano/000422026": raw_contract(),
+            "/api/contrato/42/faturas": [], "/api/contrato/42/empenhos": [],
+            "/api/contrato/42/historico": RuntimeError("histórico indisponível"),
+        }),
+    )
+    assert result["status_atualizacao"] == "MANTIDO"
+    assert result["faturas"] == previous["faturas"]
+    assert any(error["endpoint"] == "historico" for error in result["erros_enriquecimento"])
+
+
 def test_comprasnet_refresh_failure_preserves_found_snapshot(monkeypatch):
     previous = _previous_comprasnet_snapshot()
     monkeypatch.setattr(

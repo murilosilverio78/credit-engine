@@ -191,6 +191,12 @@ export function getOperation(operationId: string) {
   return request<OperationDetails>(`/api/v1/operations/${operationId}`);
 }
 
+export type AssignedContractView = Record<string, unknown>;
+
+export function getOperationAssignedContract(operationId: string) {
+  return request<AssignedContractView>(`/api/v1/operations/${encodeURIComponent(operationId)}/contrato-cedido`);
+}
+
 export type PolicyShadowView = {
   status: "OK" | "SEM_AVALIACAO";
   politica?: { versao?: number; status?: string; data_referencia?: string; shadow_logic_version?: string };

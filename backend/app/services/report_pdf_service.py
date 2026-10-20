@@ -641,6 +641,24 @@ def regularity_section(engine: dict[str, Any]) -> str:
     """
 
 
+def assigned_contract_summary_section(view: dict[str, Any]) -> str:
+    """Compact, informational contract execution and receivable-risk appendix."""
+    if not view or view.get("status") != "ENCONTRADO":
+        return ""
+    execution = record(view.get("execucao"))
+    risk = record(view.get("risco"))
+    coverage = record(record(risk.get("cobertura_parcela")).get("valor"))
+    anticipation = record(record(risk.get("antecipacao_concorrente")).get("valor"))
+    return f"""
+    <section class="section">
+      <h2>Contrato cedido — execução e risco</h2>
+      {detail_grid([("Faturado bruto", money(execution.get("faturado_bruto"))), ("Recebido", money(execution.get("recebido"))), ("A receber", money(execution.get("a_receber"))), ("Executado", pct_from_fraction(execution.get("pct_executado")))])}
+      <p><strong>Empenho:</strong> {esc(record(risk.get("saldo_empenho_ano")).get("valor"))}</p>
+      <p><strong>Cobertura de parcela:</strong> {esc(coverage.get("indice"))} · <strong>Antecipação concorrente:</strong> {"ativa no mesmo contrato" if anticipation.get("ativa_mesmo_contrato") else "não identificada"}</p>
+    </section>
+    """
+
+
 def pricing_section(operation: dict[str, Any]) -> str:
     breakdown = record(operation.get("taxa_breakdown"))
     details = record(breakdown.get("detalhes"))
@@ -968,6 +986,7 @@ def document_html(operation: dict[str, Any]) -> tuple[str, str, str]:
             scorecard_section(engine),
             parecer_section(engine),
             policy_v2_section(record(operation.get("politica_v2"))),
+            assigned_contract_summary_section(record(operation.get("contrato_cedido"))),
             regularity_section(engine),
             pricing_section(operation),
             contracts_annex(operation, snapshots),
@@ -1019,6 +1038,11 @@ class ReportPdfService:
             operation["politica_v2"] = latest_policy_view(operation_id, operation=operation)
         except Exception:
             operation["politica_v2"] = {"status": "SEM_AVALIACAO"}
+        try:
+            from app.services.contrato_cedido_service import contrato_cedido_view
+            operation["contrato_cedido"] = contrato_cedido_view(operation_id)
+        except Exception:
+            operation["contrato_cedido"] = {}
         return await asyncio.to_thread(self._render_pdf, operation)
 
     def _render_pdf(self, operation: dict[str, Any]) -> bytes:

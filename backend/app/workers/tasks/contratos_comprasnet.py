@@ -600,6 +600,12 @@ def _normalize_contract(
     _, organization, agency = _nested_contract_party(contract)
     end = _date(contract.get("vigencia_fim"))
     renewable = _plain_text(contract.get("prorrogavel"))
+    objeto = contract.get("objeto")
+    num_parcelas = _optional_int(contract.get("num_parcelas"))
+    sob_demanda = num_parcelas == 1 and any(
+        term in _plain_text(objeto)
+        for term in ("aquisicao", "fornecimento", "registro de preco")
+    )
     return {
         "contrato_id": contract.get("id"),
         "numero": contract.get("numero"),
@@ -623,12 +629,13 @@ def _normalize_contract(
         "valor_inicial": _optional_number(contract.get("valor_inicial")),
         "valor_global": _optional_number(contract.get("valor_global")),
         "valor_parcela": _optional_number(contract.get("valor_parcela")),
-        "num_parcelas": _optional_int(contract.get("num_parcelas")),
+        "num_parcelas": num_parcelas,
         "situacao": contract.get("situacao"),
         "prorrogavel": (
             True if renewable == "sim" else False if renewable == "nao" else None
         ),
-        "objeto": contract.get("objeto"),
+        "objeto": objeto,
+        "modalidade_execucao": "SOB_DEMANDA" if sob_demanda else "CONTINUO",
         "fornecedor_cnpj": _supplier_cnpj(contract),
         "match_confianca": "CNPJ_CONFERIDO",
     }
@@ -639,9 +646,49 @@ def _empty_contract() -> dict[str, Any]:
         "contrato_id", "numero", "uasg", "uasg_nome", "orgao",
         "vigencia_inicio", "vigencia_fim", "prazo_vincendo_meses",
         "valor_inicial", "valor_global", "valor_parcela", "num_parcelas",
-        "situacao", "prorrogavel", "objeto", "fornecedor_cnpj",
+        "situacao", "prorrogavel", "objeto", "modalidade_execucao", "fornecedor_cnpj",
     )
     return {**{field: None for field in fields}, "match_confianca": "SEM_MATCH"}
+
+
+def _history_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Keep the compact, display-safe portion of a Comprasnet amendment."""
+    def value(*keys: str):
+        return next((item.get(key) for key in keys if item.get(key) not in (None, "")), None)
+
+    def iso(*keys: str):
+        parsed = _date(value(*keys))
+        return parsed.isoformat() if parsed else None
+
+    observation = value("observacao", "observação", "objeto", "descricao", "descrição")
+    return {
+        "tipo": value("tipo", "tipo_evento", "descricao_tipo", "descricaoTipo"),
+        "numero": value("numero", "numero_aditivo", "numeroAditivo"),
+        "data_assinatura": iso("data_assinatura", "dataAssinatura", "data"),
+        "vigencia_inicio": iso("vigencia_inicio", "data_inicio_vigencia", "dataInicioVigencia"),
+        "vigencia_fim": iso("vigencia_fim", "data_fim_vigencia", "dataFimVigencia"),
+        "valor_global": _optional_number(value("valor_global", "valor", "valor_final", "valorGlobal")),
+        "observacao": str(observation)[:500] if observation else None,
+    }
+
+
+def _history_summary(contract: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
+    extensions = [item for item in history if "prorrog" in _plain_text(item.get("tipo"))]
+    value_changes = [
+        item for item in history
+        if any(term in _plain_text(item.get("tipo")) for term in ("acresc", "supress", "valor"))
+    ]
+    ends = [
+        value for value in [contract.get("vigencia_fim"), *(item.get("vigencia_fim") for item in history)]
+        if value
+    ]
+    latest = max(extensions, key=lambda item: item.get("data_assinatura") or "", default=None)
+    return {
+        "n_prorrogacoes": len(extensions),
+        "ultima_prorrogacao": latest.get("data_assinatura") if latest else None,
+        "vigencia_original_fim": min(ends) if ends else None,
+        "acrescimos_valor": round(sum(_number(item.get("valor_global")) for item in value_changes), 2),
+    }
 
 
 def _lag_days(start: Any, end: Any) -> int | None:
@@ -1006,17 +1053,21 @@ def _fetch(
         contract_id = contract.get("contrato_id")
         invoices: list[dict[str, Any]] = []
         commitments: list[dict[str, Any]] = []
+        history: list[dict[str, Any]] = []
         enrichment_errors: list[dict[str, str]] = []
         for name, path in (
             ("faturas", f"/api/contrato/{contract_id}/faturas"),
             ("empenhos", f"/api/contrato/{contract_id}/empenhos"),
+            ("historico", f"/api/contrato/{contract_id}/historico"),
         ):
             try:
                 items = _as_items(comprasnet_client.get(path))
                 if name == "faturas":
                     invoices = items
-                else:
+                elif name == "empenhos":
                     commitments = items
+                else:
+                    history = [_history_item(item) for item in items]
             except Exception as exc:
                 enrichment_errors.append({"endpoint": name, "erro": str(exc)[:300]})
                 logger.warning(
@@ -1029,6 +1080,7 @@ def _fetch(
 
         performance = _performance(invoices)
         commitment_metrics = _commitments(commitments)
+        history_summary = _history_summary(contract, history)
         predictability = _predictability(contract)
         consistency, flags = _margin_consistency(
             contract.get("valor_global"),
@@ -1055,6 +1107,8 @@ def _fetch(
             "cotacao_id": cotacao_id,
             "origem_numero_contrato": contract_number_source,
             "contrato_comprasnet": contract,
+            "historico": history,
+            **history_summary,
             "performance_contratual": performance,
             "empenhos": commitment_metrics,
             # Persist the payload already fetched above for the informational

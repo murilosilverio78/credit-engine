@@ -906,6 +906,13 @@ function CompletedView({
             ) : null}
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              className="flex h-8 items-center gap-1 rounded-md border border-border px-3 text-xs text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              href={`/operations/${operationId}/contrato-cedido`}
+            >
+              Contrato cedido
+              <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
+            </Link>
             {operation.status === "completed" ? (
               <Link
                 className="flex h-8 items-center gap-1 rounded-md border border-border px-3 text-xs text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
