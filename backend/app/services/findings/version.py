@@ -3,7 +3,7 @@
 Version 23 detalha antecipações concorrentes e separa depósitos de garantia.
 """
 
-EMITTER_VERSION = "23"
+EMITTER_VERSION = "24"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

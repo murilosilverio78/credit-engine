@@ -386,10 +386,24 @@ def test_portal_is_not_applicable_without_found_comprasnet(monkeypatch):
     assert result["status_consulta"] == "NAO_APLICAVEL"
 
 
-def test_supplier_payment_mentioning_withholding_is_excluded_anywhere_in_observation():
+def test_tax_orders_are_detected_only_by_leading_keyword():
     from app.services.findings.adapters.fluxo_caixa import _is_tax_or_withholding
 
     payment = {"observacao": "LIQUIDACAO DE NF(S): 38, 42, 43, CONTRATO Nº: 00004/2025 - DIRETIVA PATRIMONIAL LTDA - RETENCAO DE INSS CONFORME IN 971"}
-    assert _is_tax_or_withholding(payment)
-    for text in ("INSS NF(S): 105, 108", "IRPJ DE NF.(S): 105", "INSS-NFS(S) 3906", "RETENCAO DO ISS, CONFORME LC 116/2003", "ISS S/ SERVICO DE RECEPCAO"):
+    assert not _is_tax_or_withholding(payment)
+    for text in (
+        "INSS NF(S): 105, 108", "IRPJ DE NF.(S): 105", "INSS-NFS(S) 3906",
+        "RETENCAO DO ISS, CONFORME LC 116/2003", "ISS S/ SERVICO DE RECEPCAO",
+        "ISSQN: NFSE 1586, 1ª MEDICAO", "TRIBUTOS FEDERAIS: NFSE 1185", "TRIB.FED: NFSE 1242",
+        "TRIB. FED.: NFSE 1344", "TR.F:NFSE 1172,7  MED DA OBRA",
+    ):
         assert _is_tax_or_withholding({"observacao": text}), text
+
+
+def test_deposit_guarantee_only_when_observation_starts_with_it():
+    from app.services.findings.adapters.fluxo_caixa import _is_deposit_guarantee
+
+    assert _is_deposit_guarantee({"observacao": "DEPOSITO GARANTIA R$ 69.069,27, NF 2816 CONTRATO 08/2025"})
+    assert _is_deposit_guarantee({"observacao": "CONTA DEPOSITO VINCULADA - NF 10"})
+    assert not _is_deposit_guarantee({"observacao": "LIQUIDACAO DE NF(S): 38, 42 CONTRATO Nº 00004/2025 - RETENCAO EM CONTA VINCULADA CONFORME IN 05"})
+    assert not _is_deposit_guarantee({"observacao": "PAGAMENTO NOTA FISCAL 2780 NO VALOR DE R$ 386.732,10 DEPOSITO GARANTIA R$ 65.745,84"})

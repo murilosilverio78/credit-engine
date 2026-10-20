@@ -103,7 +103,13 @@ _CITED_CONTRACT = re.compile(
     r"(?:(\d{4})\s*/\s*(\d+)|(\d+)\s*/\s*(\d{4}))\b",
     re.IGNORECASE,
 )
-_TRIBUTARY_ORDER = re.compile(r"\b(?:INSS|IRPJ|IRRF|CSLL|PIS|COFINS|ISS|DARF|RETENCAO)\b")
+# Only orders whose observation STARTS with a tax keyword are tax payments:
+# supplier payments routinely mention "RETENCAO DE INSS" later in the text
+# (validated on UG 257050: 32% -> 98% reconciliation). Do not unanchor.
+_TRIBUTARY_ORDER = re.compile(
+    r"^\W*(?:\d+\s*-\s*)?(?:INSS|IRPJ|IRRF|CSLL|PIS|COFINS|ISSQN|ISS|DARF|RETENCAO"
+    r"|TRIBUTOS?\s+FEDERAIS|TRIB\.?\s*FED|TR\.?\s*F\s*:)"
+)
 _OPERATION_NUMBER = re.compile(r"\b(?:N\s*[º°O.]?\s*)?OP\.?\s*(\d+)\b")
 _BANK_NUMBER = re.compile(r"\b(?:BANCO|BCO)\s*(?:N\s*[º°O.]?\s*)?(\d+)\b")
 _ANTICIPATION_NUMBER = re.compile(r"\bANTECIPAGOV\s+(?:N\s*[º°O.]?\s*)?(?:OP\.?\s*)?(\d+)\b")
@@ -125,12 +131,14 @@ def _is_tax_or_withholding(order: dict[str, Any]) -> bool:
 
 
 def _is_deposit_guarantee(order: dict[str, Any]) -> bool:
-    observation = _normalized_observation(order.get("observacao"))
-    return (
-        observation.startswith("DEPOSITO GARANTIA")
-        or "CONTA VINCULADA" in observation
-        or "CONTA DEPOSITO VINCULADA" in observation
-    )
+    # Anchored on purpose: supplier payments often mention the conta vinculada
+    # retention later in the text and must stay in the reconciliation.
+    observation = _normalized_observation(order.get("observacao")).lstrip(" -:.")
+    return bool(re.match(
+        r"(?:DEPOSITO\s+(?:DE\s+)?GARANTIA|DEPOSITO\s+(?:EM\s+)?CONTA\s+(?:DEPOSITO\s+)?VINCULADA"
+        r"|CONTA\s+(?:DEPOSITO\s+)?VINCULADA)",
+        observation,
+    ))
 
 
 def _document_ug(order: dict[str, Any]) -> str:
