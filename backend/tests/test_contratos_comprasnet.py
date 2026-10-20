@@ -1041,8 +1041,9 @@ def test_history_is_persisted_and_derives_extensions_and_on_demand_mode(monkeypa
             "/api/contrato/ugorigem/158132/numeroano/000422026": raw,
             "/api/contrato/42/faturas": [], "/api/contrato/42/empenhos": [],
             "/api/contrato/42/historico": [
-                {"tipo": "Prorrogação", "numero": "1", "dataAssinatura": "01/01/2027", "dataFimVigencia": "2028-03-15"},
-                {"tipo": "Acréscimo de valor", "numero": "2", "valor": "20.000,00"},
+                {"tipo": "Contrato original", "numero": "0", "dataAssinatura": "01/01/2026", "valor": "100.000,00"},
+                {"tipo": "Prorrogação", "numero": "1", "dataAssinatura": "01/01/2027", "dataFimVigencia": "2028-03-15", "valor": "125.000,00"},
+                {"tipo": "Aditivo", "numero": "2", "dataAssinatura": "01/06/2027", "valor": "150.000,00"},
             ],
         }),
     )
@@ -1050,8 +1051,9 @@ def test_history_is_persisted_and_derives_extensions_and_on_demand_mode(monkeypa
     assert result["contrato_comprasnet"]["modalidade_execucao"] == "SOB_DEMANDA"
     assert result["n_prorrogacoes"] == 1
     assert result["ultima_prorrogacao"] == "2027-01-01"
-    assert result["acrescimos_valor"] == 20_000.0
-    assert result["historico"][0]["vigencia_fim"] == "2028-03-15"
+    assert result["acrescimos_valor"] == 50_000.0
+    assert result["valor_original"] == 100_000.0
+    assert result["historico"][1]["vigencia_fim"] == "2028-03-15"
 
 
 def test_history_failure_preserves_previous_found_snapshot(monkeypatch):

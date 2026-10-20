@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from app.integrations.comprasnet.parsing import parse_data, parse_number
-from app.services.findings.adapters.fluxo_caixa import reconcile_payments
+from app.services.findings.adapters.fluxo_caixa import _month, reconcile_payments
 from app.services.findings.version import EMITTER_VERSION
 
 
@@ -60,21 +60,19 @@ def contrato_cedido_view(operation_id: str, *, database=None) -> dict[str, Any]:
     glosa = round(sum(_number(item.get("glosa")) for item in invoices), 2)
     liquid = round(sum(_number(item.get("valorliquido")) or max(_number(item.get("valor")) - _number(item.get("glosa")), 0) for item in invoices), 2)
     received = round(sum(_number(order.get("valor")) for order in paid_orders.values()), 2)
-    total = _number(contract.get("valor_global")) + _number(compras.get("acrescimos_valor"))
+    total = _number(contract.get("valor_global"))
     first = parse_data(contract.get("vigencia_inicio"))
     latest_invoice = max((parse_data(item.get("emissao")) or parse_data(item.get("data_liquidacao")) for item in invoices), default=None)
     alert = bool(first and first <= date.today() - timedelta(days=180) and (not latest_invoice or latest_invoice <= date.today() - timedelta(days=180)))
 
     monthly: dict[tuple[int, int], dict[str, Any]] = {}
     for invoice in invoices:
-        try:
-            reference = date(int(invoice.get("anoref")), int(invoice.get("mesref")), 1)
-        except (TypeError, ValueError):
-            reference = parse_data(invoice.get("dados_referencia")) or parse_data(invoice.get("emissao")) or parse_data(invoice.get("data_liquidacao"))
-        if not reference:
+        competence = _month(invoice)
+        if not competence:
             continue
-        key = (reference.year, reference.month)
-        item = monthly.setdefault(key, {"competencia": f"{reference.month:02d}/{reference.year}", "bruto": 0.0, "glosa": 0.0, "liquido": 0.0, "data_liquidacao": None, "data_pagamento": None, "valor_pago": 0.0, "dias_ate_pagamento": None, "deposito_vinculado": False})
+        year, month = competence
+        key = competence
+        item = monthly.setdefault(key, {"competencia": f"{month:02d}/{year}", "bruto": 0.0, "glosa": 0.0, "liquido": 0.0, "data_liquidacao": None, "data_pagamento": None, "valor_pago": 0.0, "dias_ate_pagamento": None, "deposito_vinculado": False})
         item["bruto"] += _number(invoice.get("valor")); item["glosa"] += _number(invoice.get("glosa")); item["liquido"] += _number(invoice.get("valorliquido")) or max(_number(invoice.get("valor")) - _number(invoice.get("glosa")), 0)
         item["data_liquidacao"] = invoice.get("data_liquidacao") or item["data_liquidacao"]
         order = payments_by_invoice.get(id(invoice))
@@ -90,7 +88,7 @@ def contrato_cedido_view(operation_id: str, *, database=None) -> dict[str, Any]:
     risk_codes = ("saldo_empenho_ano", "empenho_insuficiente", "prazo_ateste_dias", "prazo_liquidacao_dias", "prazo_pagamento_dias", "faturas_liquidadas_sem_pagamento", "antecipacao_concorrente", "cobertura_parcela")
     return {
         "status": compras.get("status_consulta") or "NAO_VERIFICADO",
-        "identificacao": {"objeto": contract.get("objeto"), "orgao": contract.get("orgao"), "uasg": contract.get("uasg"), "numero": contract.get("numero"), "modalidade_execucao": contract.get("modalidade_execucao"), "vigencia": {"inicio": contract.get("vigencia_inicio"), "fim": contract.get("vigencia_fim")}, "valor_global": contract.get("valor_global"), "prorrogavel": contract.get("prorrogavel"), "n_prorrogacoes": compras.get("n_prorrogacoes", 0), "historico": compras.get("historico") or []},
+        "identificacao": {"objeto": contract.get("objeto"), "orgao": contract.get("orgao"), "uasg": contract.get("uasg"), "numero": contract.get("numero"), "modalidade_execucao": contract.get("modalidade_execucao"), "vigencia": {"inicio": contract.get("vigencia_inicio"), "fim": contract.get("vigencia_fim")}, "valor_original": compras.get("valor_original") or contract.get("valor_inicial"), "valor_vigente": compras.get("valor_vigente") or contract.get("valor_global"), "prorrogavel": contract.get("prorrogavel"), "n_prorrogacoes": compras.get("n_prorrogacoes", 0), "historico": compras.get("historico") or []},
         "execucao": {"contratado": contract.get("valor_global"), "faturado_bruto": gross, "glosa": glosa, "faturado_liquido": liquid, "recebido": received, "depositos_conta_vinculada": deposits, "a_receber": round(max(total - gross, 0), 2), "pct_executado": round(gross / total, 6) if total else None, "alerta_sem_execucao": alert},
         "fluxo_mensal": [monthly[key] for key in sorted(monthly)],
         "risco": {**{code: findings.get(code) for code in risk_codes}, "capacidade_memoria": operation.get("capacidade_memoria")},

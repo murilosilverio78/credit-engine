@@ -673,11 +673,11 @@ def _history_item(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _history_summary(contract: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
+    ordered = sorted(history, key=lambda item: item.get("data_assinatura") or "")
     extensions = [item for item in history if "prorrog" in _plain_text(item.get("tipo"))]
-    value_changes = [
-        item for item in history
-        if any(term in _plain_text(item.get("tipo")) for term in ("acresc", "supress", "valor"))
-    ]
+    values = [item.get("valor_global") for item in ordered if item.get("valor_global") is not None]
+    original_value = values[0] if values else contract.get("valor_inicial") or contract.get("valor_global")
+    increments = [max(float(current) - float(previous), 0) for previous, current in zip(values, values[1:])]
     ends = [
         value for value in [contract.get("vigencia_fim"), *(item.get("vigencia_fim") for item in history)]
         if value
@@ -687,7 +687,9 @@ def _history_summary(contract: dict[str, Any], history: list[dict[str, Any]]) ->
         "n_prorrogacoes": len(extensions),
         "ultima_prorrogacao": latest.get("data_assinatura") if latest else None,
         "vigencia_original_fim": min(ends) if ends else None,
-        "acrescimos_valor": round(sum(_number(item.get("valor_global")) for item in value_changes), 2),
+        "acrescimos_valor": round(sum(increments), 2),
+        "valor_original": original_value,
+        "valor_vigente": contract.get("valor_global"),
     }
 
 
