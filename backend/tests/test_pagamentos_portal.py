@@ -414,9 +414,52 @@ def test_portal_falls_back_without_uasg_and_filters_contract_observation(monkeyp
     monkeypatch.setattr(pagamentos_portal, "_pages", pages)
     result = pagamentos_portal._fetch("02955426000124", operation_id="op", today=date(2026, 10, 19))
 
-    assert result["filtro_usado"] == "OBSERVACAO"
+    assert result["filtro_usado"] == "UASG+OBSERVACAO"
     assert len(result["ordens_bancarias"]) == 2
     assert calls == [(2026, "194004"), (2025, "194004"), (2026, None), (2025, None)]
+
+
+def test_completed_empty_ug_keeps_confirmed_zero_results_when_fallback_is_incomplete(monkeypatch):
+    comprasnet = _comprasnet_found()
+    fallback_limits = []
+    monkeypatch.setattr(
+        pagamentos_portal,
+        "_context",
+        lambda _op: ({"cnpj": "02955426000124"}, comprasnet, {}),
+    )
+    monkeypatch.setattr(pagamentos_portal.httpx, "Client", lambda **_kwargs: _Client())
+
+    def pages(_client, _cnpj, _year, uasg, **kwargs):
+        if uasg:
+            return [], {"registros": 0, "paginas_lidas": 1, "atingiu_cap": False, "parcial": False}
+        fallback_limits.append(kwargs["max_pages"])
+        return [], {"registros": 0, "paginas_lidas": 20, "atingiu_cap": True, "parcial": False}
+
+    monkeypatch.setattr(pagamentos_portal, "_pages", pages)
+    result = pagamentos_portal._fetch("02955426000124", operation_id="op", today=date(2026, 10, 19))
+
+    assert result["status_consulta"] == "ENCONTRADO"
+    assert result["ordens_bancarias"] == []
+    assert result["filtro_usado"] == "UASG"
+    assert result["paginacao"]["parcial"] is False
+    assert result["fallback_observacao"] == {"status": "INCOMPLETO", "paginas": 40}
+    assert fallback_limits == [20, 20]
+
+    findings = {item.codigo: item for item in emit_fluxo_caixa(
+        {
+            "contratos_comprasnet": {
+                "status_consulta": "ENCONTRADO",
+                "contrato_comprasnet": {"numero": "00076/2026", "uasg": "194004"},
+                "faturas": [_invoice("1")],
+            },
+            "pagamentos_portal": result,
+        },
+        fingerprint="f",
+        operation={"data_referencia": "19/10/2026"},
+    )}
+    assert findings["antecipacao_concorrente"].estado == Estado.CONFIRMADO
+    assert findings["pago_portal_vs_comprasnet"].estado == Estado.CONFIRMADO
+    assert findings["pago_portal_vs_comprasnet"].valor["pago_portal_ano"] == 0.0
 
 
 def test_portal_uses_documented_ug_filter_and_persists_ug_payload_fields(monkeypatch):

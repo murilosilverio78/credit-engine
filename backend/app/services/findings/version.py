@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 27 registra a degradação de achados de pagamentos quando o Portal foi lido parcialmente.
+Version 28 separa a completude da busca por UG do fallback complementar por observação.
 """
 
-EMITTER_VERSION = "27"
+EMITTER_VERSION = "28"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

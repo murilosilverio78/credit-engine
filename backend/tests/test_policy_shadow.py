@@ -2,6 +2,9 @@ from datetime import date
 
 from app.services.policy import shadow
 from app.services.policy.engine import _limit
+from app.services.policy.inputs import montar_entrada
+from app.services.findings.emitter import REQUIRED
+from app.services.findings.version import EMITTER_VERSION
 from app.services.policy.types import EntradaPolitica, FindingValue
 from tests.fakes.postgrest import Postgrest
 
@@ -194,6 +197,48 @@ def test_automatic_comparison_failure_preserves_primary_shadow_run(monkeypatch):
     shadow.executar_sombra_automatica("op", database=database)
 
     assert calls == [("op", {"database": database, "aplicar": True})]
+
+
+def test_automatic_shadow_reemits_old_findings_before_evaluating(monkeypatch):
+    database = Postgrest({
+        "operations": [{"id": "op"}],
+        "finding_runs": [
+            {"id": f"current-{specialist}", "operation_id": "op", "especialista": specialist,
+             "versao_emissor": EMITTER_VERSION, "status": "COMPLETO", "created_at": "2026-10-20"}
+            for specialist in REQUIRED if specialist != "cadastro_regularidade"
+        ] + [{
+            "id": "old-cadastro", "operation_id": "op", "especialista": "cadastro_regularidade",
+            "versao_emissor": str(int(EMITTER_VERSION) - 1), "status": "COMPLETO", "created_at": "2026-10-19",
+        }],
+        "policy_versions": [],
+    })
+    reemissions = []
+    evaluated = []
+
+    def reemit(operation_id, *, aplicar, database):
+        reemissions.append((operation_id, aplicar))
+        database.tables["finding_runs"].append({
+            "id": "current-cadastro", "operation_id": operation_id,
+            "especialista": "cadastro_regularidade", "versao_emissor": EMITTER_VERSION,
+            "status": "COMPLETO", "created_at": "2026-10-20T12:00:00",
+        })
+
+    def evaluate(operation_id, **_kwargs):
+        entrada = montar_entrada(operation_id, database=database)
+        assert entrada.indisponiveis == set()
+        evaluated.append("DECISAO_CALCULADA")
+        return {"status_decisao": "DECISAO_CALCULADA"}
+
+    monkeypatch.setattr("app.services.findings.backfill.reemitir_operacao", reemit)
+    monkeypatch.setattr(
+        shadow, "load_policy", lambda **_kwargs: {"version": {"versao": 3, "status": "SOMBRA"}},
+    )
+    monkeypatch.setattr(shadow, "avaliar_sombra", evaluate)
+
+    shadow.executar_sombra_automatica("op", database=database)
+
+    assert reemissions == [("op", True)]
+    assert evaluated == ["DECISAO_CALCULADA"]
 
 
 def test_shadow_classifies_missing_runs_and_dry_run_does_not_persist(monkeypatch):

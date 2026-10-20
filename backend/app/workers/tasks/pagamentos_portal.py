@@ -17,6 +17,7 @@ from app.workers.http_utils import fetch_json_with_retry, portal_api_url, portal
 
 
 MAX_PAGES = 300
+FALLBACK_MAX_PAGES = 20
 MAX_SECONDS = 120
 PARTIAL_RETRY_DELAY_SECONDS = 5 * 60
 
@@ -57,7 +58,13 @@ def _context(operation_id: str) -> tuple[dict[str, Any], dict[str, Any], dict[st
 
 
 def _pages(
-    client: httpx.Client, cnpj: str, year: int, uasg: str | None, *, deadline: float,
+    client: httpx.Client,
+    cnpj: str,
+    year: int,
+    uasg: str | None,
+    *,
+    deadline: float,
+    max_pages: int = MAX_PAGES,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     records: list[dict[str, Any]] = []
     page = 1
@@ -66,7 +73,7 @@ def _pages(
         if time.monotonic() >= deadline:
             partial = True
             break
-        if page > MAX_PAGES:
+        if page > max_pages:
             break
         query = f"?codigoPessoa={cnpj}&fase=3&ano={year}&pagina={page}"
         if uasg:
@@ -93,7 +100,7 @@ def _pages(
     return records, {
         "paginas_lidas": page - 1,
         "registros": len(records),
-        "atingiu_cap": page > MAX_PAGES,
+        "atingiu_cap": page > max_pages,
         "parcial": partial,
     }
 
@@ -140,33 +147,61 @@ def _fetch(
         from app.core.config import settings
         with httpx.Client(timeout=20, verify=settings.HTTPX_VERIFY_SSL) as client:
             deadline = time.monotonic() + MAX_SECONDS
-            batches = []
+            ug_batches = []
             for year in years:
                 batch = _pages(client, cnpj or operation.get("cnpj") or "", year, uasg, deadline=deadline)
-                batches.append(batch)
+                ug_batches.append(batch)
                 if batch[1].get("parcial"):
                     break
-            records = [item for batch, _ in batches for item in batch]
-            pagination = {str(year): page for year, (_, page) in zip(years, batches)}
-            partial = any(page.get("parcial") for _, page in batches)
+            records = [item for batch, _ in ug_batches for item in batch]
+            pagination = {str(year): page for year, (_, page) in zip(years, ug_batches)}
+            # ``parcial`` describes only the authoritative UG listing.  A
+            # page cap means that listing did not finish and therefore must
+            # not be upgraded by the complementary observation fallback.
+            partial = any(
+                page.get("parcial") or page.get("atingiu_cap")
+                for _, page in ug_batches
+            )
             filter_used = "UASG"
+            fallback_observacao = None
             if not records and not partial:
-                batches = []
+                fallback_batches = []
                 for year in years:
-                    batch = _pages(client, cnpj or operation.get("cnpj") or "", year, None, deadline=deadline)
-                    batches.append(batch)
+                    batch = _pages(
+                        client,
+                        cnpj or operation.get("cnpj") or "",
+                        year,
+                        None,
+                        deadline=deadline,
+                        max_pages=FALLBACK_MAX_PAGES,
+                    )
+                    fallback_batches.append(batch)
                     if batch[1].get("parcial"):
                         break
-                records = [item for batch, _ in batches for item in batch]
-                records = [
-                    item for item in records
+                fallback_records = [item for batch, _ in fallback_batches for item in batch]
+                matched_records = [
+                    item for item in fallback_records
                     if number in number_tokens(item.get("observacao") or item.get("observacaoDocumento"))
                 ]
-                pagination = {str(year): page for year, (_, page) in zip(years, batches)}
-                partial = any(page.get("parcial") for _, page in batches)
-                filter_used = "OBSERVACAO"
+                if matched_records:
+                    records = matched_records
+                    filter_used = "UASG+OBSERVACAO"
+                incomplete = any(
+                    page.get("parcial") or page.get("atingiu_cap")
+                    for _, page in fallback_batches
+                )
+                if incomplete:
+                    fallback_observacao = {
+                        "status": "INCOMPLETO",
+                        "paginas": sum(
+                            int(page.get("paginas_lidas") or 0)
+                            for _, page in fallback_batches
+                        ),
+                    }
         pagination["parcial"] = partial
         result = {"status_consulta": "ENCONTRADO", "status_atualizacao": "ATUALIZADO", "ordens_bancarias": [_order(item) for item in records], "filtro_usado": filter_used, "anos": years, "paginacao": pagination}
+        if fallback_observacao:
+            result["fallback_observacao"] = fallback_observacao
         if partial and not retry_attempt:
             _schedule_partial_retry(operation_id)
         return result

@@ -10,6 +10,8 @@ from typing import Any
 import structlog
 
 from app.services.policy.engine import avaliar
+from app.services.findings.emitter import REQUIRED
+from app.services.findings.version import EMITTER_VERSION
 from app.services.policy.inputs import montar_entrada
 from app.services.policy.loader import load_policy
 
@@ -311,6 +313,60 @@ def versao_arquivada_anterior(
         return None
 
 
+def _especialistas_sem_run_atual(operation_id: str, *, database) -> set[str]:
+    """Return specialists without a run produced by the current emitter.
+
+    Policy input intentionally never falls back to an earlier emitter version.
+    Checking the same invariant here lets automatic shadow refresh the
+    append-only findings once before it evaluates the operation.
+    """
+    rows = _rows(
+        database.table("finding_runs")
+        .select("especialista")
+        .eq("operation_id", operation_id)
+        .eq("versao_emissor", EMITTER_VERSION)
+    )
+    presentes = {
+        str(row.get("especialista"))
+        for row in rows
+        if row.get("especialista")
+    }
+    return set(REQUIRED) - presentes
+
+
+def _garantir_runs_sombra_atuais(operation_id: str, *, database) -> None:
+    """Re-emit all findings once when the current policy cannot read them."""
+    try:
+        ausentes = _especialistas_sem_run_atual(operation_id, database=database)
+    except Exception as exc:
+        logger.warning(
+            "policy_shadow.current_runs_lookup_failed",
+            operation_id=operation_id,
+            error=str(exc),
+        )
+        return
+    if not ausentes:
+        return
+    try:
+        from app.services.findings.backfill import reemitir_operacao
+
+        logger.info(
+            "policy_shadow.reemitting_current_findings",
+            operation_id=operation_id,
+            especialistas=sorted(ausentes),
+            versao_emissor=EMITTER_VERSION,
+        )
+        reemitir_operacao(operation_id, aplicar=True, database=database)
+    except Exception as exc:
+        # Shadow remains observational.  ``montar_entrada`` will still mark
+        # missing current runs as unavailable instead of reading old ones.
+        logger.warning(
+            "policy_shadow.current_findings_reemission_failed",
+            operation_id=operation_id,
+            error=str(exc),
+        )
+
+
 def executar_sombra_automatica(operation_id: str, *, database=None) -> None:
     """Run automatic shadow safely; it must never affect the official flow."""
     try:
@@ -318,6 +374,10 @@ def executar_sombra_automatica(operation_id: str, *, database=None) -> None:
             from app.core.database import supabase
 
             database = supabase
+        # _complete_analysis also calls this helper for score reprocessing,
+        # so this gate covers both normal completion and reprocessing without
+        # creating a second shadow run.
+        _garantir_runs_sombra_atuais(operation_id, database=database)
         try:
             policy = load_policy(database=database, status="SOMBRA")
             version = policy["version"].get("versao")
