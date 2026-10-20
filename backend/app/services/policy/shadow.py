@@ -14,7 +14,7 @@ from app.services.policy.inputs import montar_entrada
 from app.services.policy.loader import load_policy
 
 # Bump whenever shadow comparison or classification semantics change.
-SHADOW_LOGIC_VERSION = "3"
+SHADOW_LOGIC_VERSION = "4"
 _FIELDS = (
     "merit",
     "merit_potencial",
@@ -397,6 +397,15 @@ def _policy_content_hash(
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+def _persist_shadow(database, payload: dict[str, Any]) -> None:
+    """Append one idempotent shadow result without the loaded policy envelope."""
+    database.table("policy_shadow_runs").upsert(
+        {key: value for key, value in payload.items() if key != "policy_version"},
+        on_conflict="operation_id,policy_version_id,entrada_hash",
+        ignore_duplicates=True,
+    ).execute()
+
+
 def avaliar_sombra(
     operation_id: str,
     *,
@@ -554,11 +563,7 @@ def avaliar_sombra(
         "parametros_divergentes": [],
     }
     if aplicar:
-        database.table("policy_shadow_runs").upsert(
-            {key: value for key, value in payload.items() if key != "policy_version"},
-            on_conflict="operation_id,policy_version_id,entrada_hash",
-            ignore_duplicates=True,
-        ).execute()
+        _persist_shadow(database, payload)
     return payload
 
 
@@ -576,6 +581,77 @@ def _comparative_projection(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _rule_identity(rule: dict[str, Any]) -> tuple[str, str, str | None]:
+    return (
+        str(rule.get("codigo") or ""),
+        str(rule.get("classe") or ""),
+        str(rule["parametro_alvo"]) if rule.get("parametro_alvo") is not None else None,
+    )
+
+
+def _fired_rule_identities(result: dict[str, Any]) -> set[tuple[str, str, str | None]]:
+    """Project the engine trail portions that demonstrate a generic rule fired."""
+    fired: set[tuple[str, str, str | None]] = set()
+    for code in result.get("bloqueios") or []:
+        fired.add((str(code), "VETO", None))
+    for item in result.get("condicoes_precedentes") or []:
+        if isinstance(item, dict) and item.get("codigo"):
+            fired.add((str(item["codigo"]), "CONDICAO", "cp"))
+    for item in result.get("alcada_motivos") or []:
+        if isinstance(item, dict) and item.get("codigo"):
+            fired.add((str(item["codigo"]), "AJUSTE", "alcada"))
+    for item in result.get("limite_multiplicadores") or []:
+        if isinstance(item, dict) and item.get("codigo"):
+            fired.add((str(item["codigo"]), "AJUSTE", "limite_mult"))
+    return fired
+
+
+def _comparative_rule_class(
+    diff: dict[str, Any], primary_rules: list[dict[str, Any]],
+    reference_rules: list[dict[str, Any]], primary_result: dict[str, Any],
+) -> tuple[str, list[dict[str, Any]]]:
+    """Classify policy-to-policy deltas without changing official parity class."""
+    reference_identities = {_rule_identity(rule) for rule in reference_rules}
+    seen: set[tuple[str, str, str | None]] = set()
+    new_identities: list[tuple[str, str, str | None]] = []
+    for rule in primary_rules:
+        identity = _rule_identity(rule)
+        if identity not in reference_identities and identity not in seen:
+            new_identities.append(identity)
+            seen.add(identity)
+    fired = _fired_rule_identities(primary_result)
+    rules_new = [
+        {
+            "codigo": code,
+            "classe": classe,
+            "parametro_alvo": target,
+            "disparou": identity in fired,
+        }
+        for identity in new_identities
+        for code, classe, target in [identity]
+    ]
+    if not diff:
+        return "IGUAL", rules_new
+
+    def explains(field: str, identity: tuple[str, str, str | None]) -> bool:
+        _code, classe, target = identity
+        if field in {"vetos", "rating"}:
+            return classe == "VETO"
+        if field == "limite":
+            return classe == "VETO" or (classe == "AJUSTE" and target == "limite_mult")
+        if field == "condicoes_precedentes":
+            return classe == "CONDICAO" and target == "cp"
+        if field == "alcada_minima":
+            return classe == "AJUSTE" and target == "alcada"
+        return False
+
+    fired_new = set(new_identities) & fired
+    return (
+        "ESPERADA" if all(any(explains(field, identity) for identity in fired_new) for field in diff) else "INESPERADA",
+        rules_new,
+    )
+
+
 def comparar_sombra(
     operation_id: str,
     *,
@@ -585,10 +661,16 @@ def comparar_sombra(
     aplicar: bool = False,
 ) -> dict[str, Any]:
     """Runs a draft policy in shadow and compares its decision projection."""
+    if database is None:
+        from app.core.database import supabase
+
+        database = supabase
+    primary_policy = load_policy(database=database, versao=versao, status="SOMBRA")
+    reference_policy = load_policy(database=database, versao=comparar_com, status="SOMBRA")
     primary = avaliar_sombra(
         operation_id,
         database=database,
-        aplicar=aplicar,
+        aplicar=False,
         versao=versao,
     )
     reference = avaliar_sombra(
@@ -607,6 +689,20 @@ def comparar_sombra(
         for key in projected_primary
         if key != "versao" and projected_primary[key] != projected_reference[key]
     }
+    classe_comparativo, regras_novas = _comparative_rule_class(
+        diff,
+        primary_policy["regras"],
+        reference_policy["regras"],
+        primary.get("resultado") or {},
+    )
+    primary["comparativo"] = {
+        "comparar_com": comparar_com,
+        "diff": diff,
+        "regras_novas": regras_novas,
+    }
+    primary["classe_comparativo"] = classe_comparativo
+    if aplicar:
+        _persist_shadow(database, primary)
     return {
         "operation_id": operation_id,
         "versao": projected_primary,

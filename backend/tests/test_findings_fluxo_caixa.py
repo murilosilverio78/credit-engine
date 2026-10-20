@@ -58,7 +58,14 @@ def test_funai_76_cash_flow_reports_invoices_and_unfunded_november_december():
     assert findings["empenho_insuficiente"].valor["valor_descoberto"] == 51_520.26
     assert findings["empenho_insuficiente"].valor["meses_descobertos"] == 2.0
     installment = 100_000 * 0.02 / (1 - (1.02) ** -12)
-    assert findings["cobertura_parcela"].valor == pytest.approx(25_760.13 * .755 / installment)
+    assert findings["cobertura_parcela"].catalogo_versao == 2
+    assert findings["cobertura_parcela"].valor == {
+        "indice": pytest.approx(25_760.13 * .755 / installment),
+        "fonte_fator": "CAPACIDADE_MEMORIA",
+        "fonte_parcela": "PRECIFICADA",
+        "parcela": pytest.approx(installment, abs=.01),
+        "mensal_liquido": pytest.approx(25_760.13 * .755, abs=.01),
+    }
 
 
 def test_new_contract_without_invoices_is_unverified_not_negative():
@@ -85,6 +92,45 @@ def test_coverage_is_unverified_when_rate_is_missing():
     coverage = findings["cobertura_parcela"]
     assert coverage.estado == Estado.NAO_VERIFICADO
     assert coverage.pendencia == {"motivo": "parcela da operação indisponível"}
+
+
+def test_coverage_uses_dedicated_default_factor_when_memory_is_absent(monkeypatch):
+    import app.services.eligibility_params_service as eligibility
+
+    monkeypatch.setattr(eligibility, "get_eligibility_config", lambda: {
+        "cap_fator_liquido_mao_obra": .645,
+        "cap_fator_liquido_demais": .85,
+        "cap_taxa_referencia_am": .035,
+    })
+    operation = _operation() | {
+        "capacidade_memoria": {}, "contrato_dedicacao_exclusiva": True,
+    }
+    findings = _by_code(emit_fluxo_caixa(
+        _snapshots([_invoice(month) for month in range(4, 10)]), fingerprint="f", operation=operation,
+    ))
+
+    coverage = findings["cobertura_parcela"].valor
+    assert coverage["fonte_fator"] == "PARAMETRO_PADRAO"
+    assert coverage["mensal_liquido"] == pytest.approx(25_760.13 * .645, abs=.01)
+
+
+def test_coverage_estimates_installment_before_pricing(monkeypatch):
+    import app.services.eligibility_params_service as eligibility
+
+    monkeypatch.setattr(eligibility, "get_eligibility_config", lambda: {
+        "cap_fator_liquido_mao_obra": .645,
+        "cap_fator_liquido_demais": .85,
+        "cap_taxa_referencia_am": .035,
+    })
+    operation = _operation() | {"taxa_breakdown": None, "prazo_final_meses": 12}
+    findings = _by_code(emit_fluxo_caixa(
+        _snapshots([_invoice(month) for month in range(4, 10)]), fingerprint="f", operation=operation,
+    ))
+
+    coverage = findings["cobertura_parcela"].valor
+    estimated = 100_000 * .035 / (1 - 1.035 ** -12)
+    assert coverage["fonte_parcela"] == "ESTIMADA"
+    assert coverage["parcela"] == pytest.approx(estimated, abs=.01)
 
 
 def test_commitments_without_issue_dates_use_all_rows():

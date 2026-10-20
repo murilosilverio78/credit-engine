@@ -138,7 +138,8 @@ def _informative_text(code: str, value: Any, label: str) -> list[str]:
     if code == "empenho_insuficiente":
         return [f"Empenho insuficiente: {_money(data.get('valor_descoberto'))} descobertos em {_quantity(data.get('meses_descobertos'))} meses"]
     if code == "cobertura_parcela":
-        return [f"Cobertura da parcela estimada: {_percent(value)}"]
+        coverage = data.get("indice") if isinstance(data, dict) else value
+        return [f"Cobertura da parcela estimada: {_percent(coverage)}"]
     if code == "execucao_vs_contratado":
         return [f"Execução faturada versus contratado: {_percent(value)}"]
     if code == "prazo_pagamento_dias":

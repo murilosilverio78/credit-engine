@@ -67,6 +67,16 @@ def _months_between(start: date, end: date) -> int:
     return max((end.year - start.year) * 12 + end.month - start.month + 1, 1)
 
 
+def _pmt(rate: float | None, term: float | None, value: float | None) -> float | None:
+    """Return the fixed monthly installment without accepting partial inputs."""
+    if rate is None or rate < 0 or term is None or term <= 0 or value is None or value <= 0:
+        return None
+    months = int(term)
+    if months != term:
+        return None
+    return value / months if rate == 0 else value * rate / (1 - (1 + rate) ** -months)
+
+
 def _installment(operation: dict[str, Any]) -> float | None:
     pricing = operation.get("taxa_breakdown")
     if not isinstance(pricing, dict):
@@ -85,12 +95,43 @@ def _installment(operation: dict[str, Any]) -> float | None:
         ),
         None,
     )
-    if rate is None or rate < 0 or term is None or term <= 0 or value is None:
-        return None
-    months = int(term)
-    if months != term:
-        return None
-    return value / months if rate == 0 else value * rate / (1 - (1 + rate) ** -months)
+    return _pmt(rate, term, value)
+
+
+def _coverage_inputs(operation: dict[str, Any]) -> tuple[float | None, str | None, float | None, str | None]:
+    """Resolve factor and payment sources without using circular capacity limits."""
+    memory = operation.get("capacidade_memoria")
+    memory = memory if isinstance(memory, dict) else {}
+    factor = _number(memory.get("fator_liquido"))
+    factor_source = "CAPACIDADE_MEMORIA" if factor is not None and factor > 0 else None
+    pricing = operation.get("taxa_breakdown")
+    installment = _installment(operation) if isinstance(pricing, dict) and pricing else None
+    installment_source = "PRECIFICADA" if installment is not None else None
+    needs_defaults = factor_source is None or not pricing
+    parameters: dict[str, Any] = {}
+    if needs_defaults:
+        try:
+            from app.services.eligibility_params_service import get_eligibility_config
+
+            parameters = get_eligibility_config()
+        except Exception:
+            parameters = {}
+    if factor_source is None:
+        dedicated = operation.get("contrato_dedicacao_exclusiva") is True
+        factor_key = "cap_fator_liquido_mao_obra" if dedicated else "cap_fator_liquido_demais"
+        factor = _number(parameters.get(factor_key))
+        if factor is not None and factor > 0:
+            factor_source = "PARAMETRO_PADRAO"
+        else:
+            factor = None
+    if not pricing:
+        installment = _pmt(
+            _number(parameters.get("cap_taxa_referencia_am")),
+            _number(operation.get("prazo_final_meses")),
+            _number(operation.get("valor_solicitado")),
+        )
+        installment_source = "ESTIMADA" if installment is not None else None
+    return factor, factor_source, installment, installment_source
 
 
 def _reference_tokens(value: Any) -> set[str]:
@@ -608,11 +649,29 @@ def emit_fluxo_caixa(
             "faturas_nao_liquidadas_valor": round(unpaid_invoices, 2),
         }, component="contratos_comprasnet", path="empenhos_detalhe", fingerprint=fingerprint))
 
-    memory = operation.get("capacidade_memoria") if isinstance(operation.get("capacidade_memoria"), dict) else {}
-    factor = _number(memory.get("fator_liquido"))
-    installment = _installment(operation)
+    factor, factor_source, installment, installment_source = _coverage_inputs(operation)
     coverage = monthly_average * factor / installment if monthly_average and factor is not None and installment else None
-    result.append(finding("cobertura_parcela", Escopo.OPERACAO, round(coverage, 6), component="contratos_comprasnet", path="faturas,capacidade_memoria,taxa_breakdown", fingerprint=fingerprint) if coverage is not None else _unverified("cobertura_parcela", "faturas,capacidade_memoria,taxa_breakdown", fingerprint, "parcela da operação indisponível" if installment is None else "fator líquido indisponível"))
+    if coverage is None:
+        result.append(_unverified(
+            "cobertura_parcela", "faturas,capacidade_memoria,taxa_breakdown", fingerprint,
+            "parcela da operação indisponível" if installment is None else "fator líquido indisponível",
+        ))
+    else:
+        coverage_finding = finding(
+            "cobertura_parcela", Escopo.OPERACAO,
+            {
+                "indice": round(coverage, 6),
+                "fonte_fator": factor_source,
+                "fonte_parcela": installment_source,
+                "parcela": round(installment, 2),
+                "mensal_liquido": round(monthly_average * factor, 2),
+            },
+            component="contratos_comprasnet",
+            path="faturas,capacidade_memoria,taxa_breakdown,eligibility_parameters",
+            fingerprint=fingerprint,
+            catalog_version=2,
+        )
+        result.append(coverage_finding)
 
     end, global_value = _date(contract.get("vigencia_fim")), _number(contract.get("valor_global"))
     if start and end and global_value and end > start:

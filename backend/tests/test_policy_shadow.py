@@ -47,6 +47,87 @@ def _shadow_result(values, *, limite_multiplicadores=None):
     })()
 
 
+def _rule(code, classe, target=None):
+    return {"codigo": code, "classe": classe, "parametro_alvo": target}
+
+
+def test_comparative_shadow_classifies_fired_new_veto_cp_and_authority_rules():
+    cases = [
+        (
+            {"vetos": {"versao": ["antecipacao"], "comparar_com": []}},
+            [_rule("antecipacao", "VETO")],
+            {"bloqueios": ["antecipacao"]},
+        ),
+        (
+            {"condicoes_precedentes": {"versao": [{"codigo": "empenho"}], "comparar_com": []}},
+            [_rule("empenho", "CONDICAO", "cp")],
+            {"condicoes_precedentes": [{"codigo": "empenho"}]},
+        ),
+        (
+            {"alcada_minima": {"versao": 2, "comparar_com": 1}},
+            [_rule("cobertura", "AJUSTE", "alcada")],
+            {"alcada_motivos": [{"codigo": "cobertura"}]},
+        ),
+    ]
+
+    for diff, primary_rules, result in cases:
+        classe, rules = shadow._comparative_rule_class(diff, primary_rules, [], result)
+        assert classe == "ESPERADA"
+        assert rules == [{**primary_rules[0], "disparou": True}]
+
+
+def test_comparative_shadow_marks_unexplained_limit_and_empty_diff():
+    shared_rule = _rule("rating", "AJUSTE", "limite_mult")
+    unexpected, rules = shadow._comparative_rule_class(
+        {"limite": {"versao": 85, "comparar_com": 100}},
+        [shared_rule], [shared_rule],
+        {"limite_multiplicadores": [{"codigo": "rating"}]},
+    )
+    equal, _rules = shadow._comparative_rule_class({}, [shared_rule], [], {})
+
+    assert unexpected == "INESPERADA"
+    assert rules == []
+    assert equal == "IGUAL"
+
+
+def test_comparar_sombra_persists_comparative_only_on_primary_run(monkeypatch):
+    primary_rule = _rule("empenho", "CONDICAO", "cp")
+    monkeypatch.setattr(
+        shadow,
+        "load_policy",
+        lambda *, versao, **_kwargs: {"version": {"id": f"p{versao}", "versao": versao}, "regras": [primary_rule] if versao == 3 else []},
+    )
+
+    def fake_evaluate(_operation_id, *, versao, **_kwargs):
+        return {
+            "operation_id": "op", "policy_version_id": f"p{versao}", "policy_version": {"versao": versao},
+            "entrada_hash": f"hash-{versao}",
+            "resultado": {
+                "rating": "C", "limite_aprovado_rs": 100, "bloqueios": [],
+                "condicoes_precedentes": [{"codigo": "empenho"}] if versao == 3 else [],
+                "alcada_minima": 1, "taxa_ajuste_pp": 0,
+            },
+        }
+
+    monkeypatch.setattr(shadow, "avaliar_sombra", fake_evaluate)
+    db = _Db()
+
+    compared = shadow.comparar_sombra("op", versao=3, comparar_com=2, database=db, aplicar=True)
+
+    assert len(db.inserted) == 1
+    persisted = db.inserted[0]
+    assert persisted["policy_version_id"] == "p3"
+    assert persisted["classe_comparativo"] == "ESPERADA"
+    assert persisted["comparativo"] == {
+        "comparar_com": 2,
+        "diff": {"condicoes_precedentes": {
+            "versao": [{"codigo": "empenho"}], "comparar_com": [],
+        }},
+        "regras_novas": [{"codigo": "empenho", "classe": "CONDICAO", "parametro_alvo": "cp", "disparou": True}],
+    }
+    assert compared["shadow"]["comparativo"] == persisted["comparativo"]
+
+
 def test_shadow_classifies_missing_runs_and_dry_run_does_not_persist(monkeypatch):
     params = {"score_bloqueio": 20}
     monkeypatch.setattr(shadow, "load_policy", lambda **_kwargs: {"version": {"id": "policy"}, "parametros": params, "regras": []})
@@ -118,12 +199,12 @@ def test_shadow_hash_includes_logic_version(monkeypatch):
     db = _Db()
 
     first = shadow.avaliar_sombra("op", database=db, aplicar=True)
-    monkeypatch.setattr(shadow, "SHADOW_LOGIC_VERSION", "4")
+    monkeypatch.setattr(shadow, "SHADOW_LOGIC_VERSION", "5")
     changed_logic = shadow.avaliar_sombra("op", database=db, aplicar=True)
 
     assert first["entrada_hash"] != changed_logic["entrada_hash"]
-    assert first["resultado"]["shadow_logic_version"] == "3"
-    assert changed_logic["resultado"]["shadow_logic_version"] == "4"
+    assert first["resultado"]["shadow_logic_version"] == "4"
+    assert changed_logic["resultado"]["shadow_logic_version"] == "5"
     assert len(db.inserted) == 2
 
 

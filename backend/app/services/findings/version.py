@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 25 expõe o estado agregado das antecipações concorrentes para a política v3.
+Version 26 registra fontes padrão de fator líquido e parcela para cobertura do contrato.
 """
 
-EMITTER_VERSION = "25"
+EMITTER_VERSION = "26"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

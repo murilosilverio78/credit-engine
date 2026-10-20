@@ -262,7 +262,7 @@ def _v3_rules():
         ),
         _rule(
             "cobertura_parcela", "alcada", 2,
-            {"estados": ["CONFIRMADO"], "comparacao": {"campo": "", "op": "<", "ref": 1.25}},
+            {"estados": ["CONFIRMADO"], "comparacao": {"campo": "indice", "op": "<", "ref": 1.25}},
         ),
     ]
 
@@ -311,13 +311,13 @@ def test_v3_271d9f08_other_contract_4701_and_coverage_apply_authority_only_when_
             {"ativa_mesmo_contrato": False, "encerrada_mesmo_contrato": False, "ativa_outro_contrato": True},
         ),
     })
-    low_coverage = _evaluate_v3({"cobertura_parcela": _finding("cobertura_parcela", 1.10)})
+    low_coverage = _evaluate_v3({"cobertura_parcela": _finding("cobertura_parcela", {"indice": 1.10})})
     no_anticipation = _evaluate_v3({
         "antecipacao_concorrente": _finding(
             "antecipacao_concorrente",
             {"ativa_mesmo_contrato": False, "encerrada_mesmo_contrato": False, "ativa_outro_contrato": False},
         ),
-        "cobertura_parcela": _finding("cobertura_parcela", 1.30),
+        "cobertura_parcela": _finding("cobertura_parcela", {"indice": 1.30}),
     })
 
     assert other_contract.alcada_minima == 2
