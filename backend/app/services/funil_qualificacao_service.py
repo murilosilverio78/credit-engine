@@ -117,7 +117,7 @@ def _load_operation(operation_id: str) -> dict[str, Any]:
     result = (
         supabase.table("operations")
         .select(
-            "id,ambiente,status,valor_enquadrado,valor_enquadrado_pre_capacidade,"
+            "id,ambiente,status,cotacao_id,valor_enquadrado,valor_enquadrado_pre_capacidade,"
             "capacidade_contrato,capacidade_memoria,flags_funil,"
             "valor_global_contrato,contrato_vigencia_inicio,"
             "contrato_vigencia_fim,contrato_dedicacao_exclusiva,"
@@ -127,7 +127,20 @@ def _load_operation(operation_id: str) -> dict[str, Any]:
         .maybe_single()
         .execute()
     )
-    return result.data or {}
+    return result.data if result else {}
+
+
+def _load_cotacao(cotacao_id: str | None) -> dict[str, Any]:
+    if not cotacao_id:
+        return {}
+    result = (
+        supabase.table("cotacoes_broadfactor")
+        .select("cotacao_id,valor_enquadrado,estagio")
+        .eq("cotacao_id", cotacao_id)
+        .maybe_single()
+        .execute()
+    )
+    return result.data if result else {}
 
 
 def _contract_found(snapshots: dict[str, Any]) -> bool:
@@ -378,6 +391,27 @@ def avaliar_qualificacao_funil(operation_id: str) -> tuple[bool, list[str]]:
     return not motivos, motivos
 
 
+def preparar_atualizacao_cotacao_pos_fase2(
+    operation: dict[str, Any],
+    snapshots: dict[str, Any],
+    statuses: dict[str, str],
+    params: dict[str, Any],
+    operation_id: str,
+) -> tuple[str, list[str], dict[str, Any]]:
+    """Build the quote stage patch used by regular and on-demand re-evaluation."""
+    motivos = _avaliar_com_dados(operation, snapshots, statuses, params)
+    qualificada = not motivos
+    estagio = "QUALIFICADA" if qualificada else "DOCUMENTADA"
+    return estagio, motivos, {
+        "estagio": estagio,
+        "estagio_max": estagio,
+        "estagio_motivo": "; ".join(motivos) if motivos else None,
+        "estagio_atualizado_em": datetime.now(timezone.utc).isoformat(),
+        "operation_id": operation_id,
+        "status_ingestao": "AGUARDANDO_RELATORIO" if qualificada else "DOCUMENTADA",
+    }
+
+
 def atualizar_estagio_pos_fase2(cotacao_id: str, operation_id: str) -> tuple[str, list[str]]:
     operation = _load_operation(operation_id)
     snapshots, statuses = _load_snapshots(operation_id)
@@ -406,16 +440,8 @@ def atualizar_estagio_pos_fase2(cotacao_id: str, operation_id: str) -> tuple[str
     else:
         supabase.table("operations").update(operation_updates).eq("id", operation_id).execute()
 
-    motivos = _avaliar_com_dados(operation, snapshots, statuses, params)
-    qualificada = not motivos
-    estagio = "QUALIFICADA" if qualificada else "DOCUMENTADA"
-    data = {
-        "estagio": estagio,
-        "estagio_max": estagio,
-        "estagio_motivo": "; ".join(motivos) if motivos else None,
-        "estagio_atualizado_em": datetime.now(timezone.utc).isoformat(),
-        "operation_id": operation_id,
-        "status_ingestao": "AGUARDANDO_RELATORIO" if qualificada else "DOCUMENTADA",
-    }
+    estagio, motivos, data = preparar_atualizacao_cotacao_pos_fase2(
+        operation, snapshots, statuses, params, operation_id
+    )
     supabase.table("cotacoes_broadfactor").update(data).eq("cotacao_id", cotacao_id).execute()
     return estagio, motivos

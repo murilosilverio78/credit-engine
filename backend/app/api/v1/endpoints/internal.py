@@ -447,6 +447,13 @@ def _resumo_capacidade(operation: dict, *, incluir_execucao: bool) -> dict:
     return resumo
 
 
+def _resumo_cotacao(cotacao: dict) -> dict:
+    return {
+        "valor_enquadrado": cotacao.get("valor_enquadrado"),
+        "estagio": cotacao.get("estagio"),
+    }
+
+
 @router.post("/funil/recalcular-capacidade")
 async def recalcular_capacidade(
     request: RecalcularCapacidadeRequest,
@@ -472,12 +479,23 @@ async def recalcular_capacidade(
 
             before = _resumo_capacidade(operation, incluir_execucao=False)
             status_atual = operation.get("status")
+            cotacao = await asyncio.to_thread(
+                funil._load_cotacao, operation.get("cotacao_id")
+            )
+            cotacao_before = _resumo_cotacao(cotacao)
+            cotacao_result = {
+                "antes": cotacao_before,
+                "depois": cotacao_before.copy(),
+            }
+            if not cotacao:
+                cotacao_result["aviso"] = "cotacao_nao_encontrada"
             if operation.get("ambiente") != "PRODUCAO":
                 results.append({
                     "operation_id": operation_id,
                     "antes": before,
                     "depois": _resumo_capacidade(operation, incluir_execucao=True),
                     "status_atual": status_atual,
+                    "cotacao": cotacao_result,
                     "grava": False,
                     "motivo_ignorada": "ambiente_nao_producao",
                 })
@@ -500,6 +518,7 @@ async def recalcular_capacidade(
                     "antes": before,
                     "depois": _resumo_capacidade(operation, incluir_execucao=True),
                     "status_atual": status_atual,
+                    "cotacao": cotacao_result,
                     "grava": False,
                     "motivo_ignorada": "sem_capacidade",
                 })
@@ -507,23 +526,45 @@ async def recalcular_capacidade(
 
             after_operation = {**operation, **updates}
             after = _resumo_capacidade(after_operation, incluir_execucao=True)
+            cotacao_updates: dict = {}
+            if capacidade["reenquadrado"] and cotacao:
+                _stage, _motivos, cotacao_updates = await asyncio.to_thread(
+                    funil.preparar_atualizacao_cotacao_pos_fase2,
+                    after_operation,
+                    snapshots,
+                    statuses,
+                    params,
+                    operation_id,
+                )
+                cotacao_updates["valor_enquadrado"] = capacidade["valor_enquadrado"]
+                cotacao_result["depois"] = _resumo_cotacao(
+                    {**cotacao, **cotacao_updates}
+                )
             if request.aplicar:
                 supabase.table("operations").update(updates).eq(
                     "id", operation_id
                 ).execute()
+                if cotacao_updates:
+                    supabase.table("cotacoes_broadfactor").update(cotacao_updates).eq(
+                        "cotacao_id", operation.get("cotacao_id")
+                    ).execute()
                 AuditService().log(
                     operation_id=operation_id,
-                    action="operation_capacity_recalculated",
+                    action="operation_status_changed",
                     actor_type="system",
                     previous_value=before,
                     new_value=after,
-                    payload={"contexto": "recalculo_capacidade_sob_demanda"},
+                    payload={
+                        "contexto": "recalculo_capacidade_sob_demanda",
+                        "memoria": capacidade["memoria"],
+                    },
                 )
             results.append({
                 "operation_id": operation_id,
                 "antes": before,
                 "depois": after,
                 "status_atual": status_atual,
+                "cotacao": cotacao_result,
                 "grava": request.aplicar,
                 "motivo_ignorada": None,
             })
