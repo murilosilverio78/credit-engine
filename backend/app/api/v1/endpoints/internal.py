@@ -454,6 +454,14 @@ def _resumo_cotacao(cotacao: dict) -> dict:
     }
 
 
+def _campos_alterados(atual: dict, desejado: dict) -> dict:
+    return {
+        campo: valor
+        for campo, valor in desejado.items()
+        if atual.get(campo) != valor
+    }
+
+
 @router.post("/funil/recalcular-capacidade")
 async def recalcular_capacidade(
     request: RecalcularCapacidadeRequest,
@@ -526,9 +534,14 @@ async def recalcular_capacidade(
 
             after_operation = {**operation, **updates}
             after = _resumo_capacidade(after_operation, incluir_execucao=True)
+            operation_updates = _campos_alterados(operation, updates)
             cotacao_updates: dict = {}
-            if capacidade["reenquadrado"] and cotacao:
-                _stage, _motivos, cotacao_updates = await asyncio.to_thread(
+            if (
+                cotacao
+                and cotacao.get("valor_enquadrado")
+                != capacidade["valor_enquadrado"]
+            ):
+                stage, _motivos, cotacao_updates = await asyncio.to_thread(
                     funil.preparar_atualizacao_cotacao_pos_fase2,
                     after_operation,
                     snapshots,
@@ -537,13 +550,20 @@ async def recalcular_capacidade(
                     operation_id,
                 )
                 cotacao_updates["valor_enquadrado"] = capacidade["valor_enquadrado"]
+                if (
+                    stage == "QUALIFICADA"
+                    and status_atual != "aguardando_relatorio"
+                ):
+                    cotacao_updates.pop("status_ingestao")
                 cotacao_result["depois"] = _resumo_cotacao(
                     {**cotacao, **cotacao_updates}
                 )
-            if request.aplicar:
-                supabase.table("operations").update(updates).eq(
-                    "id", operation_id
-                ).execute()
+            grava = request.aplicar and bool(operation_updates or cotacao_updates)
+            if grava:
+                if operation_updates:
+                    supabase.table("operations").update(operation_updates).eq(
+                        "id", operation_id
+                    ).execute()
                 if cotacao_updates:
                     supabase.table("cotacoes_broadfactor").update(cotacao_updates).eq(
                         "cotacao_id", operation.get("cotacao_id")
@@ -565,7 +585,7 @@ async def recalcular_capacidade(
                 "depois": after,
                 "status_atual": status_atual,
                 "cotacao": cotacao_result,
-                "grava": request.aplicar,
+                "grava": grava,
                 "motivo_ignorada": None,
             })
         except Exception as exc:

@@ -652,6 +652,18 @@ def _snapshots_for_capacity(operation_id, modalidade="CONTINUO", faturas=None):
     ]
 
 
+def _make_operation_match_calculated_capacity(operation, snapshots):
+    from app.services import funil_qualificacao_service
+
+    by_component = {row["component"]: row["parsed_result"] for row in snapshots}
+    statuses = {row["component"]: row["status"] for row in snapshots}
+    capacidade, updates = funil_qualificacao_service.preparar_atualizacao_capacidade(
+        operation, by_component, statuses, CAPACIDADE_PARAMS
+    )
+    operation.update(updates)
+    return capacidade
+
+
 def _cotacao_for_capacity(cotacao_id, **overrides):
     return {
         "cotacao_id": cotacao_id,
@@ -708,11 +720,18 @@ def _record_updates(monkeypatch, db):
 def test_recalcular_capacidade_dry_run_returns_before_after_without_update(monkeypatch):
     operation_id = "00000000-0000-0000-0000-000000000101"
     cotacao_id = "C-101"
-    operation = _operation_for_capacity(operation_id, cotacao_id=cotacao_id)
+    operation = _operation_for_capacity(
+        operation_id,
+        cotacao_id=cotacao_id,
+        valor_enquadrado=0,
+        capacidade_contrato=0,
+    )
+    snapshots = _snapshots_for_capacity(operation_id, modalidade="SOB_DEMANDA")
+    _make_operation_match_calculated_capacity(operation, snapshots)
     db = _setup_recalculo_capacidade(
         monkeypatch,
         [operation],
-        _snapshots_for_capacity(operation_id),
+        snapshots,
         [_cotacao_for_capacity(cotacao_id)],
     )
     updates = _record_updates(monkeypatch, db)
@@ -727,14 +746,51 @@ def test_recalcular_capacidade_dry_run_returns_before_after_without_update(monke
     item = response.json()["operacoes"][0]
     assert updates == []
     assert item["grava"] is False
-    assert item["antes"]["capacidade_contrato"] == 180_000
-    assert item["depois"]["capacidade_contrato"] is not None
+    assert item["antes"]["capacidade_contrato"] == 0
+    assert item["depois"]["capacidade_contrato"] == 0
     assert "faturas_na_janela" in item["depois"]
     assert item["cotacao"]["antes"] == {
         "valor_enquadrado": 250_000,
         "estagio": "QUALIFICADA",
     }
+    assert item["cotacao"]["antes"] != item["cotacao"]["depois"]
     assert db.tables["cotacoes_broadfactor"][0]["estagio"] == "QUALIFICADA"
+
+
+def test_recalcular_capacidade_syncs_stale_quote_when_operation_is_already_correct(
+    monkeypatch,
+):
+    operation_id = "00000000-0000-0000-0000-000000000110"
+    cotacao_id = "C-110"
+    operation = _operation_for_capacity(
+        operation_id,
+        cotacao_id=cotacao_id,
+        valor_enquadrado=0,
+        capacidade_contrato=0,
+    )
+    snapshots = _snapshots_for_capacity(operation_id, modalidade="SOB_DEMANDA")
+    _make_operation_match_calculated_capacity(operation, snapshots)
+    db = _setup_recalculo_capacidade(
+        monkeypatch,
+        [operation],
+        snapshots,
+        [_cotacao_for_capacity(cotacao_id)],
+    )
+    updates = _record_updates(monkeypatch, db)
+
+    response = make_client().post(
+        "/api/v1/internal/funil/recalcular-capacidade",
+        headers={"X-Internal-Token": "configured-token"},
+        json={"operation_ids": [operation_id], "aplicar": True},
+    )
+
+    item = response.json()["operacoes"][0]
+    assert response.status_code == 200
+    assert item["grava"] is True
+    assert not [table for table, _payload in updates if table == "operations"]
+    assert db.tables["cotacoes_broadfactor"][0]["valor_enquadrado"] == 0
+    assert db.tables["cotacoes_broadfactor"][0]["estagio"] == "DOCUMENTADA"
+    assert len(db.tables["audit_trail"]) == 1
 
 
 def test_recalcular_capacidade_apply_updates_only_capacity_fields(monkeypatch):
@@ -807,9 +863,7 @@ def test_recalcular_capacidade_demand_without_invoices_uses_sem_execucao(monkeyp
     assert item["depois"]["fonte_mensal"] == "SEM_EXECUCAO"
 
 
-def test_recalcular_capacidade_continuous_preserves_the_same_values(monkeypatch):
-    from app.services import funil_qualificacao_service
-
+def test_recalcular_capacidade_skips_writes_when_operation_and_quote_match(monkeypatch):
     operation_id = "00000000-0000-0000-0000-000000000104"
     cotacao_id = "C-104"
     operation = _operation_for_capacity(
@@ -818,22 +872,14 @@ def test_recalcular_capacidade_continuous_preserves_the_same_values(monkeypatch)
         valor_enquadrado_pre_capacidade=1_000_000,
     )
     snapshots = _snapshots_for_capacity(operation_id)
+    capacidade = _make_operation_match_calculated_capacity(operation, snapshots)
+    cotacao = _cotacao_for_capacity(
+        cotacao_id, valor_enquadrado=capacidade["valor_enquadrado"]
+    )
     db = _setup_recalculo_capacidade(
-        monkeypatch, [operation], snapshots, [_cotacao_for_capacity(cotacao_id)]
+        monkeypatch, [operation], snapshots, [cotacao]
     )
     updates = _record_updates(monkeypatch, db)
-    by_component = {row["component"]: row["parsed_result"] for row in snapshots}
-    statuses = {row["component"]: row["status"] for row in snapshots}
-    capacidade = funil_qualificacao_service._capacidade_do_contrato(
-        operation, by_component, statuses, CAPACIDADE_PARAMS
-    )
-    operation.update(
-        {
-            "valor_enquadrado": capacidade["valor_enquadrado"],
-            "capacidade_contrato": capacidade["capacidade"],
-            "capacidade_memoria": capacidade["memoria"],
-        }
-    )
 
     response = make_client().post(
         "/api/v1/internal/funil/recalcular-capacidade",
@@ -843,10 +889,63 @@ def test_recalcular_capacidade_continuous_preserves_the_same_values(monkeypatch)
 
     item = response.json()["operacoes"][0]
     assert response.status_code == 200
+    assert item["grava"] is False
     for key in item["antes"]:
         assert item["depois"][key] == item["antes"][key]
     assert item["cotacao"]["depois"] == item["cotacao"]["antes"]
-    assert not [table for table, _payload in updates if table == "cotacoes_broadfactor"]
+    assert updates == []
+    assert db.tables["audit_trail"] == []
+
+
+def test_recalcular_capacidade_preserves_quote_ingestion_status_for_completed_operation(
+    monkeypatch,
+):
+    from app.services import funil_qualificacao_service
+
+    operation_id = "00000000-0000-0000-0000-000000000111"
+    cotacao_id = "C-111"
+    operation = _operation_for_capacity(operation_id, cotacao_id=cotacao_id)
+    db = _setup_recalculo_capacidade(
+        monkeypatch,
+        [operation],
+        _snapshots_for_capacity(operation_id),
+        [
+            _cotacao_for_capacity(
+                cotacao_id,
+                status_ingestao="QUALIFICADA_ANTERIOR",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        funil_qualificacao_service,
+        "preparar_atualizacao_cotacao_pos_fase2",
+        lambda *_args: (
+            "QUALIFICADA",
+            [],
+            {
+                "estagio": "QUALIFICADA",
+                "estagio_max": "QUALIFICADA",
+                "estagio_motivo": None,
+                "estagio_atualizado_em": "2026-10-25T00:00:00+00:00",
+                "operation_id": operation_id,
+                "status_ingestao": "AGUARDANDO_RELATORIO",
+            },
+        ),
+    )
+
+    response = make_client().post(
+        "/api/v1/internal/funil/recalcular-capacidade",
+        headers={"X-Internal-Token": "configured-token"},
+        json={"operation_ids": [operation_id], "aplicar": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["operacoes"][0]["cotacao"]["depois"]["estagio"] == (
+        "QUALIFICADA"
+    )
+    assert db.tables["cotacoes_broadfactor"][0]["status_ingestao"] == (
+        "QUALIFICADA_ANTERIOR"
+    )
 
 
 def test_recalcular_capacidade_missing_quote_returns_warning_without_breaking(monkeypatch):
