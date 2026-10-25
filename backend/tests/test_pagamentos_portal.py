@@ -167,14 +167,42 @@ def test_antecipacao_concorrente_includes_other_ug_and_extracts_operation_and_ba
 
     assert findings["antecipacao_concorrente"].valor == {
         "quantidade": 1, "valor": 1200.0, "ugs": ["999999"],
-        "numeros_operacao": ["5043"], "bancos": ["274"], "ultima_data": "2026-09-20",
+        "numeros_operacao": ["5043"], "bancos": ["274"], "bancos_ativos_mesmo_contrato": [], "ultima_data": "2026-09-20",
         "ativa_mesmo_contrato": False, "encerrada_mesmo_contrato": False,
         "ativa_outro_contrato": True,
         "operacoes": [{
-            "numero_op": "5043", "data_op": None, "contrato_vinculado": None,
+            "numero_op": "5043", "banco": "274", "data_op": None, "contrato_vinculado": None,
             "mesmo_contrato": False, "ultima_data": "2026-09-20", "ativa": True,
         }],
     }
+
+
+def test_anticipation_operations_report_active_same_contract_banks_only():
+    snapshots = {
+        "contratos_comprasnet": {
+            "status_consulta": "ENCONTRADO",
+            "contrato_comprasnet": {"numero": "00211/2025", "uasg": "123456"},
+            "faturas": [],
+        },
+        "pagamentos_portal": {
+            "status_consulta": "ENCONTRADO",
+            "ordens_bancarias": [
+                {"documento": "12345600000001", "data": "2026-10-01", "valor": "100,00", "observacao": "ANTECIPAGOV OP. 4633 BANCO 0274 ATIVA PARA O CONTRATO Nº 00211/2025"},
+                {"documento": "12345600000002", "data": "2026-10-02", "valor": "100,00", "observacao": "ANTECIPAGOV OP. 4634 ATIVA PARA O CONTRATO Nº 00211/2025"},
+                {"documento": "12345600000003", "data": "2026-10-03", "valor": "100,00", "observacao": "ANTECIPAGOV OP. 4635 BANCO 999 ATIVA PARA O CONTRATO Nº 00212/2025"},
+            ],
+        },
+    }
+
+    findings = {item.codigo: item for item in emit_fluxo_caixa(
+        snapshots, fingerprint="f", operation={"data_referencia": "19/10/2026"},
+    )}
+
+    summary = findings["antecipacao_concorrente"].valor
+    operations = {operation["numero_op"]: operation for operation in summary["operacoes"]}
+    assert operations["4633"]["banco"] == "274"
+    assert operations["4634"]["banco"] is None
+    assert summary["bancos_ativos_mesmo_contrato"] == ["274"]
 
 
 def test_anticipations_detail_contract_link_and_active_status_and_exclude_guarantee_deposit():
@@ -202,16 +230,16 @@ def test_anticipations_detail_contract_link_and_active_status_and_exclude_guaran
 
     anticipation = findings["antecipacao_concorrente"].valor["operacoes"]
     assert anticipation == [
-        {"numero_op": "4223", "data_op": "2026-01-01", "contrato_vinculado": "00004/2025", "mesmo_contrato": True, "ultima_data": "2026-07-01", "ativa": False},
-        {"numero_op": "4701", "data_op": "2026-02-09", "contrato_vinculado": "00015/2025", "mesmo_contrato": False, "ultima_data": "2026-09-20", "ativa": True},
-        {"numero_op": "4903", "data_op": "2026-10-01", "contrato_vinculado": "00004/2025", "mesmo_contrato": True, "ultima_data": "2026-10-01", "ativa": True},
+        {"numero_op": "4223", "banco": None, "data_op": "2026-01-01", "contrato_vinculado": "00004/2025", "mesmo_contrato": True, "ultima_data": "2026-07-01", "ativa": False},
+        {"numero_op": "4701", "banco": None, "data_op": "2026-02-09", "contrato_vinculado": "00015/2025", "mesmo_contrato": False, "ultima_data": "2026-09-20", "ativa": True},
+        {"numero_op": "4903", "banco": None, "data_op": "2026-10-01", "contrato_vinculado": "00004/2025", "mesmo_contrato": True, "ultima_data": "2026-10-01", "ativa": True},
     ]
     paid = findings["pago_portal_vs_comprasnet"].valor
     assert paid["pago_portal_ano"] == 900.0
     assert paid["deposito_conta_vinculada"] == {"valor": 100.0, "pct_sobre_pago": 0.1}
     assert findings["antecipacao_concorrente"].valor | {"operacoes": None} == {
         "quantidade": 3, "valor": 300.0, "ugs": ["123456", "999999"],
-        "numeros_operacao": ["4223", "4701", "4903"], "bancos": [],
+        "numeros_operacao": ["4223", "4701", "4903"], "bancos": [], "bancos_ativos_mesmo_contrato": [],
         "ultima_data": "2026-10-01", "ativa_mesmo_contrato": True,
         "encerrada_mesmo_contrato": False, "ativa_outro_contrato": True,
         "operacoes": None,

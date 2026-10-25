@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 28 separa a completude da busca por UG do fallback complementar por observação.
+Version 29 identifica o banco do financiador em antecipações concorrentes.
 """
 
-EMITTER_VERSION = "28"
+EMITTER_VERSION = "29"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

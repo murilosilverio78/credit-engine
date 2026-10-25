@@ -221,6 +221,14 @@ def _path(value: Any, path: str) -> Any:
 def _compare(value: Any, op: str, reference: Any) -> bool:
     """Evaluates the closed comparison operators accepted by policy_rules."""
     try:
+        if op in {"contem", "nao_contem"}:
+            if reference is None:
+                return op == "nao_contem"
+            values = value if isinstance(value, list) else []
+            contains = any(
+                str(item).strip() == str(reference).strip() for item in values
+            )
+            return contains if op == "contem" else not contains
         if op == "in":
             return value in (reference if isinstance(reference, list) else [reference])
         if op == "==":
@@ -238,8 +246,30 @@ def _compare(value: Any, op: str, reference: Any) -> bool:
         return False
 
 
+def _comparison_reference(comparison: dict[str, Any], parametros: dict[str, Any]) -> Any:
+    """Resolve a literal comparison reference or a versioned policy parameter."""
+    if "ref_parametro" not in comparison:
+        return comparison.get("ref")
+    reference = parametros.get(str(comparison.get("ref_parametro") or ""))
+    return None if reference is None or reference == [] else reference
+
+
+def _matches_comparison(
+    found: Any, comparison: dict[str, Any], parametros: dict[str, Any],
+) -> bool:
+    return _compare(
+        _path(found.valor, str(comparison.get("campo") or "")),
+        str(comparison.get("op") or ""),
+        _comparison_reference(comparison, parametros),
+    )
+
+
 def _matches_rule(
-    found: Any, condition: dict[str, Any], *, rating: str | None = None
+    found: Any,
+    condition: dict[str, Any],
+    *,
+    rating: str | None = None,
+    parametros: dict[str, Any] | None = None,
 ) -> bool:
     """Matches a versioned generic rule without coercing a missing finding to zero."""
     rating_in = condition.get("rating_in")
@@ -257,12 +287,18 @@ def _matches_rule(
         str(minimum), 0
     ):
         return False
+    parameters = parametros or {}
+    all_comparisons = condition.get("todas")
+    if all_comparisons is not None:
+        return isinstance(all_comparisons, list) and all(
+            isinstance(comparison, dict)
+            and _matches_comparison(found, comparison, parameters)
+            for comparison in all_comparisons
+        )
     comparison = condition.get("comparacao")
     if comparison:
-        return _compare(
-            _path(found.valor, str(comparison.get("campo") or "")),
-            str(comparison.get("op") or ""),
-            comparison.get("ref"),
+        return isinstance(comparison, dict) and _matches_comparison(
+            found, comparison, parameters
         )
     if "valor" in condition:
         return found.valor == condition["valor"]
@@ -297,7 +333,7 @@ def _generic_effects(
         if target == "cp" and code in (vetos or set()):
             continue
         found = _finding(entrada, code, trail, "regras_genericas")
-        if not _matches_rule(found, condition, rating=rating):
+        if not _matches_rule(found, condition, rating=rating, parametros=parametros):
             continue
         magnitude = _number(rule.get("magnitude"))
         if target == "cp":
@@ -399,7 +435,7 @@ def avaliar(
         if rule.get("classe") != "VETO":
             continue
         found = _finding(entrada, str(rule.get("codigo")), trail, "vetos")
-        if _matches_rule(found, rule.get("condicao") or {}):
+        if _matches_rule(found, rule.get("condicao") or {}, parametros=parametros):
             vetos.append(str(found.codigo))
     missing_rating_specialists = _missing_rating_specialists(entrada)
     if missing_rating_specialists and not vetos:

@@ -324,8 +324,14 @@ def _anticipation_operations(
             and _contract_identity(_linked_contract(order.get("observacao"))) == linked_identity
             for order in normal_orders
         )
+        operation_banks = sorted({
+            match.group(1).lstrip("0") or "0"
+            for order in operation_orders
+            for match in _BANK_NUMBER.finditer(str(order.get("observacao") or ""))
+        }, key=int)
         result.append({
             "numero_op": number,
+            "banco": operation_banks[0] if operation_banks else None,
             "data_op": data_op.isoformat() if data_op else None,
             "contrato_vinculado": linked_contract,
             "mesmo_contrato": linked_identity is not None and linked_identity == contract_identity,
@@ -488,6 +494,11 @@ def _payment_findings(
         for order in anticipation_orders
         for match in _BANK_NUMBER.finditer(str(order.get("observacao") or ""))
     }, key=int)
+    active_same_contract_banks = sorted({
+        operation["banco"]
+        for operation in anticipation_operations
+        if operation["mesmo_contrato"] and operation["ativa"] and operation["banco"] is not None
+    }, key=int)
     anticipation_dates = [_date(order.get("data")) for order in anticipation_orders if _date(order.get("data"))]
     payments_12m = sorted(
         [
@@ -509,6 +520,7 @@ def _payment_findings(
         "ugs": sorted({_document_ug(order) or _digits(order.get("codigoUg")) for order in anticipation_orders} - {""}),
         "numeros_operacao": operation_numbers,
         "bancos": banks,
+        "bancos_ativos_mesmo_contrato": active_same_contract_banks,
         "ultima_data": max(anticipation_dates).isoformat() if anticipation_dates else None,
         "ativa_mesmo_contrato": active_same_contract,
         "encerrada_mesmo_contrato": closed_same_contract and not active_same_contract,
