@@ -63,6 +63,11 @@ class ReavaliarFunilRequest(BaseModel):
     operation_ids: list[UUID] | None = None
 
 
+class RecalcularCapacidadeRequest(BaseModel):
+    operation_ids: list[UUID] = Field(min_length=1, max_length=20)
+    aplicar: bool = False
+
+
 class CapturarDocumentosRequest(BaseModel):
     cotacao_ids: list[str] | None = None
 
@@ -418,6 +423,117 @@ def _operacoes_para_reavaliar_funil(operation_ids: list[str] | None) -> list[dic
         or []
     )
     return rows
+
+
+def _resumo_capacidade(operation: dict, *, incluir_execucao: bool) -> dict:
+    memoria = operation.get("capacidade_memoria")
+    memoria = memoria if isinstance(memoria, dict) else {}
+    resumo = {
+        "valor_enquadrado": operation.get("valor_enquadrado"),
+        "valor_enquadrado_pre_capacidade": operation.get(
+            "valor_enquadrado_pre_capacidade"
+        ),
+        "capacidade_contrato": operation.get("capacidade_contrato"),
+        "fonte_mensal": memoria.get("fonte_mensal"),
+        "mensal_bruto": memoria.get("mensal_bruto"),
+    }
+    if incluir_execucao:
+        resumo.update({
+            "faturas_na_janela": memoria.get("faturas_na_janela"),
+            "janela_meses": memoria.get("janela_meses"),
+            "mensal_execucao": memoria.get("mensal_execucao"),
+            "mensal_nominal": memoria.get("mensal_nominal"),
+        })
+    return resumo
+
+
+@router.post("/funil/recalcular-capacidade")
+async def recalcular_capacidade(
+    request: RecalcularCapacidadeRequest,
+    _: None = Depends(verify_internal_token),
+):
+    """Recalculate capacity from persisted snapshots without collecting data."""
+    from app.core.database import supabase
+    from app.services.audit_service import AuditService
+    from app.services import funil_qualificacao_service as funil
+
+    results: list[dict] = []
+    for requested_id in request.operation_ids:
+        operation_id = str(requested_id)
+        try:
+            operation = await asyncio.to_thread(funil._load_operation, operation_id)
+            if not operation:
+                results.append({
+                    "operation_id": operation_id,
+                    "grava": False,
+                    "erro": "operacao_nao_encontrada",
+                })
+                continue
+
+            before = _resumo_capacidade(operation, incluir_execucao=False)
+            status_atual = operation.get("status")
+            if operation.get("ambiente") != "PRODUCAO":
+                results.append({
+                    "operation_id": operation_id,
+                    "antes": before,
+                    "depois": _resumo_capacidade(operation, incluir_execucao=True),
+                    "status_atual": status_atual,
+                    "grava": False,
+                    "motivo_ignorada": "ambiente_nao_producao",
+                })
+                continue
+
+            snapshots, statuses = await asyncio.to_thread(
+                funil._load_snapshots, operation_id
+            )
+            params = await asyncio.to_thread(funil.get_eligibility_config)
+            capacidade, updates = await asyncio.to_thread(
+                funil.preparar_atualizacao_capacidade,
+                operation,
+                snapshots,
+                statuses,
+                params,
+            )
+            if capacidade is None:
+                results.append({
+                    "operation_id": operation_id,
+                    "antes": before,
+                    "depois": _resumo_capacidade(operation, incluir_execucao=True),
+                    "status_atual": status_atual,
+                    "grava": False,
+                    "motivo_ignorada": "sem_capacidade",
+                })
+                continue
+
+            after_operation = {**operation, **updates}
+            after = _resumo_capacidade(after_operation, incluir_execucao=True)
+            if request.aplicar:
+                supabase.table("operations").update(updates).eq(
+                    "id", operation_id
+                ).execute()
+                AuditService().log(
+                    operation_id=operation_id,
+                    action="operation_capacity_recalculated",
+                    actor_type="system",
+                    previous_value=before,
+                    new_value=after,
+                    payload={"contexto": "recalculo_capacidade_sob_demanda"},
+                )
+            results.append({
+                "operation_id": operation_id,
+                "antes": before,
+                "depois": after,
+                "status_atual": status_atual,
+                "grava": request.aplicar,
+                "motivo_ignorada": None,
+            })
+        except Exception as exc:
+            results.append({
+                "operation_id": operation_id,
+                "grava": False,
+                "erro": str(exc),
+            })
+    return {"aplicar": request.aplicar, "operacoes": results}
 
 
 @router.post("/funil/reavaliar")

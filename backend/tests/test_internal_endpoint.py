@@ -573,6 +573,291 @@ def test_reavaliar_funil_source_failure_is_reported_without_stopping_item(monkey
     assert "PNCP fora" in response.json()["operacoes"][0]["erro"]
 
 
+CAPACIDADE_PARAMS = {
+    "cap_fator_liquido_mao_obra": 0.645,
+    "cap_fator_liquido_demais": 0.85,
+    "cap_cobertura_parcela": 1.25,
+    "cap_taxa_referencia_am": 0.035,
+    "cap_folga_meses": 1,
+    "cap_sob_demanda_janela_meses": 6,
+    "cap_sob_demanda_min_faturas": 2,
+}
+
+
+def _operation_for_capacity(operation_id, **overrides):
+    return {
+        "id": operation_id,
+        "ambiente": "PRODUCAO",
+        "status": "completed",
+        "valor_enquadrado": 250_000,
+        "valor_enquadrado_pre_capacidade": 250_000,
+        "capacidade_contrato": 180_000,
+        "capacidade_memoria": {
+            "fonte_mensal": "NOMINAL",
+            "mensal_bruto": 20_000,
+        },
+        "flags_funil": ["manual:preservar", "salto_escala:2.0"],
+        "valor_global_contrato": 360_000,
+        "contrato_vigencia_inicio": "2026-01-01",
+        "contrato_vigencia_fim": "2027-12-31",
+        "contrato_dedicacao_exclusiva": False,
+    } | overrides
+
+
+def _snapshots_for_capacity(operation_id, modalidade="CONTINUO", faturas=None):
+    return [
+        {
+            "operation_id": operation_id,
+            "component": "contratos_pncp",
+            "status": "completed",
+            "parsed_result": {
+                "contrato_cedido_match": "ENCONTRADO",
+                "contrato_cedido": {
+                    "valor_global": 360_000,
+                    "data_inicio_vigencia": "2026-01-01",
+                    "data_fim_vigencia": "2027-12-31",
+                    "dedicacao_exclusiva": False,
+                },
+            },
+        },
+        {
+            "operation_id": operation_id,
+            "component": "contratos_comprasnet",
+            "status": "completed",
+            "parsed_result": {
+                "status_consulta": "ENCONTRADO",
+                "status_atualizacao": "ATUALIZADO",
+                "contrato_comprasnet": {"modalidade_execucao": modalidade},
+                "faturas": faturas or [],
+            },
+        },
+    ]
+
+
+def _setup_recalculo_capacidade(monkeypatch, operations, snapshots):
+    from app.core import database
+    from app.services import audit_service, funil_qualificacao_service
+
+    db = Postgrest(
+        {
+            "operations": operations,
+            "component_snapshots": snapshots,
+            "audit_trail": [],
+        }
+    )
+    monkeypatch.setattr(database, "supabase", db)
+    monkeypatch.setattr(funil_qualificacao_service, "supabase", db)
+    monkeypatch.setattr(audit_service, "supabase", db)
+    monkeypatch.setattr(
+        funil_qualificacao_service,
+        "get_eligibility_config",
+        lambda: CAPACIDADE_PARAMS,
+    )
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    return db
+
+
+def _record_updates(monkeypatch, db):
+    calls = []
+    original_table = db.table
+
+    def tracked_table(name):
+        query = original_table(name)
+        original_update = query.update
+
+        def tracked_update(payload):
+            calls.append((name, payload.copy()))
+            return original_update(payload)
+
+        query.update = tracked_update
+        return query
+
+    monkeypatch.setattr(db, "table", tracked_table)
+    return calls
+
+
+def test_recalcular_capacidade_dry_run_returns_before_after_without_update(monkeypatch):
+    operation_id = "00000000-0000-0000-0000-000000000101"
+    operation = _operation_for_capacity(operation_id)
+    db = _setup_recalculo_capacidade(
+        monkeypatch, [operation], _snapshots_for_capacity(operation_id)
+    )
+    updates = _record_updates(monkeypatch, db)
+
+    response = make_client().post(
+        "/api/v1/internal/funil/recalcular-capacidade",
+        headers={"X-Internal-Token": "configured-token"},
+        json={"operation_ids": [operation_id]},
+    )
+
+    assert response.status_code == 200
+    item = response.json()["operacoes"][0]
+    assert updates == []
+    assert item["grava"] is False
+    assert item["antes"]["capacidade_contrato"] == 180_000
+    assert item["depois"]["capacidade_contrato"] is not None
+    assert "faturas_na_janela" in item["depois"]
+
+
+def test_recalcular_capacidade_apply_updates_only_capacity_fields(monkeypatch):
+    operation_id = "00000000-0000-0000-0000-000000000102"
+    operation = _operation_for_capacity(operation_id)
+    db = _setup_recalculo_capacidade(
+        monkeypatch, [operation], _snapshots_for_capacity(operation_id)
+    )
+    updates = _record_updates(monkeypatch, db)
+
+    response = make_client().post(
+        "/api/v1/internal/funil/recalcular-capacidade",
+        headers={"X-Internal-Token": "configured-token"},
+        json={"operation_ids": [operation_id], "aplicar": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["operacoes"][0]["grava"] is True
+    operation_updates = [payload for table, payload in updates if table == "operations"]
+    assert len(operation_updates) == 1
+    assert set(operation_updates[0]) <= {
+        "capacidade_contrato",
+        "capacidade_memoria",
+        "valor_enquadrado",
+        "valor_enquadrado_pre_capacidade",
+        "flags_funil",
+    }
+    assert "status" not in operation_updates[0]
+    assert db.tables["operations"][0]["status"] == "completed"
+    assert db.tables["audit_trail"][0]["action"] == "operation_capacity_recalculated"
+
+
+def test_recalcular_capacidade_demand_without_invoices_uses_sem_execucao(monkeypatch):
+    operation_id = "00000000-0000-0000-0000-000000000103"
+    operation = _operation_for_capacity(operation_id)
+    _setup_recalculo_capacidade(
+        monkeypatch,
+        [operation],
+        _snapshots_for_capacity(operation_id, modalidade="SOB_DEMANDA"),
+    )
+
+    response = make_client().post(
+        "/api/v1/internal/funil/recalcular-capacidade",
+        headers={"X-Internal-Token": "configured-token"},
+        json={"operation_ids": [operation_id]},
+    )
+
+    item = response.json()["operacoes"][0]
+    assert response.status_code == 200
+    assert item["depois"]["capacidade_contrato"] == 0
+    assert item["depois"]["fonte_mensal"] == "SEM_EXECUCAO"
+
+
+def test_recalcular_capacidade_continuous_preserves_the_same_values(monkeypatch):
+    from app.services import funil_qualificacao_service
+
+    operation_id = "00000000-0000-0000-0000-000000000104"
+    operation = _operation_for_capacity(operation_id, valor_enquadrado_pre_capacidade=1_000_000)
+    snapshots = _snapshots_for_capacity(operation_id)
+    _setup_recalculo_capacidade(monkeypatch, [operation], snapshots)
+    by_component = {row["component"]: row["parsed_result"] for row in snapshots}
+    statuses = {row["component"]: row["status"] for row in snapshots}
+    capacidade = funil_qualificacao_service._capacidade_do_contrato(
+        operation, by_component, statuses, CAPACIDADE_PARAMS
+    )
+    operation.update(
+        {
+            "valor_enquadrado": capacidade["valor_enquadrado"],
+            "capacidade_contrato": capacidade["capacidade"],
+            "capacidade_memoria": capacidade["memoria"],
+        }
+    )
+
+    response = make_client().post(
+        "/api/v1/internal/funil/recalcular-capacidade",
+        headers={"X-Internal-Token": "configured-token"},
+        json={"operation_ids": [operation_id]},
+    )
+
+    item = response.json()["operacoes"][0]
+    assert response.status_code == 200
+    for key in item["antes"]:
+        assert item["depois"][key] == item["antes"][key]
+
+
+def test_recalcular_capacidade_ignores_non_production_operation(monkeypatch):
+    operation_id = "00000000-0000-0000-0000-000000000105"
+    operation = _operation_for_capacity(operation_id, ambiente="TESTE")
+    db = _setup_recalculo_capacidade(monkeypatch, [operation], [])
+    updates = _record_updates(monkeypatch, db)
+
+    response = make_client().post(
+        "/api/v1/internal/funil/recalcular-capacidade",
+        headers={"X-Internal-Token": "configured-token"},
+        json={"operation_ids": [operation_id]},
+    )
+
+    item = response.json()["operacoes"][0]
+    assert response.status_code == 200
+    assert item["grava"] is False
+    assert item["motivo_ignorada"] == "ambiente_nao_producao"
+    assert updates == []
+
+
+def test_recalcular_capacidade_rejects_empty_or_too_many_operations(monkeypatch):
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    headers = {"X-Internal-Token": "configured-token"}
+    operation_id = "00000000-0000-0000-0000-000000000106"
+
+    empty = make_client().post(
+        "/api/v1/internal/funil/recalcular-capacidade",
+        headers=headers,
+        json={"operation_ids": []},
+    )
+    too_many = make_client().post(
+        "/api/v1/internal/funil/recalcular-capacidade",
+        headers=headers,
+        json={"operation_ids": [operation_id] * 21},
+    )
+
+    assert empty.status_code == 422
+    assert too_many.status_code == 422
+
+
+def test_recalcular_capacidade_never_runs_collectors(monkeypatch):
+    from app.workers.tasks import contratos_comprasnet, contratos_pncp
+
+    operation_id = "00000000-0000-0000-0000-000000000107"
+    operation = _operation_for_capacity(operation_id)
+    _setup_recalculo_capacidade(
+        monkeypatch, [operation], _snapshots_for_capacity(operation_id)
+    )
+
+    def collector_called(*_args, **_kwargs):
+        raise AssertionError("collector must not run")
+
+    monkeypatch.setattr(contratos_pncp, "run_contratos_pncp", collector_called)
+    monkeypatch.setattr(contratos_comprasnet, "run_contratos_comprasnet", collector_called)
+    response = make_client().post(
+        "/api/v1/internal/funil/recalcular-capacidade",
+        headers={"X-Internal-Token": "configured-token"},
+        json={"operation_ids": [operation_id]},
+    )
+
+    assert response.status_code == 200
+    assert "erro" not in response.json()["operacoes"][0]
+
+
+def test_recalcular_capacidade_rejects_invalid_internal_token(monkeypatch):
+    monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
+    operation_id = "00000000-0000-0000-0000-000000000108"
+
+    response = make_client().post(
+        "/api/v1/internal/funil/recalcular-capacidade",
+        headers={"X-Internal-Token": "wrong-token"},
+        json={"operation_ids": [operation_id]},
+    )
+
+    assert response.status_code == 401
+
+
 def test_missing_internal_token_returns_401(monkeypatch):
     monkeypatch.setattr(internal.settings, "INTERNAL_JOB_TOKEN", "configured-token")
 

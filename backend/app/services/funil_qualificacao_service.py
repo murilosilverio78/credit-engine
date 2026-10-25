@@ -117,7 +117,7 @@ def _load_operation(operation_id: str) -> dict[str, Any]:
     result = (
         supabase.table("operations")
         .select(
-            "id,valor_enquadrado,valor_enquadrado_pre_capacidade,"
+            "id,ambiente,status,valor_enquadrado,valor_enquadrado_pre_capacidade,"
             "capacidade_contrato,capacidade_memoria,flags_funil,"
             "valor_global_contrato,contrato_vigencia_inicio,"
             "contrato_vigencia_fim,contrato_dedicacao_exclusiva,"
@@ -265,6 +265,44 @@ def _capacidade_do_contrato(
     }
 
 
+def preparar_atualizacao_capacidade(
+    operation: dict[str, Any],
+    snapshots: dict[str, Any],
+    statuses: dict[str, str],
+    params: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Build the capacity patch shared by funnel re-evaluation and maintenance.
+
+    The caller decides whether a missing calculable contract should still persist
+    the funnel flags. This keeps the regular funnel behaviour intact while the
+    maintenance endpoint can leave an operation completely untouched.
+    """
+    capacidade = _capacidade_do_contrato(operation, snapshots, statuses, params)
+    flags = _flags_salto_escala(snapshots, params)
+    previous_flags = [
+        flag for flag in (operation.get("flags_funil") or [])
+        if not str(flag).startswith("salto_escala:")
+    ]
+    operation_updates: dict[str, Any] = {
+        "flags_funil": [*previous_flags, *flags],
+    }
+    if not capacidade:
+        return None, operation_updates
+
+    operation_updates.update({
+        "capacidade_contrato": capacidade["capacidade"],
+        "capacidade_memoria": capacidade["memoria"],
+    })
+    if capacidade["reduziu"]:
+        # A memória usa sempre a base original; só escrevemos/auditamos o
+        # valor quando ele realmente muda nesta reavaliação.
+        if capacidade["reenquadrado"]:
+            operation_updates["valor_enquadrado"] = capacidade["valor_enquadrado"]
+        if operation.get("valor_enquadrado_pre_capacidade") in (None, ""):
+            operation_updates["valor_enquadrado_pre_capacidade"] = capacidade["base"]
+    return capacidade, operation_updates
+
+
 def _flags_salto_escala(snapshots: dict[str, Any], params: dict[str, Any]) -> list[str]:
     pncp = snapshots.get("contratos_pncp") or {}
     recursos = snapshots.get("recursos_recebidos") or {}
@@ -344,26 +382,11 @@ def atualizar_estagio_pos_fase2(cotacao_id: str, operation_id: str) -> tuple[str
     operation = _load_operation(operation_id)
     snapshots, statuses = _load_snapshots(operation_id)
     params = get_eligibility_config()
-    capacidade = _capacidade_do_contrato(operation, snapshots, statuses, params)
-    flags = _flags_salto_escala(snapshots, params)
-    previous_flags = [
-        flag for flag in (operation.get("flags_funil") or [])
-        if not str(flag).startswith("salto_escala:")
-    ]
-    operation_updates: dict[str, Any] = {"flags_funil": [*previous_flags, *flags]}
+    capacidade, operation_updates = preparar_atualizacao_capacidade(
+        operation, snapshots, statuses, params
+    )
     if capacidade:
         valor_anterior = operation.get("valor_enquadrado")
-        operation_updates.update({
-            "capacidade_contrato": capacidade["capacidade"],
-            "capacidade_memoria": capacidade["memoria"],
-        })
-        if capacidade["reduziu"]:
-            # A memória usa sempre a base original; só escrevemos/auditamos o
-            # valor quando ele realmente muda nesta reavaliação.
-            if capacidade["reenquadrado"]:
-                operation_updates["valor_enquadrado"] = capacidade["valor_enquadrado"]
-            if operation.get("valor_enquadrado_pre_capacidade") in (None, ""):
-                operation_updates["valor_enquadrado_pre_capacidade"] = capacidade["base"]
         supabase.table("operations").update(operation_updates).eq("id", operation_id).execute()
         operation = {**operation, **operation_updates}
         if capacidade["reenquadrado"]:
