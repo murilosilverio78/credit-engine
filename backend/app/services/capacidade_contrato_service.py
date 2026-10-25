@@ -69,6 +69,74 @@ def _integer_parameter(parametros: dict[str, Any], key: str, default: int) -> in
     return default if value is None else int(value)
 
 
+def _money(value: Any) -> str:
+    amount = _number(value)
+    amount = 0.0 if amount is None else amount
+    return f"R$ {amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _whole(value: Any) -> str:
+    amount = _number(value)
+    return str(int(amount)) if amount is not None else "—"
+
+
+def explicar_capacidade(
+    memoria: Any,
+    parametros_opcionais: dict[str, Any] | None = None,
+) -> dict[str, str] | None:
+    """Translate persisted capacity memory into an analyst-facing explanation."""
+    if not isinstance(memoria, dict):
+        return None
+    fonte = memoria.get("fonte_mensal")
+    if fonte in (None, "", "NOMINAL"):
+        return None
+
+    params = parametros_opcionais if isinstance(parametros_opcionais, dict) else {}
+    if fonte == "SEM_EXECUCAO":
+        minimo = _number(params.get("cap_sob_demanda_min_faturas"))
+        minimo_texto = (
+            f" (mínimo exigido: {int(minimo)})" if minimo is not None else ""
+        )
+        return {
+            "codigo": "SEM_EXECUCAO",
+            "titulo": "Contrato sob demanda sem execução comprovada",
+            "detalhe": (
+                f"{_whole(memoria.get('faturas_na_janela'))} fatura(s) nos últimos "
+                f"{_whole(memoria.get('janela_meses'))} mês(es){minimo_texto}. "
+                "O valor global é um teto de compras, não uma receita garantida; "
+                "por isso a capacidade considerada é R$ 0,00. Valor global ÷ meses "
+                f"seria {_money(memoria.get('mensal_nominal'))}/mês."
+            ),
+            "nivel": "ALERTA",
+        }
+    if fonte == "EXECUCAO_REAL":
+        executado = _number(memoria.get("mensal_execucao"))
+        nominal = _number(memoria.get("mensal_nominal"))
+        usados = [value for value in (executado, nominal) if value is not None]
+        menor = min(usados) if usados else _number(memoria.get("mensal_bruto"))
+        return {
+            "codigo": "EXECUCAO_REAL",
+            "titulo": "Capacidade limitada pela execução real do contrato",
+            "detalhe": (
+                f"Média mensal executada de {_money(executado)} nos últimos "
+                f"{_whole(memoria.get('janela_meses'))} mês(es) versus nominal de "
+                f"{_money(nominal)}; foi usada a menor das duas ({_money(menor)}/mês)."
+            ),
+            "nivel": "INFO",
+        }
+    if fonte == "NOMINAL_EXECUCAO_NAO_VERIFICADA":
+        return {
+            "codigo": "NOMINAL_EXECUCAO_NAO_VERIFICADA",
+            "titulo": "Execução do contrato não verificada",
+            "detalhe": (
+                "A leitura das faturas no Comprasnet não foi confirmada; usado valor "
+                "global ÷ meses. Reverifique antes de decidir."
+            ),
+            "nivel": "ALERTA",
+        }
+    return None
+
+
 def _monthly_execution(
     execution: dict[str, Any], start: date, reference: date, parametros: dict[str, Any],
 ) -> tuple[str, float | None, int, int]:

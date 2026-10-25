@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from httpx import ConnectError, RemoteProtocolError
 
 from app.core.database import supabase
+from app.services.capacidade_contrato_service import explicar_capacidade
 from app.services.funil_qualificacao_service import classificar_motivos
 import structlog
 
@@ -31,6 +32,7 @@ def _format_brl(value: Any) -> str:
 def mapear_motivos_funil(
     estagio_motivo: str | None,
     parametros: dict[str, float] | None = None,
+    capacidade_memoria: Any = None,
 ) -> list[dict[str, str]]:
     """Converte os códigos persistidos do funil em motivos próprios para a UI.
 
@@ -48,6 +50,7 @@ def mapear_motivos_funil(
     cobertura_min = float(params.get("funil_cobertura_min") or 0)
     historico_min = int(params.get("funil_hist_min_meses") or 0)
     orgaos_min = int(params.get("funil_orgaos_min") or 0)
+    explicacao_capacidade = explicar_capacidade(capacidade_memoria, params)
 
     motivos: list[dict[str, str]] = []
     for raw_code in estagio_motivo.split(";"):
@@ -83,8 +86,12 @@ def mapear_motivos_funil(
             detalhe = "Recebimentos acumulados insuficientes para o valor enquadrado."
         elif codigo.startswith("capacidade_insuficiente:"):
             capacidade = _format_brl(codigo.split(":", 1)[1])
-            rotulo = f"Capacidade do contrato {capacidade} < ticket mínimo"
-            detalhe = "O fluxo futuro líquido do contrato cedido não suporta o ticket mínimo."
+            if explicacao_capacidade and explicacao_capacidade["codigo"] == "SEM_EXECUCAO":
+                rotulo = "Contrato sob demanda sem execução comprovada (capacidade R$ 0,00)"
+                detalhe = explicacao_capacidade["detalhe"]
+            else:
+                rotulo = f"Capacidade do contrato {capacidade} < ticket mínimo"
+                detalhe = "O fluxo futuro líquido do contrato cedido não suporta o ticket mínimo."
         elif codigo.startswith("historico_recebimentos_insuficiente:"):
             meses = codigo.split(":", 1)[1]
             rotulo = f"Histórico de recebimentos: {meses} (mínimo {historico_min}m)"
@@ -233,6 +240,20 @@ class OperationService:
             return None
 
         operation = result.data
+        try:
+            from app.services.eligibility_params_service import get_eligibility_config
+
+            parametros_capacidade = get_eligibility_config()
+        except Exception as exc:
+            logger.warning(
+                "operation.capacity_explanation_parameters_unavailable",
+                operation_id=operation_id,
+                error=str(exc),
+            )
+            parametros_capacidade = {}
+        operation["capacidade_explicacao"] = explicar_capacidade(
+            operation.get("capacidade_memoria"), parametros_capacidade
+        )
 
         snapshots_query = supabase.table("component_snapshots")\
             .select("component, status, score_contrib, duration_ms, error_message, completed_at, parsed_result")\
@@ -449,6 +470,9 @@ class OperationService:
                 "valor_enquadrado_pre_capacidade": quote.get("valor_enquadrado_pre_capacidade"),
                 "capacidade_contrato": quote.get("capacidade_contrato"),
                 "capacidade_memoria": quote.get("capacidade_memoria"),
+                "capacidade_explicacao": explicar_capacidade(
+                    quote.get("capacidade_memoria"), parametros
+                ),
                 "flags_funil": quote.get("flags_funil") or [],
                 "tipo": quote.get("tipo"),
                 "data_expiracao": quote.get("data_expiracao"),
@@ -456,7 +480,11 @@ class OperationService:
                 "estagio_max": quote.get("estagio_max"),
                 "estagio_atualizado_em": quote.get("estagio_atualizado_em"),
                 "estagio_motivo": quote.get("estagio_motivo"),
-                "motivos": mapear_motivos_funil(quote.get("estagio_motivo"), parametros),
+                "motivos": mapear_motivos_funil(
+                    quote.get("estagio_motivo"),
+                    parametros,
+                    quote.get("capacidade_memoria"),
+                ),
                 "n_documentos": quote.get("n_documentos"),
                 "tipos_documento": quote.get("tipos_documento"),
                 "pendencias": quote.get("pendencias") or [],

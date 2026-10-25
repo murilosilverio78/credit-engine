@@ -33,3 +33,25 @@ def test_contract_view_marks_missing_portal_findings_as_not_verified():
     view = contrato_cedido_view("op", database=database)
     assert view["risco"]["antecipacao_concorrente"] is None
     assert view["qualidade"]["filtro_usado"] is None
+
+
+def test_contract_view_exposes_capacity_explanation():
+    database = Postgrest({
+        "operations": [{
+            "id": "op", "capacidade_memoria": {
+                "fonte_mensal": "SEM_EXECUCAO", "faturas_na_janela": 0,
+                "janela_meses": 6, "mensal_nominal": 30_000,
+            },
+        }],
+        "component_snapshots": [{
+            "operation_id": "op", "component": "contratos_comprasnet",
+            "parsed_result": {
+                "status_consulta": "ENCONTRADO", "contrato_comprasnet": {},
+            },
+        }],
+        "finding_runs": [], "findings": [],
+    })
+
+    view = contrato_cedido_view("op", database=database)
+
+    assert view["risco"]["capacidade_explicacao"]["codigo"] == "SEM_EXECUCAO"

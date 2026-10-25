@@ -2,7 +2,10 @@ from datetime import date
 
 import pytest
 
-from app.services.capacidade_contrato_service import calcular_capacidade_contrato
+from app.services.capacidade_contrato_service import (
+    calcular_capacidade_contrato,
+    explicar_capacidade,
+)
 
 
 PARAMS = {
@@ -118,3 +121,64 @@ def test_demand_contract_uses_elapsed_life_when_younger_than_execution_window():
     )
 
     assert result["memoria"]["janela_meses"] == 2
+
+
+def test_explicar_capacidade_describes_confirmed_absence_of_execution():
+    explanation = explicar_capacidade({
+        "fonte_mensal": "SEM_EXECUCAO",
+        "faturas_na_janela": 0,
+        "janela_meses": 6,
+        "mensal_nominal": 30_000,
+    }, PARAMS)
+
+    assert explanation == {
+        "codigo": "SEM_EXECUCAO",
+        "titulo": "Contrato sob demanda sem execução comprovada",
+        "detalhe": (
+            "0 fatura(s) nos últimos 6 mês(es) (mínimo exigido: 2). "
+            "O valor global é um teto de compras, não uma receita garantida; "
+            "por isso a capacidade considerada é R$ 0,00. Valor global ÷ meses "
+            "seria R$ 30.000,00/mês."
+        ),
+        "nivel": "ALERTA",
+    }
+
+
+def test_explicar_capacidade_describes_real_or_unverified_execution():
+    real = explicar_capacidade({
+        "fonte_mensal": "EXECUCAO_REAL",
+        "mensal_execucao": 10_000,
+        "mensal_nominal": 30_000,
+        "janela_meses": 6,
+    })
+    unverified = explicar_capacidade({"fonte_mensal": "NOMINAL_EXECUCAO_NAO_VERIFICADA"})
+
+    assert real == {
+        "codigo": "EXECUCAO_REAL",
+        "titulo": "Capacidade limitada pela execução real do contrato",
+        "detalhe": (
+            "Média mensal executada de R$ 10.000,00 nos últimos 6 mês(es) versus "
+            "nominal de R$ 30.000,00; foi usada a menor das duas (R$ 10.000,00/mês)."
+        ),
+        "nivel": "INFO",
+    }
+    assert unverified == {
+        "codigo": "NOMINAL_EXECUCAO_NAO_VERIFICADA",
+        "titulo": "Execução do contrato não verificada",
+        "detalhe": (
+            "A leitura das faturas no Comprasnet não foi confirmada; usado valor "
+            "global ÷ meses. Reverifique antes de decidir."
+        ),
+        "nivel": "ALERTA",
+    }
+
+
+@pytest.mark.parametrize("memoria", [None, {}, {"fonte_mensal": "NOMINAL"}, {"fonte_mensal": "SEM_EXECUCAO"}])
+def test_explicar_capacidade_returns_none_for_legacy_or_nominal_memory(memoria):
+    explanation = explicar_capacidade(memoria)
+
+    if memoria == {"fonte_mensal": "SEM_EXECUCAO"}:
+        assert explanation is not None
+        assert "—" in explanation["detalhe"]
+    else:
+        assert explanation is None

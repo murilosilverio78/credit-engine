@@ -24,6 +24,7 @@ import {
 } from "recharts";
 
 import { ApiError, downloadOperationReportPdf, getOperation, getOperationDocumentUrl, getOperationPolicy, type PolicyItem, type PolicyShadowView } from "@/lib/api";
+import { CapacityExplanationNotice } from "@/components/capacity-explanation-notice";
 import { formatTaxaAm } from "@/lib/format";
 import type { ComponentSnapshot, OperationDetails, Rating } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -463,6 +464,7 @@ function OperationConferencePanel({ operation }: { operation: OperationDetails }
           </span>
         </Metric>
       </div>
+      <CapacityExplanationNotice explanation={operation.capacidade_explicacao} />
     </section>
   );
 }

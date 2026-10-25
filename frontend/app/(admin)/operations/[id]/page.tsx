@@ -21,6 +21,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { ApprovalActions } from "@/components/approval-actions";
+import { CapacityExplanationNotice } from "@/components/capacity-explanation-notice";
 import {
   ApiError,
   createOverride,
@@ -1031,6 +1032,7 @@ function CompletedView({
             </p>
           </div>
         </div>
+        <CapacityExplanationNotice explanation={operation.capacidade_explicacao} />
       </div>
 
       {operation.status === "completed" || operation.status === "failed" ? (

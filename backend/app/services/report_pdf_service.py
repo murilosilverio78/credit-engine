@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from playwright.sync_api import sync_playwright
 
 from app.utils.encoding import fix_dict_encoding
+from app.services.capacidade_contrato_service import explicar_capacidade
 
 
 DIMENSION_ORDER = [
@@ -775,8 +776,16 @@ def pncp_annex(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]]) 
         3,
     )
     memoria = record(operation.get("capacidade_memoria"))
+    explicacao_capacidade = record(operation.get("capacidade_explicacao")) or explicar_capacidade(memoria)
     capacidade = ""
     if memoria:
+        explicacao_html = ""
+        if explicacao_capacidade:
+            explicacao_html = (
+                '<p class="risk-callout"><strong>'
+                f"{esc(explicacao_capacidade.get('titulo'))}</strong>"
+                f"<span>{esc(explicacao_capacidade.get('detalhe'))}</span></p>"
+            )
         capacidade = f"""
         <h2>Capacidade do contrato</h2>
         {detail_grid([
@@ -786,6 +795,7 @@ def pncp_annex(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]]) 
             ("Parcela máxima", money(memoria.get("parcela_max"))),
             ("Horizonte firme", format_date(memoria.get("horizonte_firme"))),
         ], 3)}
+        {explicacao_html}
         """
     salto = next(
         (flag for flag in array(operation.get("flags_funil")) if str(flag).startswith("salto_escala:")),

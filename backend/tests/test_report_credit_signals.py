@@ -1,4 +1,10 @@
-from app.services.report_pdf_service import cover_section, policy_v2_section, pricing_section, regularity_section
+from app.services.report_pdf_service import (
+    cover_section,
+    pncp_annex,
+    policy_v2_section,
+    pricing_section,
+    regularity_section,
+)
 
 
 def test_pdf_policy_v2_section_renders_empty_insufficient_and_veto_states():
@@ -137,3 +143,20 @@ def test_pdf_uses_capacity_term_instead_of_unverified_default():
 
     assert "9 meses — até 20/07/2027 (fim do contrato)" in result
     assert "prazo padrão, contrato não verificado" not in result
+
+
+def test_pdf_shows_capacity_explanation_only_for_demand_contracts():
+    demand = pncp_annex({
+        "capacidade_contrato": 0,
+        "capacidade_memoria": {
+            "fonte_mensal": "SEM_EXECUCAO", "faturas_na_janela": 0,
+            "janela_meses": 6, "mensal_nominal": 30_000,
+        },
+    }, {})
+    continuous = pncp_annex({
+        "capacidade_contrato": 30_000,
+        "capacidade_memoria": {"fonte_mensal": "NOMINAL"},
+    }, {})
+
+    assert "Contrato sob demanda sem execução comprovada" in demand
+    assert "Contrato sob demanda sem execução comprovada" not in continuous

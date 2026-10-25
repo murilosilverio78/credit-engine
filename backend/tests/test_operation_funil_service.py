@@ -15,6 +15,7 @@ os.environ.setdefault(
 )
 
 from app.services import operation_service as service  # noqa: E402
+from tests.fakes.postgrest import Postgrest  # noqa: E402
 
 
 class Query:
@@ -116,6 +117,46 @@ def test_mapear_motivos_funil_uses_parameters_and_keeps_unknown_code():
         "detalhe": "Motivo recebido do funil sem rótulo específico.",
         "tipo": "criterio",
     }
+
+
+def test_mapear_motivos_funil_explains_demand_contract_without_execution():
+    memory = {
+        "fonte_mensal": "SEM_EXECUCAO",
+        "faturas_na_janela": 0,
+        "janela_meses": 6,
+        "mensal_nominal": 30_000,
+    }
+
+    demand = service.mapear_motivos_funil("capacidade_insuficiente:0", PARAMS, memory)
+    legacy = service.mapear_motivos_funil("capacidade_insuficiente:0", PARAMS, {"n": 6})
+
+    assert demand[0]["rotulo"] == "Contrato sob demanda sem execução comprovada (capacidade R$ 0,00)"
+    assert demand[0]["detalhe"].startswith("0 fatura(s) nos últimos 6 mês(es)")
+    assert legacy[0]["rotulo"] == "Capacidade do contrato R$ 0,00 < ticket mínimo"
+
+
+def test_operation_detail_exposes_capacity_explanation(monkeypatch):
+    database = Postgrest({
+        "operations": [{
+            "id": "op-capacity", "cnpj": "12345678000190",
+            "capacidade_memoria": {
+                "fonte_mensal": "SEM_EXECUCAO", "faturas_na_janela": 0,
+                "janela_meses": 6, "mensal_nominal": 30_000,
+            },
+        }],
+        "component_snapshots": [],
+        "audit_trail": [],
+    })
+    monkeypatch.setattr(service, "supabase", database)
+    monkeypatch.setattr(
+        "app.services.eligibility_params_service.get_eligibility_config",
+        lambda: PARAMS | {"cap_sob_demanda_min_faturas": 2},
+    )
+
+    operation = asyncio.run(service.OperationService().get_with_snapshots("op-capacity"))
+
+    assert operation["capacidade_explicacao"]["codigo"] == "SEM_EXECUCAO"
+    assert "mínimo exigido: 2" in operation["capacidade_explicacao"]["detalhe"]
 
 
 def test_list_funil_exposes_quote_fields_and_only_completed_score_report(monkeypatch):

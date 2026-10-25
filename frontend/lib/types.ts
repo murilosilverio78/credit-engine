@@ -48,6 +48,15 @@ export interface ContratosVerificados {
   nota: string | null;
 }
 
+export type CapacidadeNivel = "ALERTA" | "INFO";
+
+export interface CapacidadeExplicacao {
+  codigo: "SEM_EXECUCAO" | "EXECUCAO_REAL" | "NOMINAL_EXECUCAO_NAO_VERIFICADA";
+  titulo: string;
+  detalhe: string;
+  nivel: CapacidadeNivel;
+}
+
 export interface Operation {
   id: string;
   operation_id?: string | null;
@@ -63,6 +72,7 @@ export interface Operation {
   valor_enquadrado_pre_capacidade?: number | null;
   capacidade_contrato?: number | null;
   capacidade_memoria?: Record<string, unknown> | null;
+  capacidade_explicacao?: CapacidadeExplicacao | null;
   flags_funil?: string[];
   valor_operacao_relatorio?: number | null;
   saldo_vincendo?: number | null;
@@ -202,6 +212,7 @@ export interface FunnelItem {
   valor_enquadrado_pre_capacidade?: number | null;
   capacidade_contrato?: number | null;
   capacidade_memoria?: Record<string, unknown> | null;
+  capacidade_explicacao?: CapacidadeExplicacao | null;
   flags_funil?: string[];
   tipo: string | null;
   data_expiracao: string | null;
