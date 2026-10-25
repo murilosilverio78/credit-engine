@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 29 identifica o banco do financiador em antecipações concorrentes.
+Version 30 alinha a cobertura de parcela à execução de contratos sob demanda.
 """
 
-EMITTER_VERSION = "29"
+EMITTER_VERSION = "30"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

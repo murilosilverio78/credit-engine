@@ -134,6 +134,21 @@ def _coverage_inputs(operation: dict[str, Any]) -> tuple[float | None, str | Non
     return factor, factor_source, installment, installment_source
 
 
+def _coverage_monthly_net(
+    operation: dict[str, Any], monthly_average: float | None, factor: float | None,
+) -> float | None:
+    """Use the underwritten execution basis for on-demand contract coverage."""
+    memory = operation.get("capacidade_memoria")
+    memory = memory if isinstance(memory, dict) else {}
+    if memory.get("fonte_mensal") in {
+        "EXECUCAO_REAL", "SEM_EXECUCAO", "NOMINAL_EXECUCAO_NAO_VERIFICADA",
+    }:
+        monthly_net = _number(memory.get("mensal_liquido"))
+        if monthly_net is not None:
+            return monthly_net
+    return monthly_average * factor if monthly_average and factor is not None else None
+
+
 def _reference_tokens(value: Any) -> set[str]:
     return number_tokens(value)
 
@@ -677,7 +692,8 @@ def emit_fluxo_caixa(
         }, component="contratos_comprasnet", path="empenhos_detalhe", fingerprint=fingerprint))
 
     factor, factor_source, installment, installment_source = _coverage_inputs(operation)
-    coverage = monthly_average * factor / installment if monthly_average and factor is not None and installment else None
+    coverage_monthly_net = _coverage_monthly_net(operation, monthly_average, factor)
+    coverage = coverage_monthly_net / installment if coverage_monthly_net is not None and installment else None
     if coverage is None:
         result.append(_unverified(
             "cobertura_parcela", "faturas,capacidade_memoria,taxa_breakdown", fingerprint,
@@ -691,7 +707,7 @@ def emit_fluxo_caixa(
                 "fonte_fator": factor_source,
                 "fonte_parcela": installment_source,
                 "parcela": round(installment, 2),
-                "mensal_liquido": round(monthly_average * factor, 2),
+                "mensal_liquido": round(coverage_monthly_net, 2),
             },
             component="contratos_comprasnet",
             path="faturas,capacidade_memoria,taxa_breakdown,eligibility_parameters",

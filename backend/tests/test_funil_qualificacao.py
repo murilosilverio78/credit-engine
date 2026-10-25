@@ -416,6 +416,36 @@ def test_capacity_uses_original_framed_value_and_rounds_down_idempotently(monkey
     assert second["valor_enquadrado"] == first["valor_enquadrado"]
 
 
+def test_demand_contract_without_confirmed_execution_is_capacity_insufficient(monkeypatch):
+    qualified, reasons = evaluate(
+        monkeypatch,
+        lambda _operation, snapshots: snapshots["contratos_comprasnet"].update(
+            status_atualizacao="ATUALIZADO",
+            contrato_comprasnet={"modalidade_execucao": "SOB_DEMANDA"},
+            faturas=[],
+            erros_enriquecimento=[],
+        ),
+    )
+
+    assert qualified is False
+    assert any(reason.startswith("capacidade_insuficiente:0") for reason in reasons)
+
+
+def test_demand_contract_keeps_nominal_capacity_when_invoice_snapshot_is_maintained():
+    operation, snapshots, statuses = valid_context()
+    snapshots["contratos_comprasnet"].update(
+        status_atualizacao="MANTIDO",
+        contrato_comprasnet={"modalidade_execucao": "SOB_DEMANDA"},
+        faturas=[],
+    )
+
+    capacity = service._capacidade_do_contrato(operation, snapshots, statuses, PARAMS)
+
+    assert capacity is not None
+    assert capacity["memoria"]["fonte_mensal"] == "NOMINAL_EXECUCAO_NAO_VERIFICADA"
+    assert capacity["capacidade"] > 0
+
+
 def test_scale_jump_flags_ratio_and_missing_receipt_history():
     snapshots = {
         "contratos_pncp": {"faturamento_contratado_12m": 300},

@@ -205,6 +205,20 @@ def _contrato_cedido(
     return contract
 
 
+def _faturas_comprasnet_verificadas(comprasnet: dict[str, Any]) -> bool:
+    """Only an updated, error-free invoices endpoint confirms an empty result."""
+    errors = comprasnet.get("erros_enriquecimento") or []
+    invoices_failed = any(
+        isinstance(error, dict) and error.get("endpoint") == "faturas"
+        for error in errors
+    )
+    return (
+        comprasnet.get("status_consulta") == "ENCONTRADO"
+        and comprasnet.get("status_atualizacao") == "ATUALIZADO"
+        and not invoices_failed
+    )
+
+
 def _capacidade_do_contrato(
     operation: dict[str, Any], snapshots: dict[str, Any], statuses: dict[str, str], params: dict[str, Any]
 ) -> dict[str, Any] | None:
@@ -213,6 +227,17 @@ def _capacidade_do_contrato(
         return None
     from app.services.capacidade_contrato_service import calcular_capacidade_contrato
 
+    comprasnet = snapshots.get("contratos_comprasnet") or {}
+    comprasnet_contract = comprasnet.get("contrato_comprasnet") or {}
+    execution = {
+        "modalidade": comprasnet_contract.get("modalidade_execucao"),
+        "faturas": comprasnet.get("faturas"),
+        "leitura_faturas_verificada": (
+            statuses.get("contratos_comprasnet") == "completed"
+            and _faturas_comprasnet_verificadas(comprasnet)
+        ),
+    }
+
     try:
         result = calcular_capacidade_contrato(
             contract["valor_global"],
@@ -220,6 +245,7 @@ def _capacidade_do_contrato(
             contract["vigencia_fim"],
             contract["dedicacao_exclusiva"],
             params,
+            execucao=execution,
         )
     except ValueError:
         return None

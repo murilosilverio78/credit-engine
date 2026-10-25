@@ -23,7 +23,13 @@ def _number(value: Any) -> float | None:
     try:
         value = float(value)
     except (TypeError, ValueError):
-        return None
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            value = float(text.replace(".", "").replace(",", "."))
+        except ValueError:
+            return None
     return value if math.isfinite(value) else None
 
 
@@ -44,6 +50,61 @@ def _next_anniversary(start: date, reference: date) -> date:
     return anniversary
 
 
+def _subtract_months(value: date, months: int) -> date:
+    index = value.year * 12 + value.month - 1 - months
+    year, month_index = divmod(index, 12)
+    month = month_index + 1
+    return date(year, month, min(value.day, monthrange(year, month)[1]))
+
+
+def _cancelled(invoice: dict[str, Any]) -> bool:
+    value = invoice.get("nota_cancelada")
+    if value is True or str(value).strip().lower() in {"true", "sim", "s", "1"}:
+        return True
+    return "cancel" in str(invoice.get("situacao") or "").lower()
+
+
+def _integer_parameter(parametros: dict[str, Any], key: str, default: int) -> int:
+    value = _number(parametros.get(key, default))
+    return default if value is None else int(value)
+
+
+def _monthly_execution(
+    execution: dict[str, Any], start: date, reference: date, parametros: dict[str, Any],
+) -> tuple[str, float | None, int, int]:
+    """Return source, monthly execution, invoice count and effective window."""
+    configured_window = max(
+        _integer_parameter(parametros, "cap_sob_demanda_janela_meses", 6), 1
+    )
+    window_months = min(configured_window, _rounded_months(start, reference))
+    minimum_invoices = max(
+        _integer_parameter(parametros, "cap_sob_demanda_min_faturas", 2), 0
+    )
+    if minimum_invoices == 0:
+        return "NOMINAL", None, 0, window_months
+    if execution.get("leitura_faturas_verificada") is not True:
+        return "NOMINAL_EXECUCAO_NAO_VERIFICADA", None, 0, window_months
+
+    window_start = max(start, _subtract_months(reference, window_months))
+    invoices = [
+        invoice for invoice in execution.get("faturas") or []
+        if isinstance(invoice, dict)
+        and not _cancelled(invoice)
+        and (issued := _date(invoice.get("emissao"))) is not None
+        and window_start <= issued <= reference
+    ]
+    execution_value = sum(
+        (_number(invoice.get("valorliquido")) or 0.0)
+        if invoice.get("valorliquido") not in (None, "")
+        else (_number(invoice.get("valor")) or 0.0) - (_number(invoice.get("glosa")) or 0.0)
+        for invoice in invoices
+    )
+    monthly = execution_value / window_months
+    if len(invoices) < minimum_invoices:
+        return "SEM_EXECUCAO", monthly, len(invoices), window_months
+    return "EXECUCAO_REAL", monthly, len(invoices), window_months
+
+
 def calcular_capacidade_contrato(
     valor_global: Any,
     vigencia_inicio: Any,
@@ -51,6 +112,7 @@ def calcular_capacidade_contrato(
     dedicacao_exclusiva: Any,
     parametros: dict[str, Any],
     data_referencia: date | None = None,
+    execucao: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Calcula o PV das parcelas líquidas no horizonte firme do contrato.
 
@@ -79,7 +141,21 @@ def calcular_capacidade_contrato(
         raise ValueError("parametros de capacidade invalidos")
 
     months = _rounded_months(start, end)
-    monthly_gross = value / months
+    monthly_nominal = value / months
+    monthly_gross = monthly_nominal
+    source = "NOMINAL"
+    monthly_execution: float | None = None
+    invoices_in_window = 0
+    window_months: int | None = None
+    execution = execucao if isinstance(execucao, dict) else {}
+    if str(execution.get("modalidade") or "").strip().upper() == "SOB_DEMANDA":
+        source, monthly_execution, invoices_in_window, window_months = _monthly_execution(
+            execution, start, reference, parametros,
+        )
+        if source == "EXECUCAO_REAL":
+            monthly_gross = min(monthly_nominal, monthly_execution or 0.0)
+        elif source == "SEM_EXECUCAO":
+            monthly_gross = 0.0
     monthly_net = monthly_gross * factor
     horizon = min(end, _next_anniversary(start, reference))
 
@@ -100,6 +176,11 @@ def calcular_capacidade_contrato(
         "valor_global": round(value, 2),
         "meses_vigencia": months,
         "mensal_bruto": round(monthly_gross, 2),
+        "fonte_mensal": source,
+        "mensal_nominal": round(monthly_nominal, 2),
+        "mensal_execucao": round(monthly_execution, 2) if monthly_execution is not None else None,
+        "faturas_na_janela": invoices_in_window,
+        "janela_meses": window_months,
         "fator_liquido": factor,
         "mensal_liquido": round(monthly_net, 2),
         "horizonte_firme": horizon.isoformat(),

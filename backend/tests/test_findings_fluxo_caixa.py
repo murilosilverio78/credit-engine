@@ -133,6 +133,25 @@ def test_coverage_estimates_installment_before_pricing(monkeypatch):
     assert coverage["parcela"] == pytest.approx(estimated, abs=.01)
 
 
+def test_coverage_uses_demand_capacity_memory_when_execution_is_insufficient():
+    operation = _operation() | {
+        "capacidade_memoria": {
+            "fator_liquido": .755,
+            "fonte_mensal": "SEM_EXECUCAO",
+            "mensal_liquido": 0,
+        },
+    }
+    findings = _by_code(emit_fluxo_caixa(
+        _snapshots([_invoice(month) for month in range(4, 10)]),
+        fingerprint="f",
+        operation=operation,
+    ))
+
+    coverage = findings["cobertura_parcela"].valor
+    assert coverage["indice"] == 0
+    assert coverage["mensal_liquido"] == 0
+
+
 def test_commitments_without_issue_dates_use_all_rows():
     findings = _by_code(emit_fluxo_caixa(
         _snapshots([_invoice(month) for month in range(4, 10)], commitments=[

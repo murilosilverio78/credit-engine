@@ -20,7 +20,16 @@ function capacityText(memory: unknown) {
   if (!Object.keys(m).length) return "não verificado";
   const factor = Number(m.fator_liquido);
   const rate = Number(m.i);
-  return `mensal bruto ${money(m.mensal_bruto)} × fator ${Number.isFinite(factor) ? factor.toLocaleString("pt-BR") : "—"} = mensal líquido ${money(m.mensal_liquido)} → ÷ cobertura = parcela máxima ${money(m.parcela_max)} → ${String(m.n ?? "—")} parcelas até ${date(m.horizonte_firme)}, descontadas a ${Number.isFinite(rate) ? (rate * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) : "—"}% a.m.`;
+  const source = String(m.fonte_mensal || "NOMINAL");
+  const windowMonths = Number(m.janela_meses);
+  const sourceText = source === "EXECUCAO_REAL"
+    ? `pela execução real dos últimos ${Number.isFinite(windowMonths) ? windowMonths : "—"} meses`
+    : source === "SEM_EXECUCAO"
+      ? "contrato sem execução comprovada"
+      : source === "NOMINAL_EXECUCAO_NAO_VERIFICADA"
+        ? "valor global ÷ meses (execução não verificada)"
+        : "valor global ÷ meses";
+  return `${sourceText}: mensal bruto ${money(m.mensal_bruto)} × fator ${Number.isFinite(factor) ? factor.toLocaleString("pt-BR") : "—"} = mensal líquido ${money(m.mensal_liquido)} → ÷ cobertura = parcela máxima ${money(m.parcela_max)} → ${String(m.n ?? "—")} parcelas até ${date(m.horizonte_firme)}, descontadas a ${Number.isFinite(rate) ? (rate * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) : "—"}% a.m.`;
 }
 
 export default function AssignedContractPage() {
