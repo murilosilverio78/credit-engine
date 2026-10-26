@@ -259,6 +259,7 @@ def test_source_unavailability_keeps_quote_documented(monkeypatch):
         lambda _operation_id: (snapshots, statuses),
     )
     monkeypatch.setattr(service, "get_eligibility_config", lambda: PARAMS.copy())
+    monkeypatch.setattr(service, "_load_cotacao", lambda _cotacao_id: {})
     monkeypatch.setattr(
         service,
         "supabase",
@@ -368,6 +369,7 @@ def test_receipt_volume_no_longer_rejects_a_qualified_quote(monkeypatch):
         def execute(self):
             return SimpleNamespace(data=[])
 
+    monkeypatch.setattr(service, "_load_cotacao", lambda _cotacao_id: {})
     monkeypatch.setattr(
         service,
         "supabase",
@@ -455,3 +457,48 @@ def test_scale_jump_flags_ratio_and_missing_receipt_history():
 
     snapshots["recursos_recebidos"]["faturamento_verificado_12m"] = 0
     assert service._flags_salto_escala(snapshots, PARAMS) == ["salto_escala:sem_historico"]
+
+
+def test_stale_quote_ceiling_is_resynced_even_when_operation_already_framed(monkeypatch):
+    """Regressão: operação já reenquadrada, mas cotação ficou com o teto antigo."""
+    operation, snapshots, statuses = valid_context()
+    operation["valor_enquadrado"] = 650_999
+    first = service._capacidade_do_contrato(operation, snapshots, statuses, PARAMS)
+    assert first["reduziu"] is True
+    framed = first["valor_enquadrado"]
+    operation["valor_enquadrado"] = framed
+    operation["valor_enquadrado_pre_capacidade"] = first["base"]
+    quote_updates = []
+
+    class Query:
+        def __init__(self, name):
+            self.name = name
+            self.data = {}
+
+        def update(self, data):
+            self.data = data
+            return self
+
+        def eq(self, *_args):
+            return self
+
+        def execute(self):
+            if self.name == "cotacoes_broadfactor" and "valor_enquadrado" in self.data:
+                quote_updates.append(self.data["valor_enquadrado"])
+            return SimpleNamespace(data=[])
+
+    monkeypatch.setattr(service, "_load_operation", lambda _operation_id: operation)
+    monkeypatch.setattr(
+        service, "_load_snapshots", lambda _operation_id: (snapshots, statuses)
+    )
+    monkeypatch.setattr(service, "get_eligibility_config", lambda: PARAMS.copy())
+    monkeypatch.setattr(
+        service, "_load_cotacao", lambda _id: {"valor_enquadrado": first["base"]}
+    )
+    monkeypatch.setattr(
+        service, "supabase", SimpleNamespace(table=lambda name: Query(name))
+    )
+
+    service.atualizar_estagio_pos_fase2("C-1", "op-1")
+
+    assert framed in quote_updates

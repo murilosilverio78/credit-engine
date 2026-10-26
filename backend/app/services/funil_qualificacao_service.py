@@ -423,10 +423,21 @@ def atualizar_estagio_pos_fase2(cotacao_id: str, operation_id: str) -> tuple[str
         valor_anterior = operation.get("valor_enquadrado")
         supabase.table("operations").update(operation_updates).eq("id", operation_id).execute()
         operation = {**operation, **operation_updates}
-        if capacidade["reenquadrado"]:
+        # A cotação é o que a tela lê; compará-la com o valor da própria
+        # cotação (e não só com o da operação) evita que uma falha parcial
+        # numa execução anterior deixe o teto divergente para sempre.
+        cotacao_atual = _load_cotacao(cotacao_id)
+        cotacao_defasada = (
+            capacidade["reduziu"]
+            and cotacao_atual
+            and _as_float(cotacao_atual.get("valor_enquadrado"))
+            != capacidade["valor_enquadrado"]
+        )
+        if capacidade["reenquadrado"] or cotacao_defasada:
             supabase.table("cotacoes_broadfactor").update({
                 "valor_enquadrado": capacidade["valor_enquadrado"],
             }).eq("cotacao_id", cotacao_id).execute()
+        if capacidade["reenquadrado"]:
             from app.services.audit_service import AuditService
 
             AuditService().log(
