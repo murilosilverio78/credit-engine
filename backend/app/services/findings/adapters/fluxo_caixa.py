@@ -9,6 +9,7 @@ from typing import Any
 from unicodedata import combining, normalize
 
 from app.integrations.comprasnet.parsing import number_tokens, parse_data, parse_number
+from app.services.execucao_portal import faturas_equivalentes_portal
 from app.services.findings.adapters.common import finding
 from app.services.findings.schemas import Confianca, Escopo, Estado
 
@@ -602,13 +603,22 @@ def emit_fluxo_caixa(
     raw_invoices = comprasnet.get("faturas")
     invoices = [item for item in raw_invoices if isinstance(item, dict) and not _cancelled(item)] if isinstance(raw_invoices, list) else []
     reference = _date(operation.get("data_referencia")) or date.today()
+    contract = comprasnet.get("contrato_comprasnet") or {}
+    portal_execution = faturas_equivalentes_portal(
+        snapshots.get("pagamentos_portal"), contract.get("numero"), contract.get("uasg"),
+    )
+    source_portal = False
+    if not invoices and portal_execution["disponivel"]:
+        invoices = portal_execution["faturas"]
+        source_portal = True
     if not invoices:
         return [
             *[_unverified(code, "faturas", fingerprint, "contrato sem faturamento ainda") for code in _CASH_CODES if code not in _PAYMENT_CODES],
             *_payment_findings(comprasnet, snapshots.get("pagamentos_portal"), reference, fingerprint),
         ]
 
-    contract = comprasnet.get("contrato_comprasnet") or {}
+    source_component = "pagamentos_portal" if source_portal else "contratos_comprasnet"
+    source_path = "ordens_bancarias" if source_portal else "faturas"
     by_month: dict[tuple[int, int], float] = {}
     for invoice in invoices:
         if (competence := _month(invoice)) is not None:
@@ -620,20 +630,25 @@ def emit_fluxo_caixa(
     gross_total = sum(_number(invoice.get("valor")) or 0.0 for invoice in invoices)
     glosa_total = sum(_number(invoice.get("glosa")) or 0.0 for invoice in invoices)
 
-    result = [
-        finding("mensalidade_faturada_media", Escopo.OPERACAO, {
+    monthly_value = {
             "valor": round(monthly_average or 0.0, 2), "desvio": round(deviation or 0.0, 2),
             "cv": round(cv, 6) if cv is not None else None, "competencias": len(recent),
-        }, component="contratos_comprasnet", path="faturas", fingerprint=fingerprint),
-        finding("glosa_pct_12m", Escopo.OPERACAO, round(glosa_total / gross_total, 6) if gross_total else 0.0, component="contratos_comprasnet", path="faturas.glosa", fingerprint=fingerprint),
+    }
+    if source_portal:
+        monthly_value["fonte"] = "PORTAL_OB"
+    result = [
+        finding("mensalidade_faturada_media", Escopo.OPERACAO, monthly_value, component=source_component, path=source_path, fingerprint=fingerprint),
+        _unverified("glosa_pct_12m", source_path, fingerprint, "glosa não observável nas ordens bancárias", source_component)
+        if source_portal else finding("glosa_pct_12m", Escopo.OPERACAO, round(glosa_total / gross_total, 6) if gross_total else 0.0, component=source_component, path="faturas.glosa", fingerprint=fingerprint),
     ]
     for code, key in (("prazo_ateste_dias", "ateste"), ("prazo_liquidacao_dias", "data_liquidacao")):
         median = _median_days(invoices, key)
         result.append(
-            finding(code, Escopo.OPERACAO, median, component="contratos_comprasnet", path=f"faturas.{key}", fingerprint=fingerprint)
+            finding(code, Escopo.OPERACAO, median, component=source_component, path=f"{source_path}.{key}", fingerprint=fingerprint)
             if median is not None else _unverified(
-                code, f"faturas.{key}", fingerprint,
-                "data de ateste indisponível" if key == "ateste" else "data de liquidação indisponível",
+                code, f"{source_path}.{key}", fingerprint,
+                "sem datas de ateste/liquidação (execução reconstruída pelo Portal)" if source_portal else ("data de ateste indisponível" if key == "ateste" else "data de liquidação indisponível"),
+                source_component,
             )
         )
 
@@ -647,7 +662,7 @@ def emit_fluxo_caixa(
         if (cursor.year, cursor.month) not in by_month:
             missing += 1
         cursor = date(cursor.year + 1, 1, 1) if cursor.month == 12 else date(cursor.year, cursor.month + 1, 1)
-    result.append(finding("meses_sem_fatura_12m", Escopo.OPERACAO, missing, component="contratos_comprasnet", path="faturas.dados_referencia", fingerprint=fingerprint))
+    result.append(finding("meses_sem_fatura_12m", Escopo.OPERACAO, missing, component=source_component, path=f"{source_path}.dados_referencia", fingerprint=fingerprint))
 
     raw_commitments = comprasnet.get("empenhos_detalhe")
     all_commitments = [item for item in raw_commitments if isinstance(item, dict)] if isinstance(raw_commitments, list) else []
@@ -656,6 +671,16 @@ def emit_fluxo_caixa(
     commitments = (
         [item for item, issued in dated_commitments if issued and issued.year == reference.year]
         if has_commitment_dates else all_commitments
+    )
+    def commitment_inconsistent(item: dict[str, Any]) -> bool:
+        to_settle = _number(item.get("a_liquidar"))
+        committed = _number(item.get("empenhado")) or 0.0
+        settled = _number(item.get("liquidado")) or 0.0
+        paid = _number(item.get("pago")) or 0.0
+        return (to_settle is not None and to_settle < 0) or committed < settled + paid
+
+    inconsistent_commitments = source_portal and any(
+        commitment_inconsistent(item) for item in commitments
     )
     saldo = sum(
         (_number(item.get("empenhado")) or 0.0)
@@ -681,8 +706,11 @@ def emit_fluxo_caixa(
     }
     if not has_commitment_dates:
         balance_value["criterio_ano"] = "SEM_DATA_EMISSAO"
-    result.append(finding("saldo_empenho_ano", Escopo.OPERACAO, balance_value, component="contratos_comprasnet", path="empenhos_detalhe", fingerprint=fingerprint))
-    if monthly_average and saldo < need:
+    result.append(
+        _unverified("saldo_empenho_ano", "empenhos_detalhe", fingerprint, "empenho com saldo negativo no Comprasnet")
+        if inconsistent_commitments else finding("saldo_empenho_ano", Escopo.OPERACAO, balance_value, component="contratos_comprasnet", path="empenhos_detalhe", fingerprint=fingerprint)
+    )
+    if monthly_average and saldo < need and not inconsistent_commitments:
         uncovered = need - saldo
         result.append(finding("empenho_insuficiente", Escopo.OPERACAO, {
             "valor_descoberto": round(uncovered, 2), "meses_descobertos": round(uncovered / monthly_average, 4),
@@ -709,8 +737,8 @@ def emit_fluxo_caixa(
                 "parcela": round(installment, 2),
                 "mensal_liquido": round(coverage_monthly_net, 2),
             },
-            component="contratos_comprasnet",
-            path="faturas,capacidade_memoria,taxa_breakdown,eligibility_parameters",
+            component=source_component,
+            path=f"{source_path},capacidade_memoria,taxa_breakdown,eligibility_parameters",
             fingerprint=fingerprint,
             catalog_version=2,
         )
@@ -721,10 +749,20 @@ def emit_fluxo_caixa(
         elapsed = min(_months_between(start, reference), _months_between(start, end))
         expected = global_value * elapsed / _months_between(start, end)
         execution = gross_total / expected if expected else None
-        result.append(finding("execucao_vs_contratado", Escopo.OPERACAO, round(execution or 0.0, 6), component="contratos_comprasnet", path="faturas,contrato_comprasnet", fingerprint=fingerprint))
+        result.append(finding("execucao_vs_contratado", Escopo.OPERACAO, round(execution or 0.0, 6), component=source_component, path=f"{source_path},contrato_comprasnet", fingerprint=fingerprint))
     else:
-        result.append(_unverified("execucao_vs_contratado", "faturas,contrato_comprasnet", fingerprint, "dados do contrato indisponíveis"))
+        result.append(_unverified("execucao_vs_contratado", f"{source_path},contrato_comprasnet", fingerprint, "dados do contrato indisponíveis", source_component))
     result.extend(_payment_findings(comprasnet, snapshots.get("pagamentos_portal"), reference, fingerprint))
+    if source_portal:
+        unavailable = {
+            "prazo_pagamento_dias", "ciclo_caixa_dias", "faturas_liquidadas_sem_pagamento",
+            "taxa_conciliacao_pagamentos",
+        }
+        result = [
+            _unverified(item.codigo, "ordens_bancarias", fingerprint, "sem datas de ateste/liquidação (execução reconstruída pelo Portal)", "pagamentos_portal")
+            if item.codigo in unavailable else item
+            for item in result
+        ]
     return result
 
 

@@ -242,13 +242,21 @@ def _capacidade_do_contrato(
 
     comprasnet = snapshots.get("contratos_comprasnet") or {}
     comprasnet_contract = comprasnet.get("contrato_comprasnet") or {}
+    from app.services.execucao_portal import faturas_equivalentes_portal
+
+    portal_execution = faturas_equivalentes_portal(
+        snapshots.get("pagamentos_portal"), comprasnet_contract.get("numero"),
+        comprasnet_contract.get("uasg"),
+    )
     execution = {
         "modalidade": comprasnet_contract.get("modalidade_execucao"),
         "faturas": comprasnet.get("faturas"),
+        "faturas_portal": portal_execution["faturas"],
         "leitura_faturas_verificada": (
             statuses.get("contratos_comprasnet") == "completed"
             and _faturas_comprasnet_verificadas(comprasnet)
         ),
+        "leitura_portal_verificada": portal_execution["disponivel"],
     }
 
     try:

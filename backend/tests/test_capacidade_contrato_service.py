@@ -97,6 +97,25 @@ def test_demand_capacity_uses_real_execution_when_minimum_evidence_is_met():
     assert result["memoria"]["janela_meses"] == 6
 
 
+def test_demand_capacity_uses_complete_portal_execution_when_comprasnet_has_no_minimum():
+    result = calcular_capacidade_contrato(
+        360_000, "2026-01-01", "2027-01-01", False, PARAMS, date(2026, 10, 15),
+        execucao={
+            "modalidade": "SOB_DEMANDA", "faturas": [], "leitura_faturas_verificada": True,
+            "leitura_portal_verificada": True,
+            "faturas_portal": [
+                {"emissao_aproximada": "2026-08-25", "valor": 12_000, "valorliquido": 10_000},
+                {"emissao_aproximada": "2026-09-21", "valor": 24_000, "valorliquido": 20_000},
+            ],
+        },
+    )
+
+    assert result["memoria"]["fonte_mensal"] == "EXECUCAO_REAL"
+    assert result["memoria"]["fonte_execucao"] == "PORTAL_OB"
+    assert result["memoria"]["mensal_execucao"] > 0
+    assert result["memoria"]["mensal_bruto"] <= result["memoria"]["mensal_nominal"]
+
+
 def test_demand_capacity_never_exceeds_nominal_monthly_value():
     result = _demand_capacity([
         *[_invoice(month, "40.000,00") for month in range(5, 11)],

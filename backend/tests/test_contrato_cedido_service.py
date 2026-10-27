@@ -35,6 +35,26 @@ def test_contract_view_marks_missing_portal_findings_as_not_verified():
     assert view["qualidade"]["filtro_usado"] is None
 
 
+def test_contract_view_uses_complete_portal_orders_when_comprasnet_has_no_invoices():
+    database = Postgrest({
+        "operations": [{"id": "op"}],
+        "component_snapshots": [
+            {"operation_id": "op", "component": "contratos_comprasnet", "parsed_result": {"status_consulta": "ENCONTRADO", "contrato_comprasnet": {"numero": "00027/2026", "uasg": "510678", "valor_global": 100_000, "vigencia_inicio": "2026-01-01"}, "faturas": []}},
+            {"operation_id": "op", "component": "pagamentos_portal", "parsed_result": {"status_consulta": "ENCONTRADO", "paginacao": {"parcial": False}, "ordens_bancarias": [
+                {"documento": "510678OB1", "data": "2026-10-19", "valor": "1.000,00", "observacao": "CONTR. 27/2026 COMP. 10/2026 DOC. FISCAI(S): 158"},
+                {"documento": "510678DR1", "data": "2026-10-19", "valor": "100,00", "observacao": "ISSQN CONTR. 27/2026 COMP. 10/2026 DOC. FISCAI(S): 158"},
+            ]}},
+        ], "finding_runs": [], "findings": [],
+    })
+
+    view = contrato_cedido_view("op", database=database)
+
+    assert view["execucao"]["fonte_execucao"] == "PORTAL_OB"
+    assert view["execucao"]["recebido"] == 1_000
+    assert view["execucao"]["faturado_bruto"] == 1_100
+    assert view["execucao"]["alerta_sem_execucao"] is False
+
+
 def test_contract_view_exposes_capacity_explanation():
     database = Postgrest({
         "operations": [{

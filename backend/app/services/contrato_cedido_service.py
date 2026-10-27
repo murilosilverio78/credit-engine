@@ -6,6 +6,7 @@ from typing import Any
 
 from app.integrations.comprasnet.parsing import parse_data, parse_number
 from app.services.capacidade_contrato_service import explicar_capacidade
+from app.services.execucao_portal import faturas_equivalentes_portal
 from app.services.findings.adapters.fluxo_caixa import _month, reconcile_payments
 from app.services.findings.version import EMITTER_VERSION
 
@@ -54,17 +55,30 @@ def contrato_cedido_view(operation_id: str, *, database=None) -> dict[str, Any]:
     contract = compras.get("contrato_comprasnet") or {}
     invoices = [item for item in (compras.get("faturas") or []) if isinstance(item, dict) and not _cancelled(item)]
     orders = [item for item in (pagamentos.get("ordens_bancarias") or []) if isinstance(item, dict)]
-    matches = reconcile_payments(invoices, orders, contract.get("numero"), contract.get("uasg")) if contract else []
+    portal_execution = faturas_equivalentes_portal(
+        pagamentos, contract.get("numero"), contract.get("uasg"),
+    ) if contract else {"disponivel": False, "faturas": []}
+    source = "COMPRASNET_FATURAS"
+    if not invoices and portal_execution["disponivel"]:
+        invoices = portal_execution["faturas"]
+        source = "PORTAL_OB"
+    matches = reconcile_payments(invoices, orders, contract.get("numero"), contract.get("uasg")) if contract and source == "COMPRASNET_FATURAS" else []
     payments_by_invoice = {id(invoice): order for invoice, order in matches}
     paid_orders = {id(order): order for _, order in matches}
     gross = round(sum(_number(item.get("valor")) for item in invoices), 2)
     glosa = round(sum(_number(item.get("glosa")) for item in invoices), 2)
     liquid = round(sum(_number(item.get("valorliquido")) or max(_number(item.get("valor")) - _number(item.get("glosa")), 0) for item in invoices), 2)
-    received = round(sum(_number(order.get("valor")) for order in paid_orders.values()), 2)
+    received = round(
+        sum(_number(item.get("valorliquido")) for item in invoices)
+        if source == "PORTAL_OB" else sum(_number(order.get("valor")) for order in paid_orders.values()),
+        2,
+    )
     total = _number(contract.get("valor_global"))
     first = parse_data(contract.get("vigencia_inicio"))
-    latest_invoice = max((parse_data(item.get("emissao")) or parse_data(item.get("data_liquidacao")) for item in invoices), default=None)
-    alert = bool(first and first <= date.today() - timedelta(days=180) and (not latest_invoice or latest_invoice <= date.today() - timedelta(days=180)))
+    latest_invoice = max((parse_data(item.get("emissao")) or parse_data(item.get("emissao_aproximada")) or parse_data(item.get("data_liquidacao")) for item in invoices), default=None)
+    latest_ob = max((parse_data(item.get("data_pagamento")) for item in invoices if item.get("data_pagamento")), default=None)
+    latest_execution = max((value for value in (latest_invoice, latest_ob) if value), default=None)
+    alert = bool(first and first <= date.today() - timedelta(days=180) and (not latest_execution or latest_execution <= date.today() - timedelta(days=180)))
 
     monthly: dict[tuple[int, int], dict[str, Any]] = {}
     for invoice in invoices:
@@ -77,7 +91,10 @@ def contrato_cedido_view(operation_id: str, *, database=None) -> dict[str, Any]:
         item["bruto"] += _number(invoice.get("valor")); item["glosa"] += _number(invoice.get("glosa")); item["liquido"] += _number(invoice.get("valorliquido")) or max(_number(invoice.get("valor")) - _number(invoice.get("glosa")), 0)
         item["data_liquidacao"] = invoice.get("data_liquidacao") or item["data_liquidacao"]
         order = payments_by_invoice.get(id(invoice))
-        if order:
+        if source == "PORTAL_OB":
+            item["data_pagamento"] = invoice.get("data_pagamento")
+            item["valor_pago"] += _number(invoice.get("valorliquido"))
+        elif order:
             item["data_pagamento"] = order.get("data")
             item["valor_pago"] += min(_number(order.get("valor")), _number(invoice.get("valorliquido")) or _number(invoice.get("valor")))
             paid, settled = parse_data(order.get("data")), parse_data(invoice.get("data_liquidacao"))
@@ -90,7 +107,7 @@ def contrato_cedido_view(operation_id: str, *, database=None) -> dict[str, Any]:
     return {
         "status": compras.get("status_consulta") or "NAO_VERIFICADO",
         "identificacao": {"objeto": contract.get("objeto"), "orgao": contract.get("orgao"), "uasg": contract.get("uasg"), "numero": contract.get("numero"), "modalidade_execucao": contract.get("modalidade_execucao"), "vigencia": {"inicio": contract.get("vigencia_inicio"), "fim": contract.get("vigencia_fim")}, "valor_original": compras.get("valor_original") or contract.get("valor_inicial"), "valor_vigente": compras.get("valor_vigente") or contract.get("valor_global"), "prorrogavel": contract.get("prorrogavel"), "n_prorrogacoes": compras.get("n_prorrogacoes", 0), "historico": compras.get("historico") or []},
-        "execucao": {"contratado": contract.get("valor_global"), "faturado_bruto": gross, "glosa": glosa, "faturado_liquido": liquid, "recebido": received, "depositos_conta_vinculada": deposits, "a_receber": round(max(total - gross, 0), 2), "pct_executado": round(gross / total, 6) if total else None, "alerta_sem_execucao": alert},
+        "execucao": {"contratado": contract.get("valor_global"), "faturado_bruto": gross, "glosa": glosa, "faturado_liquido": liquid, "recebido": received, "depositos_conta_vinculada": deposits, "a_receber": round(max(total - gross, 0), 2), "pct_executado": round(gross / total, 6) if total else None, "alerta_sem_execucao": alert, "fonte_execucao": source, "aviso_fonte": "Sem faturas no Contratos.gov.br; execução reconstruída pelas ordens bancárias do Portal da Transparência. Bruto = pago + retenções de ISSQN visíveis (piso)." if source == "PORTAL_OB" else None},
         "fluxo_mensal": [monthly[key] for key in sorted(monthly)],
         "risco": {
             **{code: findings.get(code) for code in risk_codes},

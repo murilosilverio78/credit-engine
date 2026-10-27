@@ -292,7 +292,9 @@ def test_payment_rate_is_unverified_without_settled_invoices_and_reports_contrac
     )}
 
     assert findings["taxa_conciliacao_pagamentos"].estado == Estado.NAO_VERIFICADO
-    assert findings["taxa_conciliacao_pagamentos"].pendencia == {"motivo": "sem faturas liquidadas"}
+    # With a complete Portal reconstruction, dates of ateste/liquidação are
+    # deliberately never inferred from bank orders.
+    assert findings["taxa_conciliacao_pagamentos"].pendencia == {"motivo": "sem datas de ateste/liquidação (execução reconstruída pelo Portal)"}
     assert findings["pagamentos_contrato_12m"].valor == {
         "valor": 300.0, "quantidade": 2, "ultima_data": "2026-03-11", "intervalo_medio_dias": 60.0,
     }

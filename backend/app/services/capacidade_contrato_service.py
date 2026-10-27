@@ -127,6 +127,11 @@ def explicar_capacidade(
         nominal = _number(memoria.get("mensal_nominal"))
         usados = [value for value in (executado, nominal) if value is not None]
         menor = min(usados) if usados else _number(memoria.get("mensal_bruto"))
+        portal_note = (
+            " A execução foi reconstruída pelas ordens bancárias do Portal da Transparência, "
+            "pois não há faturas no Comprasnet."
+            if memoria.get("fonte_execucao") == "PORTAL_OB" else ""
+        )
         return {
             "codigo": "EXECUCAO_REAL",
             "titulo": "Capacidade limitada pela execução real do contrato",
@@ -134,7 +139,7 @@ def explicar_capacidade(
                 f"Média mensal executada de {_money(executado)} nos últimos "
                 f"{_whole(memoria.get('janela_meses'))} mês(es) versus nominal de "
                 f"{_money(nominal)}; foi usada a menor das duas ({_money(menor)}/mês)."
-                f"{detalhe_inicio_futuro}"
+                f"{portal_note}{detalhe_inicio_futuro}"
             ),
             "nivel": "INFO",
         }
@@ -151,9 +156,20 @@ def explicar_capacidade(
     return None
 
 
+def _window_invoices(invoices: Any, start: date, reference: date, window_months: int) -> list[dict[str, Any]]:
+    window_start = max(start, _subtract_months(reference, window_months))
+    return [
+        invoice for invoice in invoices or []
+        if isinstance(invoice, dict)
+        and not _cancelled(invoice)
+        and (issued := _date(invoice.get("emissao") or invoice.get("emissao_aproximada"))) is not None
+        and window_start <= issued <= reference
+    ]
+
+
 def _monthly_execution(
     execution: dict[str, Any], start: date, reference: date, parametros: dict[str, Any],
-) -> tuple[str, float | None, int, int]:
+) -> tuple[str, float | None, int, int, str | None]:
     """Return source, monthly execution, invoice count and effective window."""
     configured_window = max(
         _integer_parameter(parametros, "cap_sob_demanda_janela_meses", 6), 1
@@ -163,28 +179,36 @@ def _monthly_execution(
         _integer_parameter(parametros, "cap_sob_demanda_min_faturas", 2), 0
     )
     if minimum_invoices == 0:
-        return "NOMINAL", None, 0, window_months
-    if execution.get("leitura_faturas_verificada") is not True:
-        return "NOMINAL_EXECUCAO_NAO_VERIFICADA", None, 0, window_months
+        return "NOMINAL", None, 0, window_months, None
 
-    window_start = max(start, _subtract_months(reference, window_months))
-    invoices = [
-        invoice for invoice in execution.get("faturas") or []
-        if isinstance(invoice, dict)
-        and not _cancelled(invoice)
-        and (issued := _date(invoice.get("emissao"))) is not None
-        and window_start <= issued <= reference
-    ]
-    execution_value = sum(
-        (_number(invoice.get("valorliquido")) or 0.0)
-        if invoice.get("valorliquido") not in (None, "")
-        else (_number(invoice.get("valor")) or 0.0) - (_number(invoice.get("glosa")) or 0.0)
-        for invoice in invoices
-    )
-    monthly = execution_value / window_months
-    if len(invoices) < minimum_invoices:
-        return "SEM_EXECUCAO", monthly, len(invoices), window_months
-    return "EXECUCAO_REAL", monthly, len(invoices), window_months
+    def assessed(invoices: list[dict[str, Any]], *, portal: bool) -> tuple[float, int]:
+        value = sum(
+            (_number(invoice.get("valor")) or 0.0)
+            if portal else (
+                (_number(invoice.get("valorliquido")) or 0.0)
+                if invoice.get("valorliquido") not in (None, "")
+                else (_number(invoice.get("valor")) or 0.0) - (_number(invoice.get("glosa")) or 0.0)
+            )
+            for invoice in invoices
+        )
+        return value / window_months, len(invoices)
+
+    invoices = _window_invoices(execution.get("faturas"), start, reference, window_months)
+    if execution.get("leitura_faturas_verificada") is True:
+        execution_value, invoice_count = assessed(invoices, portal=False)
+        if invoice_count >= minimum_invoices:
+            return "EXECUCAO_REAL", execution_value, invoice_count, window_months, "COMPRASNET_FATURAS"
+
+    portal_invoices = _window_invoices(execution.get("faturas_portal"), start, reference, window_months)
+    if execution.get("leitura_portal_verificada") is True:
+        execution_value, invoice_count = assessed(portal_invoices, portal=True)
+        if invoice_count >= minimum_invoices:
+            return "EXECUCAO_REAL", execution_value, invoice_count, window_months, "PORTAL_OB"
+
+    if execution.get("leitura_faturas_verificada") is not True:
+        return "NOMINAL_EXECUCAO_NAO_VERIFICADA", None, 0, window_months, None
+    execution_value, invoice_count = assessed(invoices, portal=False)
+    return "SEM_EXECUCAO", execution_value, invoice_count, window_months, None
 
 
 def calcular_capacidade_contrato(
@@ -229,9 +253,10 @@ def calcular_capacidade_contrato(
     monthly_execution: float | None = None
     invoices_in_window = 0
     window_months: int | None = None
+    execution_source: str | None = None
     execution = execucao if isinstance(execucao, dict) else {}
     if str(execution.get("modalidade") or "").strip().upper() == "SOB_DEMANDA":
-        source, monthly_execution, invoices_in_window, window_months = _monthly_execution(
+        source, monthly_execution, invoices_in_window, window_months, execution_source = _monthly_execution(
             execution, start, reference, parametros,
         )
         if source == "EXECUCAO_REAL":
@@ -262,6 +287,7 @@ def calcular_capacidade_contrato(
         "meses_vigencia": months,
         "mensal_bruto": round(monthly_gross, 2),
         "fonte_mensal": source,
+        "fonte_execucao": execution_source,
         "mensal_nominal": round(monthly_nominal, 2),
         "mensal_execucao": round(monthly_execution, 2) if monthly_execution is not None else None,
         "faturas_na_janela": invoices_in_window,

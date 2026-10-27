@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 30 alinha a cobertura de parcela à execução de contratos sob demanda.
+Version 31 inclui execução reconstruída por ordens bancárias do Portal.
 """
 
-EMITTER_VERSION = "30"
+EMITTER_VERSION = "31"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

@@ -49,6 +49,12 @@ export interface ContratosVerificados {
 }
 
 export type CapacidadeNivel = "ALERTA" | "INFO";
+export type FonteExecucaoContrato = "COMPRASNET_FATURAS" | "PORTAL_OB";
+
+export interface ExecucaoContratoCedido {
+  fonte_execucao: FonteExecucaoContrato;
+  aviso_fonte?: string | null;
+}
 
 export interface CapacidadeExplicacao {
   codigo: "SEM_EXECUCAO" | "EXECUCAO_REAL" | "NOMINAL_EXECUCAO_NAO_VERIFICADA" | "INICIO_FUTURO";
