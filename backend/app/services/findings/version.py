@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 31 inclui execução reconstruída por ordens bancárias do Portal.
+Version 32 reconhece retenções tributárias após o prefixo de apropriação AP.
 """
 
-EMITTER_VERSION = "31"
+EMITTER_VERSION = "32"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

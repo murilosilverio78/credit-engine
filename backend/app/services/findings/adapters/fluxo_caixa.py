@@ -160,11 +160,12 @@ _CITED_CONTRACT = re.compile(
     r"(?:(\d{4})\s*/\s*(\d+)|(\d+)\s*/\s*(\d{4}))\b",
     re.IGNORECASE,
 )
-# Only orders whose observation STARTS with a tax keyword are tax payments:
+# Only orders whose observation starts with a tax keyword (optionally after an
+# AP/<number>/<number>/<year>. appropriation prefix) are tax payments:
 # supplier payments routinely mention "RETENCAO DE INSS" later in the text
 # (validated on UG 257050: 32% -> 98% reconciliation). Do not unanchor.
 _TRIBUTARY_ORDER = re.compile(
-    r"^\W*(?:\d+\s*-\s*)?(?:INSS|IRPJ|IRRF|CSLL|PIS|COFINS|ISSQN|ISS|DARF|RETENCAO"
+    r"^\W*(?:\d+\s*-\s*)?(?:AP/\d+/\d+/\d{4}\.\s*)?(?:INSS|IRPJ|IRRF|CSLL|PIS|COFINS|ISSQN|ISS|DARF|RETENCAO"
     r"|TRIBUTOS?\s+FEDERAIS|TRIB\.?\s*FED|TR\.?\s*F\s*:)"
 )
 _OPERATION_NUMBER = re.compile(r"\b(?:N\s*[º°O.]?\s*)?OP\.?\s*(\d+)\b")
