@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 
 for key in ("SECRET_KEY", "TWOCAPTCHA_API_KEY", "RESEND_API_KEY"):
     os.environ.setdefault(key, "test")
@@ -840,6 +842,104 @@ def test_recalcular_capacidade_apply_updates_only_capacity_fields(monkeypatch):
         "estagio"
     ]
     assert quote["estagio"] == "DOCUMENTADA"
+
+
+@pytest.mark.parametrize(
+    ("valor_atual", "capacidade", "esperado"),
+    [
+        (238_000, 2_384_594, 362_000),
+        (362_000, 238_459, 238_000),
+    ],
+    ids=["subida", "descida"],
+)
+def test_recalcular_capacidade_keeps_operation_and_quote_framed_together(
+    monkeypatch,
+    valor_atual,
+    capacidade,
+    esperado,
+):
+    from app.services import capacidade_contrato_service
+
+    operation_id = "00000000-0000-0000-0000-000000000112"
+    cotacao_id = "C-112"
+    operation = _operation_for_capacity(
+        operation_id,
+        cotacao_id=cotacao_id,
+        valor_enquadrado=valor_atual,
+        valor_enquadrado_pre_capacidade=362_893.05,
+    )
+    snapshots = _snapshots_for_capacity(operation_id)
+    db = _setup_recalculo_capacidade(
+        monkeypatch,
+        [operation],
+        snapshots,
+        [_cotacao_for_capacity(cotacao_id, valor_enquadrado=valor_atual)],
+    )
+    monkeypatch.setattr(
+        capacidade_contrato_service,
+        "calcular_capacidade_contrato",
+        lambda *_args, **_kwargs: {
+            "capacidade": capacidade,
+            "memoria": {"fonte_mensal": "NOMINAL", "n": 12},
+        },
+    )
+
+    response = make_client().post(
+        "/api/v1/internal/funil/recalcular-capacidade",
+        headers={"X-Internal-Token": "configured-token"},
+        json={"operation_ids": [operation_id], "aplicar": True},
+    )
+
+    item = response.json()["operacoes"][0]
+    assert response.status_code == 200
+    assert item["grava"] is True
+    assert item["depois"]["valor_enquadrado"] == esperado
+    assert db.tables["operations"][0]["valor_enquadrado"] == esperado
+    assert db.tables["cotacoes_broadfactor"][0]["valor_enquadrado"] == esperado
+    assert db.tables["audit_trail"][0]["previous_value"]["valor_enquadrado"] == valor_atual
+    assert db.tables["audit_trail"][0]["new_value"]["valor_enquadrado"] == esperado
+
+
+def test_recalcular_capacidade_does_not_update_framed_value_when_unchanged(monkeypatch):
+    from app.services import capacidade_contrato_service
+
+    operation_id = "00000000-0000-0000-0000-000000000113"
+    cotacao_id = "C-113"
+    operation = _operation_for_capacity(
+        operation_id,
+        cotacao_id=cotacao_id,
+        valor_enquadrado=362_000,
+        valor_enquadrado_pre_capacidade=362_893.05,
+    )
+    snapshots = _snapshots_for_capacity(operation_id)
+    db = _setup_recalculo_capacidade(
+        monkeypatch,
+        [operation],
+        snapshots,
+        [_cotacao_for_capacity(cotacao_id, valor_enquadrado=362_000)],
+    )
+    updates = _record_updates(monkeypatch, db)
+    monkeypatch.setattr(
+        capacidade_contrato_service,
+        "calcular_capacidade_contrato",
+        lambda *_args, **_kwargs: {
+            "capacidade": 2_384_594,
+            "memoria": operation["capacidade_memoria"],
+        },
+    )
+
+    response = make_client().post(
+        "/api/v1/internal/funil/recalcular-capacidade",
+        headers={"X-Internal-Token": "configured-token"},
+        json={"operation_ids": [operation_id], "aplicar": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["operacoes"][0]["grava"] is True
+    operation_updates = [payload for table, payload in updates if table == "operations"]
+    assert len(operation_updates) == 1
+    assert "valor_enquadrado" not in operation_updates[0]
+    assert db.tables["operations"][0]["valor_enquadrado"] == 362_000
 
 
 def test_recalcular_capacidade_demand_without_invoices_uses_sem_execucao(monkeypatch):

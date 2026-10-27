@@ -269,12 +269,19 @@ def _capacidade_do_contrato(
     )
     capacity = _as_float(result["capacidade"])
     framed = floor(min(base, capacity) / 1000) * 1000
+    valor_atual = _as_float(operation.get("valor_enquadrado"))
+    ja_reenquadrada_por_capacidade = operation.get(
+        "valor_enquadrado_pre_capacidade"
+    ) not in (None, "")
     return {
         **result,
         "base": base,
         "valor_enquadrado": framed,
         "reduziu": framed < base,
-        "reenquadrado": framed < _as_float(operation.get("valor_enquadrado")),
+        "reenquadrado": (
+            framed != valor_atual
+            and (ja_reenquadrada_por_capacidade or framed < valor_atual)
+        ),
     }
 
 
@@ -306,11 +313,11 @@ def preparar_atualizacao_capacidade(
         "capacidade_contrato": capacidade["capacidade"],
         "capacidade_memoria": capacidade["memoria"],
     })
+    if capacidade["reenquadrado"]:
+        # A base pré-capacidade é o teto original. Uma operação que já foi
+        # reenquadrada pode tanto descer quanto recuperar esse teto.
+        operation_updates["valor_enquadrado"] = capacidade["valor_enquadrado"]
     if capacidade["reduziu"]:
-        # A memória usa sempre a base original; só escrevemos/auditamos o
-        # valor quando ele realmente muda nesta reavaliação.
-        if capacidade["reenquadrado"]:
-            operation_updates["valor_enquadrado"] = capacidade["valor_enquadrado"]
         if operation.get("valor_enquadrado_pre_capacidade") in (None, ""):
             operation_updates["valor_enquadrado_pre_capacidade"] = capacidade["base"]
     return capacidade, operation_updates
