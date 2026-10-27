@@ -51,7 +51,7 @@ export interface ContratosVerificados {
 export type CapacidadeNivel = "ALERTA" | "INFO";
 
 export interface CapacidadeExplicacao {
-  codigo: "SEM_EXECUCAO" | "EXECUCAO_REAL" | "NOMINAL_EXECUCAO_NAO_VERIFICADA";
+  codigo: "SEM_EXECUCAO" | "EXECUCAO_REAL" | "NOMINAL_EXECUCAO_NAO_VERIFICADA" | "INICIO_FUTURO";
   titulo: string;
   detalhe: string;
   nivel: CapacidadeNivel;

@@ -1269,6 +1269,8 @@ async def _complete_analysis(operation_id: str):
         operation_id=operation_id,
         score=data["score"],
         rating=data["rating"],
+        prazo_meses=prazo_meses,
+        prazo_origem=prazo_origem,
     )
     return {
         "operation_id": operation_id,

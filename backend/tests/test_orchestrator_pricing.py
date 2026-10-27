@@ -183,6 +183,39 @@ def test_completion_prices_capacity_term(monkeypatch):
     assert database.completed_payload["taxa_sugerida"] == 0.025
 
 
+def test_completion_prices_twelve_month_future_contract_capacity(monkeypatch):
+    database = PricingSupabase({
+        "valor_solicitado": 500_000,
+        "valor_enquadrado": 400_000,
+        "prazo_final_meses": 1,
+        "capacidade_memoria": {"n": 12},
+    })
+    calls = []
+    events = []
+    monkeypatch.setattr(orchestrator, "supabase", database)
+    monkeypatch.setattr(
+        "app.services.eligibility_params_service.get_eligibility_config",
+        lambda: {"prazo_padrao_meses": 12},
+    )
+    monkeypatch.setattr(
+        "app.services.pricing_engine.compute_taxa",
+        lambda _rating, _valor, prazo_meses, **_kwargs: calls.append(prazo_meses)
+        or {"taxa_sugerida_am": 0.025},
+    )
+    monkeypatch.setattr(
+        orchestrator.logger,
+        "info",
+        lambda event, **kwargs: events.append((event, kwargs)),
+    )
+
+    asyncio.run(orchestrator._complete_analysis("op-1"))
+
+    completed = next(kwargs for event, kwargs in events if event == "pipeline.completed")
+    assert calls == [12]
+    assert completed["prazo_meses"] == 12
+    assert completed["prazo_origem"] == "capacidade_memoria"
+
+
 def test_completion_caps_capacity_term_at_default(monkeypatch):
     database = PricingSupabase({
         "valor_solicitado": 500_000,

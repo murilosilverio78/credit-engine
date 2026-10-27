@@ -38,6 +38,29 @@ def test_facilita_capacity_reference_case_uses_next_contract_anniversary():
     assert 48_000 <= result["capacidade"] <= 51_000
 
 
+def test_future_contract_uses_first_anniversary_and_start_as_capacity_anchor():
+    result = calcular_capacidade_contrato(
+        4_354_716.60, "2026-11-03", "2027-11-03", False, PARAMS, date(2026, 10, 27)
+    )
+
+    assert result["memoria"]["horizonte_firme"] == "2027-11-03"
+    assert result["memoria"]["inicio_futuro"] is True
+    assert result["memoria"]["ancora"] == "2026-11-03"
+    assert result["memoria"]["n"] == 12
+    assert result["capacidade"] > 0
+    assert result["capacidade"] > result["memoria"]["parcela_max"] * 8
+
+
+def test_future_contract_with_short_term_ends_at_contract_end():
+    result = calcular_capacidade_contrato(
+        1_000_000, "2026-11-03", "2027-06-15", False, PARAMS, date(2026, 10, 27)
+    )
+
+    assert result["memoria"]["horizonte_firme"] == "2027-06-15"
+    assert result["memoria"]["ancora"] == "2026-11-03"
+    assert result["memoria"]["n"] == 7
+
+
 def _demand_execution(invoices, *, verified=True):
     return {
         "modalidade": "SOB_DEMANDA",
@@ -170,6 +193,20 @@ def test_explicar_capacidade_describes_real_or_unverified_execution():
             "global ÷ meses. Reverifique antes de decidir."
         ),
         "nivel": "ALERTA",
+    }
+
+
+def test_explicar_capacidade_identifies_contract_that_has_not_started():
+    explanation = explicar_capacidade({
+        "fonte_mensal": "NOMINAL",
+        "inicio_futuro": True,
+    })
+
+    assert explanation == {
+        "codigo": "INICIO_FUTURO",
+        "titulo": "Contrato ainda não iniciado",
+        "detalhe": "O contrato ainda não iniciou; o horizonte firme considerado é o primeiro aniversário.",
+        "nivel": "INFO",
     }
 
 

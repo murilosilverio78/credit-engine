@@ -88,7 +88,20 @@ def explicar_capacidade(
     if not isinstance(memoria, dict):
         return None
     fonte = memoria.get("fonte_mensal")
+    inicio_futuro = memoria.get("inicio_futuro") is True
+    detalhe_inicio_futuro = (
+        " O contrato ainda não iniciou; o horizonte firme considerado é o primeiro aniversário."
+        if inicio_futuro
+        else ""
+    )
     if fonte in (None, "", "NOMINAL"):
+        if inicio_futuro:
+            return {
+                "codigo": "INICIO_FUTURO",
+                "titulo": "Contrato ainda não iniciado",
+                "detalhe": detalhe_inicio_futuro.strip(),
+                "nivel": "INFO",
+            }
         return None
 
     params = parametros_opcionais if isinstance(parametros_opcionais, dict) else {}
@@ -105,7 +118,7 @@ def explicar_capacidade(
                 f"{_whole(memoria.get('janela_meses'))} mês(es){minimo_texto}. "
                 "O valor global é um teto de compras, não uma receita garantida; "
                 "por isso a capacidade considerada é R$ 0,00. Valor global ÷ meses "
-                f"seria {_money(memoria.get('mensal_nominal'))}/mês."
+                f"seria {_money(memoria.get('mensal_nominal'))}/mês.{detalhe_inicio_futuro}"
             ),
             "nivel": "ALERTA",
         }
@@ -121,6 +134,7 @@ def explicar_capacidade(
                 f"Média mensal executada de {_money(executado)} nos últimos "
                 f"{_whole(memoria.get('janela_meses'))} mês(es) versus nominal de "
                 f"{_money(nominal)}; foi usada a menor das duas ({_money(menor)}/mês)."
+                f"{detalhe_inicio_futuro}"
             ),
             "nivel": "INFO",
         }
@@ -130,7 +144,7 @@ def explicar_capacidade(
             "titulo": "Execução do contrato não verificada",
             "detalhe": (
                 "A leitura das faturas no Comprasnet não foi confirmada; usado valor "
-                "global ÷ meses. Reverifique antes de decidir."
+                f"global ÷ meses. Reverifique antes de decidir.{detalhe_inicio_futuro}"
             ),
             "nivel": "ALERTA",
         }
@@ -225,12 +239,15 @@ def calcular_capacidade_contrato(
         elif source == "SEM_EXECUCAO":
             monthly_gross = 0.0
     monthly_net = monthly_gross * factor
-    horizon = min(end, _next_anniversary(start, reference))
+    inicio_futuro = start > reference
+    anchor = max(reference, start)
+    anniversary = _add_years(start, 1) if inicio_futuro else _next_anniversary(start, reference)
+    horizon = min(end, anniversary)
 
     # A primeira parcela disponível é a do mês seguinte.  O mês parcial da
     # referência já é a folga operacional implícita; ``slack=1`` mantém os
     # nove fluxos dos casos aprovados de outubro/2026.
-    months_until_horizon = (horizon.year - reference.year) * 12 + horizon.month - reference.month
+    months_until_horizon = (horizon.year - anchor.year) * 12 + horizon.month - anchor.month
     installments = max(months_until_horizon - max(slack - 1, 0), 0)
     installment_max = monthly_net / coverage
     if installments <= 0:
@@ -252,6 +269,8 @@ def calcular_capacidade_contrato(
         "fator_liquido": factor,
         "mensal_liquido": round(monthly_net, 2),
         "horizonte_firme": horizon.isoformat(),
+        "inicio_futuro": inicio_futuro,
+        "ancora": anchor.isoformat(),
         "n": installments,
         "parcela_max": round(installment_max, 2),
         "i": rate,
