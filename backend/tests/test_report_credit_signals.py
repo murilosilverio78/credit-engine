@@ -160,3 +160,19 @@ def test_pdf_shows_capacity_explanation_only_for_demand_contracts():
 
     assert "Contrato sob demanda sem execução comprovada" in demand
     assert "Contrato sob demanda sem execução comprovada" not in continuous
+
+
+
+def test_pdf_policy_section_uses_presented_policy_version_and_status():
+    shadow = policy_v2_section({
+        "status": "OK", "politica": {"versao": 3, "status": "SOMBRA"},
+        "oficial": {}, "decisao": {}, "ajustes": {},
+    })
+    active = policy_v2_section({
+        "status": "OK", "politica": {"versao": 3, "status": "ATIVA"},
+        "oficial": {}, "decisao": {}, "ajustes": {},
+    })
+
+    assert "Política de crédito v3" in shadow
+    assert "v3 em sombra" in shadow
+    assert "v3 ativa" in active

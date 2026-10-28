@@ -89,6 +89,38 @@ def _divergence_value(value: Any, field: Any) -> str:
     return _generic_value(value, name)
 
 
+def _unverified_informative_text(label: str, finding: dict[str, Any]) -> str:
+    pending = _record(finding.get("pendencia"))
+    reason = str(pending.get("motivo") or "motivo não disponível")
+    return f"{label}: não verificado — {reason}"
+
+
+def _is_confirmed_zero(value: Any) -> bool:
+    if isinstance(value, dict):
+        numbers = [_number(item) for item in value.values() if not isinstance(item, (dict, list, bool))]
+        return bool(numbers) and all(number == 0 for number in numbers if number is not None) and all(number is not None for number in numbers)
+    if isinstance(value, list):
+        return bool(value) and all(_is_confirmed_zero(item) for item in value)
+    number = _number(value)
+    return number == 0 if number is not None else False
+
+
+def _contract_without_execution(operation_id: str, database: Any) -> bool:
+    """Whether the collected contract and payment snapshots both have no execution."""
+    try:
+        snapshots = _rows(database.table("component_snapshots").select(
+            "component,parsed_result"
+        ).eq("operation_id", operation_id).in_(
+            "component", ["contratos_comprasnet", "pagamentos_portal"]
+        ))
+    except Exception:
+        return False
+    by_component = {str(row.get("component")): _record(row.get("parsed_result")) for row in snapshots}
+    compras = by_component.get("contratos_comprasnet")
+    pagamentos = by_component.get("pagamentos_portal")
+    return bool(compras is not None and pagamentos is not None and not compras.get("faturas") and not pagamentos.get("ordens_bancarias"))
+
+
 def _informative_text(code: str, value: Any, label: str) -> list[str]:
     data = _record(value)
     if code == "aval_cobertura":
@@ -216,6 +248,7 @@ def _finding_projection(finding: dict[str, Any] | None, labels: dict[str, str], 
         "estado": finding.get("estado"),
         "confianca": finding.get("confianca"),
         "valor": finding.get("valor"),
+        "pendencia": finding.get("pendencia"),
         "evidencia": _evidence(finding.get("evidencia"), documents),
     }
 
@@ -248,7 +281,7 @@ def latest_policy_view(operation_id: str, *, database=None, operation: dict[str,
     version = _record(version_by_id.get(str(shadow.get("policy_version_id"))))
     result = _record(shadow.get("resultado"))
     used_runs = set(_codes(shadow.get("runs_usados")))
-    findings = _rows(database.table("findings").select("codigo,estado,confianca,valor,evidencia,run_id").eq("operation_id", operation_id))
+    findings = _rows(database.table("findings").select("codigo,estado,confianca,valor,evidencia,pendencia,run_id").eq("operation_id", operation_id))
     # Cash-flow findings are informational even while policy v2 stays frozen.
     # They may have been emitted after the selected shadow run, so include the
     # newest fluxo_caixa run explicitly rather than changing policy inputs.
@@ -265,19 +298,29 @@ def latest_policy_view(operation_id: str, *, database=None, operation: dict[str,
     hashes = {str(item.get("sha256")) for finding in findings for item in (finding.get("evidencia") or []) if isinstance(item, dict) and item.get("sha256")}
     docs = _rows(database.table("documentos_cliente").select("id,cnpj,nome_arquivo,tipo,sha256,capturado_em").eq("cnpj", operation.get("cnpj"))) if hashes else []
     docs_by_hash = {str(row.get("sha256")): row for row in docs if str(row.get("sha256")) in hashes}
+    contract_without_execution = _contract_without_execution(operation_id, database)
 
     def enrich(items: Any, *, kind: str = "item") -> list[dict[str, Any]]:
         output = []
         for item in items if isinstance(items, list) else []:
             value = dict(item) if isinstance(item, dict) else {"codigo": str(item)}
             code = str(value.get("codigo") or "")
-            finding = _finding_projection(finding_by_code.get(code), labels, docs_by_hash)
+            finding_row = finding_by_code.get(code)
+            finding = _finding_projection(finding_row, labels, docs_by_hash)
             value["finding"] = finding
             if kind == "informativo":
                 raw_value = value.get("valor")
                 label = (finding or {}).get("rotulo") or labels.get(code) or _label(code)
-                for text in _informative_text(code, raw_value, str(label)):
-                    output.append({**value, "texto": text})
+                if str((finding_row or {}).get("estado") or "").upper() == "NAO_VERIFICADO":
+                    output.append({**value, "texto": _unverified_informative_text(str(label), finding_row or {})})
+                    continue
+                for rendered in _informative_text(code, raw_value, str(label)):
+                    suffix = " (contrato ainda sem execução)" if (
+                        contract_without_execution
+                        and str((finding_row or {}).get("estado") or "").upper() == "CONFIRMADO"
+                        and _is_confirmed_zero(raw_value)
+                    ) else ""
+                    output.append({**value, "texto": f"{rendered}{suffix}"})
             elif kind == "alcada":
                 message = value.get("mensagem") or _label(code)
                 output.append({**value, "texto": f"Nível {value.get('nivel')}: {message}"})

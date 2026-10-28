@@ -207,7 +207,7 @@ export type PolicyShadowView = {
   informativos?: PolicyItem[];
 };
 
-export type PolicyFinding = { codigo?: string; rotulo?: string; estado?: string; confianca?: string; valor?: unknown; evidencia?: Array<{ documento?: { documento_id?: string; nome_arquivo?: string; familia?: string; data_base?: string; pagina?: string | number; trecho?: string } }> };
+export type PolicyFinding = { codigo?: string; rotulo?: string; estado?: string; confianca?: string; valor?: unknown; pendencia?: { motivo?: string } | null; evidencia?: Array<{ documento?: { documento_id?: string; nome_arquivo?: string; familia?: string; data_base?: string; pagina?: string | number; trecho?: string } }> };
 export type PolicyItem = { codigo?: string; descricao?: string; documento_exigido?: string; fator?: number; valor?: unknown; texto?: string; finding?: PolicyFinding | null };
 
 export function getOperationPolicy(operationId: string) {

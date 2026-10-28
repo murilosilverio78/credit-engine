@@ -528,10 +528,18 @@ def parecer_section(engine: dict[str, Any]) -> str:
 
 def policy_v2_section(policy: dict[str, Any]) -> str:
     """Informational shadow-policy section, intentionally independent of pricing."""
+    policy_metadata = record(policy.get("politica"))
+    version = policy_metadata.get("versao")
+    title = f"Política de crédito v{version}" if version is not None else "Política de crédito"
+    comparison_label = (
+        f"v{version} ativa" if policy_metadata.get("status") == "ATIVA"
+        else f"v{version} em sombra" if version is not None
+        else "Política em sombra"
+    )
     if policy.get("status") == "SEM_AVALIACAO":
-        return """
+        return f"""
         <section class="page-section avoid-break">
-          <h1>Política de crédito v2</h1>
+          <h1>{esc(title)}</h1>
           <p class="note"><strong>Em observação — não altera a decisão oficial.</strong></p>
           <p>Sem avaliação de política em sombra para esta operação.</p>
         </section>
@@ -544,7 +552,7 @@ def policy_v2_section(policy: dict[str, Any]) -> str:
         if item.get("texto")
     )
     comparison = table(
-        ["", "Oficial", "v2 em sombra"],
+        ["", "Oficial", comparison_label],
         [
             ["Rating", official.get("rating"), decision.get("rating") or "-"],
             ["Limite", optional_money(official.get("limite")), optional_money(decision.get("limite"))],
@@ -553,7 +561,7 @@ def policy_v2_section(policy: dict[str, Any]) -> str:
     )
     parts = [
         '<section class="page-section">',
-        '<h1>Política de crédito v2</h1>',
+        f'<h1>{esc(title)}</h1>',
         '<p class="note"><strong>Em observação — não altera a decisão oficial.</strong></p>',
         comparison,
     ]

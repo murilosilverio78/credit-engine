@@ -134,3 +134,57 @@ def test_document_url_rejects_document_from_another_cnpj(monkeypatch):
         asyncio.run(operations.get_operation_document_url("op-1", "doc-other", {"role": "analista"}))
 
     assert error.value.status_code == 404
+
+
+
+def test_policy_view_exposes_selected_policy_version_for_presentation():
+    db = _database({"status_decisao": "DECISAO_CALCULADA"})
+    db.tables["policy_versions"][0]["versao"] = 3
+
+    view = latest_policy_view("op-1", database=db)
+
+    assert view["politica"] == {
+        "versao": 3,
+        "status": "SOMBRA",
+        "data_referencia": "2026-10-19",
+        "shadow_logic_version": None,
+    }
+
+
+def test_policy_view_renders_unverified_cash_flow_as_a_complete_phrase():
+    db = _database({"status_decisao": "DECISAO_CALCULADA"})
+    db.tables["finding_runs"] = [{"id": "cash-run", "operation_id": "op-1", "especialista": "fluxo_caixa", "created_at": "2026-10-19"}]
+    db.tables["findings"].append({
+        "operation_id": "op-1", "run_id": "cash-run", "codigo": "prazo_ateste_dias",
+        "estado": "NAO_VERIFICADO", "confianca": "BAIXA", "valor": None,
+        "pendencia": {"motivo": "contrato sem faturamento ainda"}, "evidencia": [],
+    })
+    db.tables["finding_catalog"].append({"codigo": "prazo_ateste_dias", "descricao": "Prazo mediano de ateste"})
+
+    view = latest_policy_view("op-1", database=db)
+
+    text = view["informativos"][0]["texto"]
+    assert text == "Prazo mediano de ateste: não verificado — contrato sem faturamento ainda"
+    assert "0" not in text
+    assert "não informado" not in text
+
+
+def test_policy_view_keeps_confirmed_zero_with_no_execution_context():
+    db = _database({"status_decisao": "DECISAO_CALCULADA"})
+    db.tables["finding_runs"] = [{"id": "cash-run", "operation_id": "op-1", "especialista": "fluxo_caixa", "created_at": "2026-10-19"}]
+    db.tables["component_snapshots"] = [
+        {"operation_id": "op-1", "component": "contratos_comprasnet", "parsed_result": {"faturas": []}},
+        {"operation_id": "op-1", "component": "pagamentos_portal", "parsed_result": {"ordens_bancarias": []}},
+    ]
+    db.tables["findings"].append({
+        "operation_id": "op-1", "run_id": "cash-run", "codigo": "pagamentos_contrato_12m",
+        "estado": "CONFIRMADO", "confianca": "ALTA", "valor": {"valor": 0, "quantidade": 0}, "evidencia": [],
+    })
+    db.tables["finding_catalog"].append({"codigo": "pagamentos_contrato_12m", "descricao": "Pagamentos do contrato nos últimos 12 meses"})
+
+    view = latest_policy_view("op-1", database=db)
+
+    assert view["informativos"][0]["texto"] == (
+        "Pagamentos do contrato nos últimos 12 meses: R$ 0,00 em 0 ordens "
+        "(contrato ainda sem execução)"
+    )

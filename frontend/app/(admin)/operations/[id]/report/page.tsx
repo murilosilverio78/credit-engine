@@ -1825,22 +1825,32 @@ function ShadowDocumentLink({ operationId, item }: { operationId: string; item: 
   );
 }
 
+function policyPresentationLabels(policy?: PolicyShadowView) {
+  const version = policy?.politica?.versao;
+  const title = version == null ? "Política de crédito" : `Política de crédito v${version}`;
+  const comparison = policy?.politica?.status === "ATIVA"
+    ? `v${version} ativa`
+    : version == null ? "Política em sombra" : `v${version} em sombra`;
+  return { title, comparison };
+}
+
 function ShadowPolicyPanel({ operationId, policy }: { operationId: string; policy?: PolicyShadowView }) {
   if (!policy || policy.status === "SEM_AVALIACAO") {
     return <section className="report-section rounded-lg border-[0.5px] border-dashed border-border bg-background px-4 py-3 text-xs text-muted-foreground">Sem avaliação de política em sombra para esta operação.</section>;
   }
   const decision = policy.decisao ?? {};
   const adjustments = policy.ajustes ?? {};
+  const labels = policyPresentationLabels(policy);
   const money = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   const reasons = (decision.alcada_motivos ?? []).map((reason) => reason.texto).filter(Boolean).join(" · ");
   return (
     <section className="report-section rounded-lg border-[0.5px] border-border bg-background px-4 py-3.5">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <h3 className="text-sm font-medium">Política de crédito v2</h3>
+        <h3 className="text-sm font-medium">{labels.title}</h3>
         <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800">Em observação — não altera a decisão oficial</span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-xs"><thead className="text-[10px] uppercase text-muted-foreground"><tr><th className="pb-1.5"> </th><th className="pb-1.5">Oficial</th><th className="pb-1.5">v2 em sombra</th></tr></thead><tbody>
+        <table className="w-full text-left text-xs"><thead className="text-[10px] uppercase text-muted-foreground"><tr><th className="pb-1.5"> </th><th className="pb-1.5">Oficial</th><th className="pb-1.5">{labels.comparison}</th></tr></thead><tbody>
           <tr className="border-t border-border"><td className="py-1.5">Rating</td><td>{policy.oficial?.rating ?? "—"}</td><td>{decision.rating ?? "—"}</td></tr>
           <tr className="border-t border-border"><td className="py-1.5">Limite</td><td>{money(policy.oficial?.limite)}</td><td>{money(decision.limite)}</td></tr>
           <tr className="border-t border-border"><td className="py-1.5">Alçada</td><td>não se aplica</td><td>Nível {decision.alcada_minima ?? 1}{reasons ? <span className="block text-[10px] text-muted-foreground">{reasons}</span> : null}</td></tr>
@@ -2048,7 +2058,7 @@ function Report({ operation }: { operation: OperationDetails }) {
           </p>
         </section>
 
-        <SectionTitle>Política de crédito v2</SectionTitle>
+        <SectionTitle>{policyPresentationLabels(policyQuery.data).title}</SectionTitle>
         <ShadowPolicyPanel operationId={operation.id} policy={policyQuery.data} />
 
         <section className="report-section grid gap-2.5 md:grid-cols-2">
