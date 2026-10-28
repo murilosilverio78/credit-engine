@@ -160,3 +160,30 @@ def test_commitments_without_issue_dates_use_all_rows():
     ))
 
     assert findings["saldo_empenho_ano"].valor["criterio_ano"] == "SEM_DATA_EMISSAO"
+
+
+def test_installment_uses_priced_value_not_requested_value():
+    operation = _operation() | {
+        "valor_solicitado": 599_000, "limite_aprovado": 52_000,
+        "taxa_breakdown": {"taxa_sugerida_am": 0.05, "detalhes": {"prazo_meses": 4, "valor_operacao_rs": 52_000}},
+    }
+    findings = _by_code(emit_fluxo_caixa(
+        _snapshots([_invoice(month) for month in range(4, 10)]), fingerprint="f", operation=operation,
+    ))
+
+    assert findings["cobertura_parcela"].valor["parcela"] == pytest.approx(52_000 * 0.05 / (1 - 1.05 ** -4), abs=.01)
+
+
+def test_recolhimento_and_rfb_orders_are_treated_as_withholding():
+    from app.services.findings.adapters.fluxo_caixa import _is_tax_or_withholding
+
+    for text in (
+        "RECOLHIMENTO DE ISS REFERENTE AO PGTO DO(S) INSTR.(S) DE COBRANCA",
+        "RECOLHIMENTO DE INSS DO PGTO DO(S) INSTR.(S) DE COBRANCA(S) NUM.(S): 10054359 NF 33",
+        "RECOLHIMENTO DE CONTRIBUICAO PREVIDENCIARIA, PGTO DO(S) INSTR.(S)",
+        "IN 1234/2012/RFB - RETENCAO DE IMPOSTOS FEDERAIS REFERENTE A NF 33",
+    ):
+        assert _is_tax_or_withholding({"observacao": text}), text
+    assert not _is_tax_or_withholding({
+        "observacao": "PGTO DO(S) INSTR.(S) DE COBRANCA(S) NUM.(S): 50, CONTRATO N: 00040/2026, RECOLHIMENTO DE ISS RETIDO",
+    })

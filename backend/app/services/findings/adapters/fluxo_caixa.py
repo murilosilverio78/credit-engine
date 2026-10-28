@@ -85,17 +85,16 @@ def _installment(operation: dict[str, Any]) -> float | None:
     rate = _number(pricing.get("taxa_sugerida_am"))
     details = pricing.get("detalhes")
     term = _number(details.get("prazo_meses")) if isinstance(details, dict) else None
-    value = next(
-        (
-            parsed
-            for field in (
-                "valor_solicitado", "limite_aprovado", "valor_operacao_relatorio",
-                "valor_enquadrado",
-            )
-            if (parsed := _number(operation.get(field))) is not None and parsed > 0
-        ),
-        None,
-    )
+    # The installment must be the one actually priced: taxa_breakdown carries the
+    # value the rate was computed on (valor_operacao_rs), then the approved/
+    # reported amount. valor_solicitado is only a last resort, because requested
+    # amounts above capacity inflated the installment ~11x (op 02075f0a).
+    candidates = [_number(details.get("valor_operacao_rs")) if isinstance(details, dict) else None]
+    candidates += [
+        _number(operation.get(field))
+        for field in ("valor_operacao_relatorio", "limite_aprovado", "valor_enquadrado", "valor_solicitado")
+    ]
+    value = next((parsed for parsed in candidates if parsed is not None and parsed > 0), None)
     return _pmt(rate, term, value)
 
 
@@ -166,7 +165,13 @@ _CITED_CONTRACT = re.compile(
 # (validated on UG 257050: 32% -> 98% reconciliation). Do not unanchor.
 _TRIBUTARY_ORDER = re.compile(
     r"^\W*(?:\d+\s*-\s*)?(?:AP/\d+/\d+/\d{4}\.\s*)?(?:INSS|IRPJ|IRRF|CSLL|PIS|COFINS|ISSQN|ISS|DARF|RETENCAO"
-    r"|TRIBUTOS?\s+FEDERAIS|TRIB\.?\s*FED|TR\.?\s*F\s*:)"
+    r"|TRIBUTOS?\s+FEDERAIS|TRIB\.?\s*FED|TR\.?\s*F\s*:"
+    # UGs that open the observation with "RECOLHIMENTO DE <tributo>" or with the
+    # IN RFB citation (validated on UG 194026, contrato 00040/2026: ISS/INSS
+    # recolhimentos were being matched to invoices before the real OB).
+    r"|RECOLHIMENTO\s+DE\s+(?:ISSQN|ISS|INSS|IRRF|IRPJ|CSLL|PIS|COFINS|DARF"
+    r"|CONTRIBUICAO\s+PREVIDENCI|IMPOSTOS?|TRIBUTOS?)"
+    r"|IN\s*\d+\s*/\s*\d{4}\s*/\s*RFB)"
 )
 _OPERATION_NUMBER = re.compile(r"\b(?:N\s*[º°O.]?\s*)?OP\.?\s*(\d+)\b")
 _BANK_NUMBER = re.compile(r"\b(?:BANCO|BCO)\s*(?:N\s*[º°O.]?\s*)?(\d+)\b")
