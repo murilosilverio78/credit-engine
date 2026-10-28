@@ -68,11 +68,13 @@ def contrato_cedido_view(operation_id: str, *, database=None) -> dict[str, Any]:
     gross = round(sum(_number(item.get("valor")) for item in invoices), 2)
     glosa = round(sum(_number(item.get("glosa")) for item in invoices), 2)
     liquid = round(sum(_number(item.get("valorliquido")) or max(_number(item.get("valor")) - _number(item.get("glosa")), 0) for item in invoices), 2)
-    received = round(
+    received_portal = round(
         sum(_number(item.get("valorliquido")) for item in invoices)
         if source == "PORTAL_OB" else sum(_number(order.get("valor")) for order in paid_orders.values()),
         2,
     )
+    received = received_portal
+    portal_received_available = pagamentos.get("status_consulta") == "ENCONTRADO"
     total = _number(contract.get("valor_global"))
     first = parse_data(contract.get("vigencia_inicio"))
     latest_invoice = max((parse_data(item.get("emissao")) or parse_data(item.get("emissao_aproximada")) or parse_data(item.get("data_liquidacao")) for item in invoices), default=None)
@@ -107,7 +109,7 @@ def contrato_cedido_view(operation_id: str, *, database=None) -> dict[str, Any]:
     return {
         "status": compras.get("status_consulta") or "NAO_VERIFICADO",
         "identificacao": {"objeto": contract.get("objeto"), "orgao": contract.get("orgao"), "uasg": contract.get("uasg"), "numero": contract.get("numero"), "modalidade_execucao": contract.get("modalidade_execucao"), "vigencia": {"inicio": contract.get("vigencia_inicio"), "fim": contract.get("vigencia_fim")}, "valor_original": compras.get("valor_original") or contract.get("valor_inicial"), "valor_vigente": compras.get("valor_vigente") or contract.get("valor_global"), "prorrogavel": contract.get("prorrogavel"), "n_prorrogacoes": compras.get("n_prorrogacoes", 0), "historico": compras.get("historico") or []},
-        "execucao": {"contratado": contract.get("valor_global"), "faturado_bruto": gross, "glosa": glosa, "faturado_liquido": liquid, "recebido": received, "depositos_conta_vinculada": deposits, "a_receber": round(max(total - gross, 0), 2), "pct_executado": round(gross / total, 6) if total else None, "alerta_sem_execucao": alert, "fonte_execucao": source, "aviso_fonte": "Sem faturas no Contratos.gov.br; execução reconstruída pelas ordens bancárias do Portal da Transparência. Bruto = pago + retenções de ISSQN visíveis (piso)." if source == "PORTAL_OB" else None},
+        "execucao": {"contratado": contract.get("valor_global"), "faturado_bruto": gross, "glosa": glosa, "faturado_liquido": liquid, "fonte_faturado_liquido": "PORTAL_OB" if source == "PORTAL_OB" else "COMPRASNET_INFORMADO", "recebido": received, "recebido_liquido_portal": received_portal if portal_received_available else None, "fonte_recebido_liquido_portal": "PAGAMENTOS_PORTAL" if portal_received_available else None, "depositos_conta_vinculada": deposits, "a_receber": round(max(total - gross, 0), 2), "pct_executado": round(gross / total, 6) if total else None, "alerta_sem_execucao": alert, "fonte_execucao": source, "aviso_fonte": "Sem faturas no Contratos.gov.br; execução reconstruída pelas ordens bancárias do Portal da Transparência. Bruto = pago + retenções de ISSQN visíveis (piso)." if source == "PORTAL_OB" else None},
         "fluxo_mensal": [monthly[key] for key in sorted(monthly)],
         "risco": {
             **{code: findings.get(code) for code in risk_codes},

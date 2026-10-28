@@ -54,6 +54,9 @@ export type FonteExecucaoContrato = "COMPRASNET_FATURAS" | "PORTAL_OB";
 export interface ExecucaoContratoCedido {
   fonte_execucao: FonteExecucaoContrato;
   aviso_fonte?: string | null;
+  fonte_faturado_liquido?: "COMPRASNET_INFORMADO" | "PORTAL_OB" | null;
+  recebido_liquido_portal?: number | null;
+  fonte_recebido_liquido_portal?: "PAGAMENTOS_PORTAL" | null;
 }
 
 export interface CapacidadeExplicacao {

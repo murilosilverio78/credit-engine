@@ -1,9 +1,9 @@
 """Version of the deterministic finding-emission rules.
 
-Version 32 reconhece retenções tributárias após o prefixo de apropriação AP.
+Version 33 unifica a base mensal de cobertura e necessidade de empenho.
 """
 
-EMITTER_VERSION = "32"
+EMITTER_VERSION = "33"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {

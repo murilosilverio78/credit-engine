@@ -75,3 +75,21 @@ def test_contract_view_exposes_capacity_explanation():
     view = contrato_cedido_view("op", database=database)
 
     assert view["risco"]["capacidade_explicacao"]["codigo"] == "SEM_EXECUCAO"
+
+
+def test_contract_view_preserves_comprasnet_liquid_and_exposes_portal_received_separately():
+    database = Postgrest({
+        "operations": [{"id": "op"}],
+        "component_snapshots": [
+            {"operation_id": "op", "component": "contratos_comprasnet", "parsed_result": {"status_consulta": "ENCONTRADO", "contrato_comprasnet": {"numero": "00004/2025", "uasg": "123456", "valor_global": 1_000, "vigencia_inicio": "2026-01-01"}, "faturas": [{"numero": "1", "dados_referencia": {"mesref": 9, "anoref": 2026}, "emissao": "2026-09-01", "data_liquidacao": "2026-09-10", "valor": "100,00", "valorliquido": "100,00"}]}},
+            {"operation_id": "op", "component": "pagamentos_portal", "parsed_result": {"status_consulta": "ENCONTRADO", "paginacao": {"parcial": False}, "ordens_bancarias": [{"documento": "123456OB1", "data": "2026-09-15", "valor": "90,00", "observacao": "CT 04/2025 NF 1"}]}},
+        ],
+        "finding_runs": [], "findings": [],
+    })
+
+    execution = contrato_cedido_view("op", database=database)["execucao"]
+
+    assert execution["faturado_liquido"] == 100.0
+    assert execution["fonte_faturado_liquido"] == "COMPRASNET_INFORMADO"
+    assert execution["recebido_liquido_portal"] == 90.0
+    assert execution["fonte_recebido_liquido_portal"] == "PAGAMENTOS_PORTAL"

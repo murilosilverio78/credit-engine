@@ -134,19 +134,33 @@ def _coverage_inputs(operation: dict[str, Any]) -> tuple[float | None, str | Non
     return factor, factor_source, installment, installment_source
 
 
-def _coverage_monthly_net(
+def _underwritten_monthly_basis(
     operation: dict[str, Any], monthly_average: float | None, factor: float | None,
-) -> float | None:
-    """Use the underwritten execution basis for on-demand contract coverage."""
+) -> tuple[float | None, float | None, str]:
+    """Return one gross/net basis for coverage and annual commitment need.
+
+    Contract capacity is the underwriting calculation.  Its nominal basis for
+    continuous contracts, and its verified execution basis for on-demand
+    contracts, must not diverge from cash-flow findings just because invoice
+    timing or split invoices distort a short historical average.
+    """
     memory = operation.get("capacidade_memoria")
     memory = memory if isinstance(memory, dict) else {}
     if memory.get("fonte_mensal") in {
-        "EXECUCAO_REAL", "SEM_EXECUCAO", "NOMINAL_EXECUCAO_NAO_VERIFICADA",
+        "NOMINAL", "EXECUCAO_REAL", "SEM_EXECUCAO", "NOMINAL_EXECUCAO_NAO_VERIFICADA",
     }:
-        monthly_net = _number(memory.get("mensal_liquido"))
-        if monthly_net is not None:
-            return monthly_net
-    return monthly_average * factor if monthly_average and factor is not None else None
+        gross = _number(memory.get("mensal_bruto"))
+        net = _number(memory.get("mensal_liquido"))
+        # Older zero-execution memories persisted only the liquid zero.  They
+        # still express a verified zero basis and must not fall back to invoice
+        # history merely because the gross companion was added later.
+        if memory.get("fonte_mensal") == "SEM_EXECUCAO" and net == 0 and gross is None:
+            gross = 0.0
+        if gross is not None and net is not None:
+            return gross, net, "CAPACIDADE_MEMORIA"
+    gross = monthly_average
+    net = gross * factor if gross is not None and factor is not None else None
+    return gross, net, "MEDIA_FATURAS"
 
 
 def _reference_tokens(value: Any) -> set[str]:
@@ -693,7 +707,11 @@ def emit_fluxo_caixa(
         - ((_number(item.get("liquidado")) or 0.0) + (_number(item.get("pago")) or 0.0))
         for item in commitments
     )
-    covered = saldo / monthly_average if monthly_average else None
+    factor, factor_source, installment, installment_source = _coverage_inputs(operation)
+    monthly_gross_basis, coverage_monthly_net, monthly_basis_source = _underwritten_monthly_basis(
+        operation, monthly_average, factor,
+    )
+    covered = saldo / monthly_gross_basis if monthly_gross_basis else None
     pending_months = sum((reference.year, month) not in by_month for month in range(reference.month, 13))
     unpaid_invoices = sum(
         _number(invoice.get("valor")) or 0.0
@@ -702,7 +720,7 @@ def emit_fluxo_caixa(
         and competence[0] == reference.year
         and invoice.get("data_liquidacao") in (None, "")
     )
-    need = unpaid_invoices + (monthly_average or 0.0) * pending_months
+    need = unpaid_invoices + (monthly_gross_basis or 0.0) * pending_months
     balance_value = {
         "saldo": round(saldo, 2),
         "necessidade": round(need, 2),
@@ -710,23 +728,28 @@ def emit_fluxo_caixa(
         "meses_pendentes_ano": pending_months,
         "faturas_nao_liquidadas_valor": round(unpaid_invoices, 2),
     }
+    if monthly_basis_source == "CAPACIDADE_MEMORIA":
+        balance_value["base_mensal_bruta"] = round(monthly_gross_basis or 0.0, 2)
+        balance_value["fonte_base_mensal"] = monthly_basis_source
     if not has_commitment_dates:
         balance_value["criterio_ano"] = "SEM_DATA_EMISSAO"
     result.append(
         _unverified("saldo_empenho_ano", "empenhos_detalhe", fingerprint, "empenho com saldo negativo no Comprasnet")
         if inconsistent_commitments else finding("saldo_empenho_ano", Escopo.OPERACAO, balance_value, component="contratos_comprasnet", path="empenhos_detalhe", fingerprint=fingerprint)
     )
-    if monthly_average and saldo < need and not inconsistent_commitments:
+    if monthly_gross_basis and saldo < need and not inconsistent_commitments:
         uncovered = need - saldo
-        result.append(finding("empenho_insuficiente", Escopo.OPERACAO, {
-            "valor_descoberto": round(uncovered, 2), "meses_descobertos": round(uncovered / monthly_average, 4),
+        insufficient_value = {
+            "valor_descoberto": round(uncovered, 2), "meses_descobertos": round(uncovered / monthly_gross_basis, 4),
             "saldo": round(saldo, 2), "necessidade": round(need, 2),
             "meses_pendentes_ano": pending_months,
             "faturas_nao_liquidadas_valor": round(unpaid_invoices, 2),
-        }, component="contratos_comprasnet", path="empenhos_detalhe", fingerprint=fingerprint))
+        }
+        if monthly_basis_source == "CAPACIDADE_MEMORIA":
+            insufficient_value["base_mensal_bruta"] = round(monthly_gross_basis, 2)
+            insufficient_value["fonte_base_mensal"] = monthly_basis_source
+        result.append(finding("empenho_insuficiente", Escopo.OPERACAO, insufficient_value, component="contratos_comprasnet", path="empenhos_detalhe", fingerprint=fingerprint))
 
-    factor, factor_source, installment, installment_source = _coverage_inputs(operation)
-    coverage_monthly_net = _coverage_monthly_net(operation, monthly_average, factor)
     coverage = coverage_monthly_net / installment if coverage_monthly_net is not None and installment else None
     if coverage is None:
         result.append(_unverified(
@@ -734,15 +757,17 @@ def emit_fluxo_caixa(
             "parcela da operação indisponível" if installment is None else "fator líquido indisponível",
         ))
     else:
+        coverage_value = {
+            "indice": round(coverage, 6),
+            "fonte_fator": factor_source,
+            "fonte_parcela": installment_source,
+            "parcela": round(installment, 2),
+            "mensal_liquido": round(coverage_monthly_net, 2),
+        }
+        if monthly_basis_source == "CAPACIDADE_MEMORIA":
+            coverage_value["fonte_base_mensal"] = monthly_basis_source
         coverage_finding = finding(
-            "cobertura_parcela", Escopo.OPERACAO,
-            {
-                "indice": round(coverage, 6),
-                "fonte_fator": factor_source,
-                "fonte_parcela": installment_source,
-                "parcela": round(installment, 2),
-                "mensal_liquido": round(coverage_monthly_net, 2),
-            },
+            "cobertura_parcela", Escopo.OPERACAO, coverage_value,
             component=source_component,
             path=f"{source_path},capacidade_memoria,taxa_breakdown,eligibility_parameters",
             fingerprint=fingerprint,

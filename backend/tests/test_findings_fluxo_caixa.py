@@ -187,3 +187,29 @@ def test_recolhimento_and_rfb_orders_are_treated_as_withholding():
     assert not _is_tax_or_withholding({
         "observacao": "PGTO DO(S) INSTR.(S) DE COBRANCA(S) NUM.(S): 50, CONTRATO N: 00040/2026, RECOLHIMENTO DE ISS RETIDO",
     })
+
+
+def test_coverage_and_commitment_need_share_nominal_capacity_memory():
+    operation = _operation() | {
+        "capacidade_memoria": {
+            "fonte_mensal": "NOMINAL",
+            "mensal_bruto": 27_897.01,
+            "mensal_liquido": 17_993.57,
+            "fator_liquido": .645,
+        },
+    }
+    findings = _by_code(emit_fluxo_caixa(
+        _snapshots(
+            [_invoice(month) for month in range(4, 10)],
+            commitments=[{"empenhado": "100.000,00", "liquidado": "0,00", "pago": "0,00", "data_emissao": "2026-01-05"}],
+        ),
+        fingerprint="f", operation=operation,
+    ))
+
+    coverage = findings["cobertura_parcela"].valor
+    balance = findings["saldo_empenho_ano"].valor
+    assert coverage["mensal_liquido"] == 17_993.57
+    assert coverage["fonte_base_mensal"] == "CAPACIDADE_MEMORIA"
+    assert balance["necessidade"] == 83_691.03
+    assert balance["base_mensal_bruta"] == 27_897.01
+    assert balance["fonte_base_mensal"] == "CAPACIDADE_MEMORIA"
