@@ -188,3 +188,14 @@ def test_policy_view_keeps_confirmed_zero_with_no_execution_context():
         "Pagamentos do contrato nos últimos 12 meses: R$ 0,00 em 0 ordens "
         "(contrato ainda sem execução)"
     )
+
+
+def test_confirmed_zero_accepts_real_finding_shapes_with_null_fields():
+    from app.services.policy_presentation_service import _is_confirmed_zero
+
+    assert _is_confirmed_zero({"valor": 0, "quantidade": 0, "ultima_data": None, "intervalo_medio_dias": None})
+    assert _is_confirmed_zero({"valor": 0, "quantidade": 0, "mais_antiga_dias": None})
+    assert _is_confirmed_zero({"ugs": [], "valor": 0, "bancos": [], "quantidade": 0, "ultima_data": None})
+    assert _is_confirmed_zero({"razao": None, "pago_portal_ano": 0, "ordens_nao_conciliadas": {"valor": 0, "quantidade": 0}})
+    assert not _is_confirmed_zero({"valor": 0, "quantidade": 3, "ultima_data": None})
+    assert not _is_confirmed_zero({"valor": None, "ultima_data": None})

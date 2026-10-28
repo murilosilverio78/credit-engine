@@ -97,8 +97,14 @@ def _unverified_informative_text(label: str, finding: dict[str, Any]) -> str:
 
 def _is_confirmed_zero(value: Any) -> bool:
     if isinstance(value, dict):
-        numbers = [_number(item) for item in value.values() if not isinstance(item, (dict, list, bool))]
-        return bool(numbers) and all(number == 0 for number in numbers if number is not None) and all(number is not None for number in numbers)
+        # Real finding payloads carry null companions (ultima_data, razao...);
+        # nulls are absent data, not a reason to deny a confirmed zero.
+        numbers = [
+            number for number in (
+                _number(item) for item in value.values() if not isinstance(item, (dict, list, bool))
+            ) if number is not None
+        ]
+        return bool(numbers) and all(number == 0 for number in numbers)
     if isinstance(value, list):
         return bool(value) and all(_is_confirmed_zero(item) for item in value)
     number = _number(value)
