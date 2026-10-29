@@ -928,6 +928,30 @@ async def _after_phase2(
         for row in (existing.data or [])
         if row["status"] in {"pending", "completed"}
     }
+    completed_snapshots = _execute_db(
+        operation_id,
+        "load_completed_manual_certificate_snapshots",
+        lambda: supabase.table("component_snapshots")
+        .select("component,parsed_result")
+        .eq("operation_id", operation_id)
+        .in_("component", manual_components)
+        .eq("status", "completed")
+        .execute(),
+    )
+    completed_by_component = {
+        str(row.get("component")): row.get("parsed_result") or {}
+        for row in (completed_snapshots.data or [])
+    }
+    # A certidao federal Broadfactor so dispensa upload quando esta efetivamente
+    # validada. Uma extraida vencida/incompleta continua visivel ao score, mas
+    # preserva a opcao de substituicao manual.
+    automatic_satisfied = {
+        component
+        for component, parsed in completed_by_component.items()
+        if isinstance(parsed, dict)
+        and parsed.get("fonte") == "broadfactor"
+        and parsed.get("valida") is True
+    }
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=48)).isoformat()
     pending_tasks = [
         {
@@ -938,7 +962,7 @@ async def _after_phase2(
             "expires_at": expires_at,
         }
         for component in manual_components
-        if component not in existing_components
+        if component not in existing_components and component not in automatic_satisfied
     ]
     if pending_tasks:
         _execute_db(
@@ -950,7 +974,8 @@ async def _after_phase2(
     waiting_components = [
         component
         for component in manual_components
-        if component not in (reusable_components or set())
+        if component not in completed_by_component
+        and component not in (reusable_components or set())
     ]
     if waiting_components:
         _execute_db(

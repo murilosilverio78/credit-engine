@@ -285,6 +285,25 @@ def _capturar_documentos(
     )
 
 
+def _processar_certidoes_broadfactor(
+    cotacao_id: str,
+    cnpj: str,
+    operation_id: str,
+) -> dict[str, int]:
+    """Materializa apenas anexos capturados da cotacao ativa corrente."""
+    from app.core.database import supabase
+    from app.services.certidoes_broadfactor_service import processar_certidoes_cotacao
+    from app.services.storage_service import StorageService
+
+    return processar_certidoes_cotacao(
+        cotacao_id,
+        cnpj,
+        operation_id,
+        database=supabase,
+        storage=StorageService(),
+    )
+
+
 def _listing_is_safe_for_closure(supabase: Any, quote_count: int) -> bool:
     """Reject empty or anomalously small Broadfactor listings before closure."""
     if quote_count == 0:
@@ -911,6 +930,21 @@ async def _run_broadfactor_ingestao(
 
             if not operation_id:
                 continue
+            try:
+                await asyncio.to_thread(
+                    _processar_certidoes_broadfactor,
+                    cotacao.id,
+                    cotacao.documento.numero,
+                    operation_id,
+                )
+            except Exception as certificate_exc:
+                # Certidoes sao enriquecimento nao bloqueante da cotacao: a
+                # ausencia de migration/R2 nunca interrompe a analise base.
+                logger.warning(
+                    "broadfactor_ingestao.certificate_processing_failed",
+                    cotacao_id=cotacao.id,
+                    error_type=certificate_exc.__class__.__name__,
+                )
             analysis_jobs.append(
                 (
                     cotacao.id,

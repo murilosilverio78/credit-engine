@@ -1,6 +1,6 @@
 """UploadService: manages human-in-the-loop upload tasks."""
 import base64
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import json
 import re
 from typing import Optional
@@ -24,6 +24,17 @@ def _cnpj_root(cnpj: str) -> str:
     """Return the 8-digit CNPJ root (ignores branch suffix)."""
     digits = "".join(c for c in (cnpj or "") if c.isdigit())
     return digits[:8]
+
+
+def _is_current_validity(value: object) -> bool:
+    """Certificate validity is independent from a positive/negative outcome."""
+    text = str(value or "").strip()
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).date() >= date.today()
+        except ValueError:
+            continue
+    return False
 
 
 def _parse_json_response(text: str) -> dict:
@@ -149,6 +160,12 @@ class UploadService:
                 .execute()
             operation_cnpj = _normalize_cnpj(operation.data.get("cnpj"))
             certificate_cnpj = _normalize_cnpj(extraction.get("cnpj"))
+            parsed_result["valida"] = bool(
+                extraction.get("valida")
+                and certificate_cnpj
+                and operation_cnpj
+                and _is_current_validity(parsed_result.get("data_validade"))
+            )
             if certificate_cnpj and operation_cnpj:
                 cert_root = _cnpj_root(certificate_cnpj)
                 op_root = _cnpj_root(operation_cnpj)
@@ -281,7 +298,9 @@ Retorne APENAS um JSON válido, sem markdown:
   "data_validade": "DD/MM/AAAA ou null",
   "orgao_emissor": "nome do órgão emissor",
   "numero_certidao": "número/código da certidão se houver",
-  "valida": true/false (true se resultado=negativa e dentro da validade)
+  "valida": true/false (true somente se o emissor e o CNPJ puderem ser
+  identificados e a validade ainda estiver vigente; o resultado positiva ou
+  negativa NAO determina este campo)
 }}
 O tipo esperado para este upload é "{document_type}".
 Se não conseguir extrair algum campo, use null.""",

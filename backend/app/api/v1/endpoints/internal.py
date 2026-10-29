@@ -372,6 +372,19 @@ async def capturar_documentos(
                 str(row.get("cnpj") or ""),
                 str(row["operation_id"]) if row.get("operation_id") else None,
             )
+            operation_id = str(row["operation_id"]) if row.get("operation_id") else None
+            if operation_id:
+                from app.services.certidoes_broadfactor_service import processar_certidoes_cotacao
+                from app.services.storage_service import StorageService
+
+                await asyncio.to_thread(
+                    processar_certidoes_cotacao,
+                    cotacao_id,
+                    str(row.get("cnpj") or ""),
+                    operation_id,
+                    database=supabase,
+                    storage=StorageService(),
+                )
             for key in totals:
                 totals[key] += int(resumo.get(key) or 0)
             items.append({"cotacao_id": cotacao_id, **resumo})
