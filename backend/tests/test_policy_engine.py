@@ -177,3 +177,158 @@ def test_confirmed_veto_remains_decisive_with_partial_inputs():
     assert result.status_decisao == "VETO"
     assert result.bloqueios == ["cadastro_inativo"]
     assert result.rating == "E"
+
+
+_INDEX_WEIGHTS = {
+    "certidao_cnd_federal_pendente": 0.35,
+    "certidao_cndt_pendente": 0.25,
+    "certidao_fgts_pendente": 0.25,
+    "certidao_cnd_estadual": 0.10,
+    "certidao_cnd_municipal": 0.05,
+}
+_INDEX_NOTES = {
+    "negativa": 1.0,
+    "positiva_com_efeitos_negativa": 0.6,
+    "vencida": 0.3,
+    "nao_validada": 0.3,
+    "positiva": 0.0,
+}
+
+
+def _index_parameters():
+    return _params() | {
+        "pesos_indice_regularidade_certidoes": _INDEX_WEIGHTS,
+        "notas_indice_regularidade_certidoes": _INDEX_NOTES,
+    }
+
+
+def _index_input(states):
+    values = {
+        "idade_empresa_anos": 4,
+        "capital_social_rs": 300000,
+        "porte_cadastral": "EPP",
+        "qsa_estabilidade": {"entrada_mais_recente": "2020-01-01"},
+        "contratos_ativos_qtd": 3,
+        "contratos_total_qtd": 3,
+        "orgaos_distintos_qtd": 2,
+        "hhi_recebimentos": 3000,
+        "meses_com_recebimento": 8,
+        "maturidade_max_anos": 4,
+        "capacidade_operacional": "Atencao",
+        "reputacao_mercado": "Atencao",
+        "balanco_ausente": False,
+    }
+    values.update({code: {"estado": state} for code, state in states.items()})
+    return EntradaPolitica(
+        {"valor_enquadrado": 100, "valor_solicitado": 100},
+        {
+            code: FindingValue(code, value, "CONFIRMADO", "ALTA", "run")
+            for code, value in values.items()
+        },
+        _rating_runs(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("states", "expected_index", "expected_factor"),
+    [
+        ({"certidao_cnd_federal_pendente": "negativa"}, 1.0, 1.0),
+        (
+            {
+                "certidao_cnd_federal_pendente": "positiva_com_efeitos_negativa",
+                "certidao_cndt_pendente": "negativa",
+                "certidao_fgts_pendente": "vencida",
+            },
+            (0.35 * 0.6 + 0.25 * 1.0 + 0.25 * 0.3) / 0.85,
+            0.91,
+        ),
+        (
+            {
+                "certidao_cnd_federal_pendente": "negativa",
+                "certidao_cndt_pendente": "positiva_com_efeitos_negativa",
+                "certidao_fgts_pendente": "vencida",
+                "certidao_cnd_estadual": "positiva",
+                "certidao_cnd_municipal": "nao_validada",
+            },
+            0.35 * 1.0 + 0.25 * 0.6 + 0.25 * 0.3 + 0.10 * 0.0 + 0.05 * 0.3,
+            0.90,
+        ),
+        ({"certidao_cnd_federal_pendente": "vencida"}, 0.3, 0.82),
+        ({"certidao_cnd_federal_pendente": "positiva"}, 0.0, 0.75),
+    ],
+)
+def test_parameterized_certificate_index_uses_only_assessed_certificates(
+    states, expected_index, expected_factor,
+):
+    result = avaliar(_index_input(states), _index_parameters(), [], date(2026, 1, 1))
+
+    assert result.indice_regularidade == pytest.approx(expected_index)
+    assert result.fator_regularidade == pytest.approx(expected_factor)
+    assert result.fator_regularidade_v4 == pytest.approx(expected_factor)
+    assert {item["codigo"] for item in result.certidoes_avaliadas} == set(states)
+
+
+def test_certificate_index_is_neutral_when_no_certificate_was_assessed():
+    result = avaliar(_index_input({}), _index_parameters(), [], date(2026, 1, 1))
+
+    assert result.indice_regularidade is None
+    assert result.fator_regularidade == 1.0
+    assert len(result.certidoes_ausentes) == 5
+
+
+def test_certificate_absence_is_outside_index_denominator():
+    result = avaliar(
+        _index_input({
+            "certidao_cnd_federal_pendente": "positiva",
+            "certidao_cndt_pendente": "ausente",
+            "certidao_fgts_pendente": "ausente",
+        }),
+        _index_parameters(), [], date(2026, 1, 1),
+    )
+
+    assert result.indice_regularidade == 0.0
+    assert result.fator_regularidade == 0.75
+    assert {item["codigo"] for item in result.certidoes_ausentes} == {
+        "certidao_cndt_pendente", "certidao_fgts_pendente", "certidao_cnd_estadual", "certidao_cnd_municipal",
+    }
+
+
+def test_v3_regularidade_penalties_remain_unchanged_without_v4_parameters():
+    result = avaliar(_index_input({}), _params(), [], date(2026, 1, 1))
+
+    assert result.fator_regularidade == 0.82
+    assert result.fator_regularidade_v4 is None
+    assert result.indice_regularidade is None
+
+
+def test_v4_absent_core_certificates_become_precedent_conditions():
+    rules = [
+        {
+            "codigo": code,
+            "classe": "CONDICAO",
+            "parametro_alvo": "cp",
+            "condicao": {
+                "estados": ["CONFIRMADO"],
+                "todas": [{"campo": "estado", "op": "==", "ref": "ausente"}],
+                "mensagem": message,
+            },
+        }
+        for code, message in (
+            ("certidao_cnd_federal_pendente", "CND Federal ausente"),
+            ("certidao_cndt_pendente", "CNDT ausente"),
+            ("certidao_fgts_pendente", "CRF do FGTS vale 30 dias e deve estar vigente na aprovação"),
+        )
+    ]
+    result = avaliar(
+        _index_input({
+            "certidao_cnd_federal_pendente": "ausente",
+            "certidao_cndt_pendente": "ausente",
+            "certidao_fgts_pendente": "ausente",
+        }),
+        _index_parameters(), rules, date(2026, 1, 1),
+    )
+
+    assert [item["codigo"] for item in result.condicoes_precedentes] == [
+        "certidao_cnd_federal_pendente", "certidao_cndt_pendente", "certidao_fgts_pendente",
+    ]
+    assert "30 dias" in result.condicoes_precedentes[-1]["descricao"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from typing import Any
+import re
 import structlog
 from app.services.findings.adapters import ADAPTERS
 from app.services.findings.catalog import get_catalog, validate_value
@@ -133,6 +134,37 @@ def _operation_documents(database, operation_id: str):
         return {"documentos": []}
 
 
+def _certidoes_broadfactor(database, cnpj: Any) -> list[dict[str, Any]]:
+    """Load cached state/municipal certificates for the operation's CNPJ.
+
+    The cache is a finding input rather than a component snapshot: it has its
+    own lineage and must therefore be represented in the emission fingerprint.
+    """
+    normalized = re.sub(r"\D", "", str(cnpj or ""))
+    if len(normalized) != 14:
+        return []
+    try:
+        result = (
+            database.table("certidoes_broadfactor")
+            .select(
+                "tipo,cnpj,sha256,resultado,data_emissao,data_validade,"
+                "codigo_controle,orgao_emissor,uf,municipio,valida,"
+                "fonte_extracao,confianca,erro,updated_at"
+            )
+            .eq("cnpj", normalized)
+            .in_("tipo", ["CND_ESTADUAL", "CND_MUNICIPAL"])
+            .execute()
+        )
+        return list((result.data or []) if result else [])
+    except Exception as exc:
+        logger.warning(
+            "findings.certidoes_broadfactor_unavailable",
+            cnpj=normalized,
+            error=str(exc),
+        )
+        return []
+
+
 def emit_findings(
     operation_id: str,
     especialista: str,
@@ -197,6 +229,10 @@ def emit_findings(
         if "documentos_operacao" in extras:
             operation_documents = _operation_documents(db, operation_id)
             snapshots["documentos_operacao"] = operation_documents
+        broadfactor_certificates = None
+        if "certidoes_broadfactor" in extras:
+            broadfactor_certificates = _certidoes_broadfactor(db, operation.get("cnpj"))
+            snapshots["certidoes_broadfactor"] = broadfactor_certificates
         if overrides and "overrides" in extras:
             snapshots.update(overrides)
         snapshots["__statuses__"] = statuses
@@ -236,6 +272,8 @@ def emit_findings(
             hash_extras["documentos_operacao"] = (operation_documents or {}).get(
                 "documentos"
             )
+        if "certidoes_broadfactor" in extras:
+            hash_extras["certidoes_broadfactor"] = broadfactor_certificates or []
         if "overrides" in extras:
             hash_extras["overrides"] = overrides or {}
         fingerprint = entrada_hash(

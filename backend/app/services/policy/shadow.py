@@ -16,7 +16,7 @@ from app.services.policy.inputs import montar_entrada
 from app.services.policy.loader import load_policy
 
 # Bump whenever shadow comparison or classification semantics change.
-SHADOW_LOGIC_VERSION = "5"
+SHADOW_LOGIC_VERSION = "6"
 _FIELDS = (
     "merit",
     "merit_potencial",
@@ -697,6 +697,13 @@ def _comparative_projection(result: dict[str, Any]) -> dict[str, Any]:
         "condicoes_precedentes": value.get("condicoes_precedentes") or [],
         "alcada_minima": value.get("alcada_minima", 1),
         "taxa_ajuste_pp": value.get("taxa_ajuste_pp", 0.0),
+        "regularidade": {
+            "indice": value.get("indice_regularidade"),
+            "fator": value.get("fator_regularidade"),
+            "fator_v4": value.get("fator_regularidade_v4"),
+            "certidoes_avaliadas": value.get("certidoes_avaliadas") or [],
+            "certidoes_ausentes": value.get("certidoes_ausentes") or [],
+        },
     }
 
 
@@ -762,6 +769,10 @@ def _comparative_rule_class(
             return classe == "CONDICAO" and target == "cp"
         if field == "alcada_minima":
             return classe == "AJUSTE" and target == "alcada"
+        if field == "regularidade":
+            # The v4 index is a parameterized calculation rather than a
+            # finding rule; its own result marks this expected comparison.
+            return primary_result.get("fator_regularidade_v4") is not None
         return False
 
     fired_new = set(new_identities) & fired
@@ -798,6 +809,15 @@ def comparar_sombra(
         aplicar=False,
         versao=comparar_com,
     )
+    primary_value = primary.get("resultado") or {}
+    reference_value = reference.get("resultado") or {}
+    if (
+        (primary.get("policy_version") or {}).get("versao") == 4
+        and (reference.get("policy_version") or {}).get("versao") == 3
+    ):
+        primary_value["fator_regularidade_v3"] = reference_value.get(
+            "fator_regularidade"
+        )
     projected_primary = _comparative_projection(primary)
     projected_reference = _comparative_projection(reference)
     diff = {

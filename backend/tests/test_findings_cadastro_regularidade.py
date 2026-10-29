@@ -2,6 +2,7 @@ from app.services.findings.adapters.cadastro_regularidade import (
     emit_cadastro_regularidade,
 )
 import json
+from datetime import datetime, timezone
 
 
 def test_cadastro_adapter_emits_official_gate_and_balance_catalog():
@@ -161,3 +162,79 @@ def test_cadastro_adapter_emits_score_equivalent_nature_and_activity_facts():
 
     assert findings["natureza_juridica_empresarial"].valor is False
     assert findings["atividade_restrita"].valor is True
+
+
+def test_cadastro_adapter_emits_most_recent_broadfactor_state_and_municipal_certificates():
+    today = datetime.now(timezone.utc).date()
+    year = today.year + 1
+    findings = {
+        item.codigo: item
+        for item in emit_cadastro_regularidade(
+            {
+                "certidoes_broadfactor": [
+                    {
+                        "tipo": "CND_ESTADUAL",
+                        "sha256": "old",
+                        "resultado": "negativa",
+                        "data_emissao": f"{year - 1}-01-01",
+                        "data_validade": f"{year}-06-01",
+                        "valida": True,
+                        "uf": "SP",
+                    },
+                    {
+                        "tipo": "CND_ESTADUAL",
+                        "sha256": "new",
+                        "resultado": "positiva_com_efeitos_negativa",
+                        "data_emissao": f"{year}-02-01",
+                        "data_validade": f"{year}-12-31",
+                        "valida": True,
+                        "uf": "SP",
+                    },
+                    {
+                        "tipo": "CND_MUNICIPAL",
+                        "sha256": "city",
+                        "resultado": "positiva",
+                        "data_emissao": f"{year}-02-01",
+                        "data_validade": f"{year}-12-31",
+                        "valida": True,
+                        "municipio": "São Paulo",
+                    },
+                ]
+            },
+            fingerprint="x",
+        )
+    }
+
+    state = findings["certidao_cnd_estadual"]
+    municipal = findings["certidao_cnd_municipal"]
+    assert state.estado == "CONFIRMADO"
+    assert state.valor["estado"] == "positiva_com_efeitos_negativa"
+    assert state.valor["uf"] == "SP"
+    assert municipal.valor["estado"] == "positiva"
+    assert municipal.valor["municipio"] == "São Paulo"
+
+
+def test_cadastro_adapter_keeps_missing_and_expired_broadfactor_certificates_distinct():
+    findings = {
+        item.codigo: item
+        for item in emit_cadastro_regularidade(
+            {
+                "certidoes_broadfactor": [
+                    {
+                        "tipo": "CND_ESTADUAL",
+                        "resultado": "negativa",
+                        "data_emissao": "2025-01-01",
+                        "data_validade": "2025-02-01",
+                        "valida": True,
+                    }
+                ]
+            },
+            fingerprint="x",
+        )
+    }
+
+    assert findings["certidao_cnd_estadual"].valor["estado"] == "vencida"
+    missing = findings["certidao_cnd_municipal"]
+    assert missing.estado == "NAO_VERIFICADO"
+    assert missing.valor["estado"] == "ausente"
+    assert missing.pendencia == {"motivo": "certidao_municipal_nao_capturada"}

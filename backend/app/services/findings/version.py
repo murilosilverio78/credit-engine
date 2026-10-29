@@ -1,13 +1,17 @@
 """Version of the deterministic finding-emission rules.
 
-Version 33 unifica a base mensal de cobertura e necessidade de empenho.
+Version 34 inclui as certidoes estadual e municipal da Broadfactor.
 """
 
-EMITTER_VERSION = "33"
+EMITTER_VERSION = "34"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {
-    "cadastro_regularidade": ("tipos_documento", "documentos_operacao"),
+    "cadastro_regularidade": (
+        "tipos_documento",
+        "documentos_operacao",
+        "certidoes_broadfactor",
+    ),
     "sacado_orgao": ("valor_enquadrado",),
     "documentos": (),
     "reputacional": (),

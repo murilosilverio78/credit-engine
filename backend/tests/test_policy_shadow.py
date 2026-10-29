@@ -131,6 +131,39 @@ def test_comparar_sombra_persists_comparative_only_on_primary_run(monkeypatch):
     assert compared["shadow"]["comparativo"] == persisted["comparativo"]
 
 
+def test_v4_comparison_persists_regularidade_v3_and_v4_fields(monkeypatch):
+    monkeypatch.setattr(
+        shadow,
+        "load_policy",
+        lambda *, versao, **_kwargs: {"version": {"id": f"p{versao}", "versao": versao}, "regras": []},
+    )
+
+    def fake_evaluate(_operation_id, *, versao, **_kwargs):
+        result = {
+            "rating": "C", "limite_aprovado_rs": 100, "bloqueios": [],
+            "condicoes_precedentes": [], "alcada_minima": 1, "taxa_ajuste_pp": 0,
+            "fator_regularidade": 0.90 if versao == 4 else 0.84,
+            "indice_regularidade": 0.60 if versao == 4 else None,
+            "fator_regularidade_v4": 0.90 if versao == 4 else None,
+            "certidoes_avaliadas": [{"codigo": "certidao_cnd_federal_pendente"}] if versao == 4 else [],
+            "certidoes_ausentes": [{"codigo": "certidao_cndt_pendente"}] if versao == 4 else [],
+        }
+        return {
+            "operation_id": "op", "policy_version_id": f"p{versao}",
+            "policy_version": {"versao": versao}, "entrada_hash": f"hash-{versao}",
+            "resultado": result,
+        }
+
+    monkeypatch.setattr(shadow, "avaliar_sombra", fake_evaluate)
+
+    compared = shadow.comparar_sombra("op", versao=4, comparar_com=3)
+
+    result = compared["shadow"]["resultado"]
+    assert result["fator_regularidade_v3"] == 0.84
+    assert result["fator_regularidade_v4"] == 0.90
+    assert compared["diff"]["regularidade"]["versao"]["indice"] == 0.60
+
+
 def test_automatic_shadow_compares_against_nearest_archived_version(monkeypatch):
     database = Postgrest({"policy_versions": [
         {"versao": 2, "status": "ARQUIVADA"},
@@ -312,12 +345,14 @@ def test_shadow_hash_includes_logic_version(monkeypatch):
     db = _Db()
 
     first = shadow.avaliar_sombra("op", database=db, aplicar=True)
-    monkeypatch.setattr(shadow, "SHADOW_LOGIC_VERSION", "6")
+    monkeypatch.setattr(
+        shadow, "SHADOW_LOGIC_VERSION", str(int(shadow.SHADOW_LOGIC_VERSION) + 1)
+    )
     changed_logic = shadow.avaliar_sombra("op", database=db, aplicar=True)
 
     assert first["entrada_hash"] != changed_logic["entrada_hash"]
-    assert first["resultado"]["shadow_logic_version"] == "5"
-    assert changed_logic["resultado"]["shadow_logic_version"] == "6"
+    assert first["resultado"]["shadow_logic_version"] == "6"
+    assert changed_logic["resultado"]["shadow_logic_version"] == "7"
     assert len(db.inserted) == 2
 
 

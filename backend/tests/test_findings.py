@@ -82,3 +82,39 @@ def test_cadastro_hash_includes_operation_documents_and_loads_empty_catalog_safe
     assert captured[0]["documentos_operacao"] == {"documentos": [{"operation_id": "op", "document_type": "BALANCO"}]}
     assert captured[1]["documentos_operacao"] == {"documentos": []}
     assert with_documents.rpc_calls[0][1]["p_run"]["entrada_hash"] != without_documents.rpc_calls[0][1]["p_run"]["entrada_hash"]
+
+
+def test_cadastro_hash_includes_broadfactor_certificate_cache(monkeypatch):
+    components = ("brasil_api", "pessoa_juridica", "ceis", "cnep", "cepim", "acordos_leniencia")
+    base = {
+        "operations": [{"id": "op", "cnpj": "03012610000101", "ambiente": "TESTE"}],
+        "component_snapshots": [
+            {"operation_id": "op", "component": component, "status": "completed", "parsed_result": {}}
+            for component in components
+        ],
+        "cotacoes_broadfactor": [],
+        "documents": [],
+    }
+    captured = []
+    monkeypatch.setattr(emitter, "get_catalog", lambda **_kwargs: {})
+    monkeypatch.setitem(
+        emitter.ADAPTERS,
+        "cadastro_regularidade",
+        lambda snapshots, **_kwargs: captured.append(snapshots) or [],
+    )
+    cached = Postgrest({
+        **base,
+        "certidoes_broadfactor": [{
+            "tipo": "CND_ESTADUAL", "cnpj": "03012610000101", "sha256": "a" * 64,
+            "resultado": "negativa", "data_emissao": "2026-10-01", "data_validade": "2026-12-31",
+            "valida": True, "fonte_extracao": "deterministico", "confianca": "ALTA",
+        }],
+    })
+    empty = Postgrest({**base, "certidoes_broadfactor": []})
+
+    emitter.emit_findings("op", "cadastro_regularidade", database=cached)
+    emitter.emit_findings("op", "cadastro_regularidade", database=empty)
+
+    assert captured[0]["certidoes_broadfactor"][0]["tipo"] == "CND_ESTADUAL"
+    assert captured[1]["certidoes_broadfactor"] == []
+    assert cached.rpc_calls[0][1]["p_run"]["entrada_hash"] != empty.rpc_calls[0][1]["p_run"]["entrada_hash"]

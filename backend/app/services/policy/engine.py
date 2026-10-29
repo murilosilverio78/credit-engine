@@ -422,6 +422,69 @@ def _missing_rating_specialists(entrada: EntradaPolitica) -> list[str]:
     return sorted(RATING_REQUIRED_SPECIALISTS - set(entrada.runs_usados))
 
 
+def _indice_regularidade(
+    entrada: EntradaPolitica,
+    parametros: dict[str, Any],
+    trail: dict[str, list[dict[str, str | None]]],
+) -> dict[str, Any] | None:
+    """Evaluate the versioned certificate index when its parameters exist.
+
+    The parameter maps contain every business choice (certificate weights and
+    state notes).  Their presence opts a policy version into the index, while
+    policies without them retain the legacy regularity calculation unchanged.
+    """
+    weights = parametros.get("pesos_indice_regularidade_certidoes")
+    notes = parametros.get("notas_indice_regularidade_certidoes")
+    if not isinstance(weights, dict) or not isinstance(notes, dict):
+        return None
+
+    evaluated: list[dict[str, Any]] = []
+    absent: list[dict[str, Any]] = []
+    weighted_sum = 0.0
+    total_weight = 0.0
+    for code, configured_weight in weights.items():
+        weight = _number(configured_weight)
+        if weight <= 0:
+            continue
+        found = _finding(entrada, str(code), trail, "regularidade")
+        value = found.valor if found else None
+        state = value.get("estado") if isinstance(value, dict) else "ausente"
+        if state == "ausente" or state not in notes:
+            absent.append({"codigo": str(code), "estado": state})
+            continue
+        note = _number(notes[state])
+        evaluated.append(
+            {
+                "codigo": str(code),
+                "estado": state,
+                "peso": weight,
+                "nota": note,
+            }
+        )
+        weighted_sum += weight * note
+        total_weight += weight
+
+    # With no assessed certificate the index is intentionally neutral.  Keep
+    # its value null (rather than a synthetic zero) so reporting does not
+    # imply an adverse measured result.
+    if total_weight <= 0:
+        return {
+            "indice": None,
+            "fator": 1.0,
+            "avaliadas": evaluated,
+            "ausentes": absent,
+        }
+    index = weighted_sum / total_weight
+    floor = _number(parametros["piso_fator_regularidade"])
+    factor = 1 - (1 - floor) * (1 - index)
+    return {
+        "indice": round(index, 6),
+        "fator": round(factor, 2),
+        "avaliadas": evaluated,
+        "ausentes": absent,
+    }
+
+
 def avaliar(
     entrada: EntradaPolitica,
     parametros: dict[str, Any],
@@ -603,23 +666,39 @@ def avaliar(
         1,
     )
 
-    haircuts = 0.0
-    penalties = 0.0
-    for code, penalty_key in (
-        ("certidao_cnd_federal_pendente", "penalidade_cnd_federal_ausente"),
-        ("certidao_cndt_pendente", "penalidade_cndt_ausente"),
-        ("certidao_fgts_pendente", "penalidade_fgts_ausente"),
-    ):
-        found = _finding(entrada, code, trail, "regularidade")
-        value = found.valor if found else None
-        state = value.get("estado") if isinstance(value, dict) else "ausente"
-        haircuts += _number(parametros["haircut_certidao_por_estado"].get(state))
-        if state == "ausente":
-            penalties += _number(parametros[penalty_key])
-    factor_potential = round(
-        max(_number(parametros["piso_fator_regularidade"]), 1 - haircuts), 2
-    )
-    factor = round(max(0.0, factor_potential - penalties / 100), 2)
+    regularity_index = _indice_regularidade(entrada, parametros, trail)
+    indice_regularidade = None
+    fator_regularidade_v4 = None
+    certidoes_avaliadas: list[dict[str, Any]] = []
+    certidoes_ausentes: list[dict[str, Any]] = []
+    if regularity_index is not None:
+        indice_regularidade = regularity_index["indice"]
+        factor = regularity_index["fator"]
+        factor_potential = factor
+        fator_regularidade_v4 = factor
+        certidoes_avaliadas = regularity_index["avaliadas"]
+        certidoes_ausentes = regularity_index["ausentes"]
+    else:
+        # Legacy policies retain the official v3 haircut and absence-penalty
+        # model exactly; only policies with the versioned index parameters use
+        # the branch above.
+        haircuts = 0.0
+        penalties = 0.0
+        for code, penalty_key in (
+            ("certidao_cnd_federal_pendente", "penalidade_cnd_federal_ausente"),
+            ("certidao_cndt_pendente", "penalidade_cndt_ausente"),
+            ("certidao_fgts_pendente", "penalidade_fgts_ausente"),
+        ):
+            found = _finding(entrada, code, trail, "regularidade")
+            value = found.valor if found else None
+            state = value.get("estado") if isinstance(value, dict) else "ausente"
+            haircuts += _number(parametros["haircut_certidao_por_estado"].get(state))
+            if state == "ausente":
+                penalties += _number(parametros[penalty_key])
+        factor_potential = round(
+            max(_number(parametros["piso_fator_regularidade"]), 1 - haircuts), 2
+        )
+        factor = round(max(0.0, factor_potential - penalties / 100), 2)
     balance = _finding(entrada, "balanco_ausente", trail, "balanco")
     configured_balance_penalty = _number(parametros["penalidade_balanco_ausente"])
     porte_weight = _number(weights["porte_operacionalidade"])
@@ -685,6 +764,10 @@ def avaliar(
             trail,
             status_decisao="VETO",
             faltantes=missing_rating_specialists,
+            indice_regularidade=indice_regularidade,
+            fator_regularidade_v4=fator_regularidade_v4,
+            certidoes_avaliadas=certidoes_avaliadas,
+            certidoes_ausentes=certidoes_ausentes,
             **generic,
         )
     rating = _rating(score, parametros["faixas_rating"])
@@ -716,5 +799,9 @@ def avaliar(
         },
         effects,
         trail,
+        indice_regularidade=indice_regularidade,
+        fator_regularidade_v4=fator_regularidade_v4,
+        certidoes_avaliadas=certidoes_avaliadas,
+        certidoes_ausentes=certidoes_ausentes,
         **generic,
     )

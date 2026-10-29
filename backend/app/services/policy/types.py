@@ -54,6 +54,10 @@ class ResultadoPolitica:
     informativos: list[dict[str, Any]] = field(default_factory=list)
     status_decisao: str = "DECISAO_CALCULADA"
     faltantes: list[str] = field(default_factory=list)
+    indice_regularidade: float | None = None
+    fator_regularidade_v4: float | None = None
+    certidoes_avaliadas: list[dict[str, Any]] = field(default_factory=list)
+    certidoes_ausentes: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -80,4 +84,8 @@ class ResultadoPolitica:
             "informativos": self.informativos,
             "status_decisao": self.status_decisao,
             "faltantes": self.faltantes,
+            "indice_regularidade": self.indice_regularidade,
+            "fator_regularidade_v4": self.fator_regularidade_v4,
+            "certidoes_avaliadas": self.certidoes_avaliadas,
+            "certidoes_ausentes": self.certidoes_ausentes,
         }

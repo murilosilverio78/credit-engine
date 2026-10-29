@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from app.services.document_types import BALANCO_DOCUMENT_TYPES
@@ -66,6 +66,66 @@ def _record_value(record: dict[str, Any], *names: str) -> Any:
         if value not in (None, ""):
             return value
     return None
+
+
+def _certificate_date(value: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _broadfactor_certificate_state(certificate: dict[str, Any], today: date) -> str:
+    """Map the cached reading to the states configured by the policy.
+
+    ``valida`` deliberately means source/CNPJ/validity verification, not a
+    negative tax result.  A positive certificate consequently remains
+    ``positiva`` instead of being conflated with ``nao_validada``.
+    """
+    validity = _certificate_date(certificate.get("data_validade"))
+    if validity is not None and validity < today:
+        return "vencida"
+    if certificate.get("valida") is not True:
+        return "nao_validada"
+    outcome = str(certificate.get("resultado") or "")
+    if outcome in {"negativa", "positiva_com_efeitos_negativa", "positiva"}:
+        return outcome
+    return "nao_validada"
+
+
+def _most_recent_broadfactor_certificate(
+    certificates: Any, certificate_type: str, today: date,
+) -> dict[str, Any] | None:
+    candidates = [
+        item
+        for item in (certificates if isinstance(certificates, list) else [])
+        if isinstance(item, dict) and item.get("tipo") == certificate_type
+    ]
+    if not candidates:
+        return None
+
+    # Prefer a currently valid certificate.  If every cached certificate has
+    # expired, expose the newest one so the analyst can see that it is expired
+    # rather than mistakenly treating it as never captured.
+    current = [
+        item
+        for item in candidates
+        if item.get("valida") is True
+        and (
+            (validity := _certificate_date(item.get("data_validade"))) is None
+            or validity >= today
+        )
+    ]
+    pool = current or candidates
+    return max(
+        pool,
+        key=lambda item: (
+            _certificate_date(item.get("data_emissao")) or date.min,
+            _certificate_date(item.get("data_validade")) or date.min,
+            str(item.get("updated_at") or ""),
+            str(item.get("sha256") or ""),
+        ),
+    )
 
 
 def _sanction_summary(
@@ -329,6 +389,61 @@ def emit_cadastro_regularidade(
                 confidence=Confianca.ALTA,
             )
         item.evidencia[0]["status_componente"] = status
+        result.append(item)
+    today = datetime.now(timezone.utc).date()
+    for certificate_type, code, label in (
+        ("CND_ESTADUAL", "certidao_cnd_estadual", "estadual"),
+        ("CND_MUNICIPAL", "certidao_cnd_municipal", "municipal"),
+    ):
+        certificate = _most_recent_broadfactor_certificate(
+            snapshots.get("certidoes_broadfactor"), certificate_type, today
+        )
+        if certificate is None:
+            result.append(
+                finding(
+                    code,
+                    Escopo.CEDENTE,
+                    {
+                        "estado": "ausente",
+                        "validade": None,
+                        "uf": None,
+                        "municipio": None,
+                    },
+                    component="certidoes_broadfactor",
+                    path=certificate_type,
+                    fingerprint=fingerprint,
+                    state=Estado.NAO_VERIFICADO,
+                    confidence=Confianca.BAIXA,
+                    pendencia={"motivo": f"certidao_{label}_nao_capturada"},
+                )
+            )
+            continue
+        certificate_state = _broadfactor_certificate_state(certificate, today)
+        item = finding(
+            code,
+            Escopo.CEDENTE,
+            {
+                "estado": certificate_state,
+                "resultado": certificate.get("resultado"),
+                "validade": certificate.get("data_validade"),
+                "emissao": certificate.get("data_emissao"),
+                "codigo_controle": certificate.get("codigo_controle"),
+                "uf": certificate.get("uf"),
+                "municipio": certificate.get("municipio"),
+                "valida": certificate.get("valida"),
+                "fonte": "broadfactor",
+            },
+            component="certidoes_broadfactor",
+            path=certificate_type,
+            fingerprint=fingerprint,
+            state=(
+                Estado.NEGATIVO_CONFIRMADO
+                if certificate_state == "negativa"
+                else Estado.CONFIRMADO
+            ),
+            confidence=Confianca.ALTA,
+        )
+        item.valido_ate = certificate.get("data_validade")
         result.append(item)
     # Exact score semantics: extraction, operation documents and quote catalog
     # are recursively scanned by the same helper used by score_engine.
