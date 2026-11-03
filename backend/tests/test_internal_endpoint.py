@@ -423,6 +423,37 @@ def test_executar_componente_retorna_failed_de_fonte_sem_erro_500(monkeypatch):
     assert response.json()["erro"] == "PNCP indisponível"
 
 
+def test_executar_componente_informa_snapshot_preservado(monkeypatch):
+    db, _calls, operation = _setup_component_execution(monkeypatch)
+    from app.workers.tasks import contratos_pncp
+
+    db.tables["component_snapshots"][0].update(
+        {
+            "status": "completed",
+            "parsed_result": {"n_contratos": 11},
+            "error_message": "nova coleta indisponível",
+        }
+    )
+    monkeypatch.setattr(
+        contratos_pncp,
+        "run_contratos_pncp",
+        lambda *_args, **_kwargs: {
+            "status": "failed",
+            "snapshot_preservado": True,
+        },
+    )
+
+    response = make_client().post(
+        f"/api/v1/internal/operations/{operation['id']}/componentes/contratos_pncp/executar",
+        headers={"X-Internal-Token": "configured-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["snapshot_preservado"] is True
+    assert response.json()["parsed_result"]["n_contratos"] == 11
+
+
 def test_executar_componente_reavalia_funil_aberto(monkeypatch):
     from app.services import funil_qualificacao_service
 

@@ -937,8 +937,9 @@ async def executar_componente(
             },
         )
     execution_error: Exception | None = None
+    execution_result: dict | None = None
     try:
-        await asyncio.to_thread(
+        execution_result = await asyncio.to_thread(
             runners[component], operation_id_text, use_cache=use_cache
         )
     except Exception as exc:
@@ -955,7 +956,12 @@ async def executar_componente(
     )
     snapshot = snapshot_result.data or {}
     parsed_result = snapshot.get("parsed_result") or {}
-    if execution_error is not None and snapshot.get("status") != "failed":
+    snapshot_preservado = bool((execution_result or {}).get("snapshot_preservado"))
+    if (
+        execution_error is not None
+        and snapshot.get("status") != "failed"
+        and not snapshot_preservado
+    ):
         raise execution_error
 
     reavaliacao: dict | None = None
@@ -1006,9 +1012,10 @@ async def executar_componente(
     return {
         "operation_id": operation_id_text,
         "component": component,
-        "status": snapshot.get("status") or "missing",
+        "status": (execution_result or {}).get("status") or snapshot.get("status") or "missing",
+        "snapshot_preservado": snapshot_preservado,
         "erro": snapshot.get("error_message")
-        if snapshot.get("status") == "failed"
+        if snapshot.get("status") == "failed" or snapshot_preservado
         else None,
         "parsed_result": _component_result_summary(component, parsed_result),
         "reavaliacao_funil": reavaliacao,

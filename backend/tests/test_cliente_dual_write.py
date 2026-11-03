@@ -403,6 +403,63 @@ def test_execute_relança_excecao_original_e_grava_error(monkeypatch):
     assert rpc_call["p_parsed_result"] is None
 
 
+def test_execute_preserva_snapshot_concluido_quando_recoleta_falha(monkeypatch):
+    from app.services.audit_service import AuditService
+    from app.services.snapshot_service import SnapshotService
+
+    db = FakeSupabase()
+    monkeypatch.setattr(cliente_service, "supabase", db)
+    monkeypatch.setattr("app.core.database.supabase", db)
+    _patch_component_dependencies(monkeypatch)
+    preserved = []
+    audits = []
+    monkeypatch.setattr(
+        SnapshotService,
+        "get_snapshot",
+        lambda *_args: {
+            "status": "completed",
+            "parsed_result": {"historico": "mantido"},
+            "completed_at": "2026-11-01T10:00:00Z",
+        },
+    )
+    monkeypatch.setattr(
+        SnapshotService,
+        "preserve_completed_after_refresh_failure",
+        lambda *_args: preserved.append(_args),
+    )
+    monkeypatch.setattr(
+        AuditService,
+        "log",
+        lambda _self, operation_id, action, payload: audits.append(
+            (operation_id, action, payload)
+        ),
+    )
+
+    result = BaseComponentTask().execute(
+        "op-1",
+        "brasil_api",
+        lambda _cnpj: (_ for _ in ()).throw(RuntimeError("fonte indisponivel")),
+        use_cache=False,
+    )
+
+    assert result == {
+        "operation_id": "op-1",
+        "component": "brasil_api",
+        "status": "failed",
+        "snapshot_preservado": True,
+    }
+    assert [args[1:] for args in preserved] == [
+        ("op-1", "brasil_api", "fonte indisponivel")
+    ]
+    assert audits[-1:] == [
+        (
+            "op-1",
+            "component_refresh_failed",
+            {"component": "brasil_api", "message": "fonte indisponivel"},
+        )
+    ]
+
+
 def test_execute_cache_hit_nao_grava_cliente_snapshot(monkeypatch):
     db = FakeSupabase()
     monkeypatch.setattr(cliente_service, "supabase", db)

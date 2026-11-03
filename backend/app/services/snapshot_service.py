@@ -12,6 +12,22 @@ logger = structlog.get_logger()
 
 class SnapshotService:
 
+    def get_snapshot(self, operation_id: str, component: str) -> dict:
+        result = supabase.table("component_snapshots")\
+            .select("status,parsed_result,completed_at")\
+            .eq("operation_id", operation_id)\
+            .eq("component", component)\
+            .maybe_single()\
+            .execute()
+        return result.data or {}
+
+    def preserve_completed_after_refresh_failure(
+        self, operation_id: str, component: str, error_message: str,
+    ) -> None:
+        supabase.table("component_snapshots").update({
+            "status": "completed", "error_message": error_message,
+        }).eq("operation_id", operation_id).eq("component", component).execute()
+
     def get_cnpj(self, operation_id: str) -> str:
         """Retorna CNPJ da operação."""
         result = _execute_snapshot_write(

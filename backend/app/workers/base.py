@@ -264,6 +264,14 @@ class BaseComponentTask:
         snap_svc = SnapshotService()
         cache_svc = CacheService()
         audit_svc = AuditService()
+        try:
+            previous_snapshot = snap_svc.get_snapshot(operation_id, component)
+        except Exception:
+            previous_snapshot = {}
+        preserve_completed = bool(
+            previous_snapshot.get("status") == "completed"
+            and previous_snapshot.get("parsed_result") is not None
+        )
 
         try:
             cnpj = snap_svc.get_cnpj(operation_id)
@@ -275,6 +283,26 @@ class BaseComponentTask:
                 component=component,
                 error=error_message,
             )
+            if preserve_completed:
+                _execute_snapshot_write(
+                    operation_id,
+                    component,
+                    "preserve_completed_after_preflight_failure",
+                    lambda: snap_svc.preserve_completed_after_refresh_failure(
+                        operation_id, component, error_message,
+                    ),
+                )
+                audit_svc.log(
+                    operation_id,
+                    "component_refresh_failed",
+                    payload={"component": component, "message": error_message},
+                )
+                return {
+                    "operation_id": operation_id,
+                    "component": component,
+                    "status": "failed",
+                    "snapshot_preservado": True,
+                }
             try:
                 _execute_snapshot_write(
                     operation_id,
@@ -442,6 +470,27 @@ class BaseComponentTask:
                 component=component,
                 error=error_message,
             )
+
+            if preserve_completed:
+                _execute_snapshot_write(
+                    operation_id,
+                    component,
+                    "preserve_completed_after_refresh_failure",
+                    lambda: snap_svc.preserve_completed_after_refresh_failure(
+                        operation_id, component, error_message,
+                    ),
+                )
+                audit_svc.log(
+                    operation_id,
+                    "component_refresh_failed",
+                    payload={"component": component, "message": error_message},
+                )
+                return {
+                    "operation_id": operation_id,
+                    "component": component,
+                    "status": "failed",
+                    "snapshot_preservado": True,
+                }
 
             _dual_write_cliente(
                 operation_id=operation_id,
