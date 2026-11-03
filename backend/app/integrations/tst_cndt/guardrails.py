@@ -71,15 +71,18 @@ class LocalGuardrails:
             except FileNotFoundError:
                 pass
 
-    def reusable(self, cnpj: str) -> dict | None:
+    def reusable(self, cnpj: str, *, safety_days: int = 0) -> dict | None:
         cache = self._read_json(".cndt-cache.json", {})
         item = cache.get(cnpj_hash(cnpj)) if isinstance(cache, dict) else None
-        if not isinstance(item, dict) or item.get("success_date") != date.today().isoformat():
+        if not isinstance(item, dict):
             return None
         path = Path(str(item.get("storage_key") or ""))
         if path.is_file() and item.get("data_validade"):
             try:
-                if datetime.strptime(item["data_validade"], "%d/%m/%Y").date() >= date.today():
+                reusable_after = date.today().fromordinal(
+                    date.today().toordinal() + max(int(safety_days), 0)
+                )
+                if datetime.strptime(item["data_validade"], "%d/%m/%Y").date() >= reusable_after:
                     return item
             except ValueError:
                 pass

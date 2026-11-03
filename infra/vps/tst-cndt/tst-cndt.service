@@ -1,0 +1,23 @@
+[Unit]
+Description=AntecipaGov TST CNDT issuer (Brazilian VPS only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tstcndt
+Group=tstcndt
+WorkingDirectory=/opt/credit-engine/backend
+EnvironmentFile=/etc/tst-cndt.env
+ExecStart=/opt/tst-cndt-venv/bin/uvicorn app.integrations.tst_cndt.vps_app:app --host 127.0.0.1 --port 8113 --workers 1 --no-access-log
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=90
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tst-cndt
+
+[Install]
+WantedBy=multi-user.target

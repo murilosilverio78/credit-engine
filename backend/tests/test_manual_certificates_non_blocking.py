@@ -153,6 +153,72 @@ def test_after_phase2_keeps_waiting_upload_and_continues_pipeline(monkeypatch):
     assert not any(query.table == "operations" for query in database.queries)
 
 
+def test_after_phase2_automatic_cndt_failure_keeps_its_manual_upload(monkeypatch):
+    database = FakeSupabase({
+        "component_config": [{"component": component} for component in orchestrator.MANUAL_COMPONENTS],
+        "upload_tasks": [],
+        "component_snapshots": [],
+    })
+
+    async def fake_phase3_4(operation_id, **_kwargs):
+        return {"operation_id": operation_id, "status": "completed"}
+
+    class FailedCndt:
+        obtained = False
+        source = "tst"
+        error = "PORTAL_INDISPONIVEL"
+
+    calls = []
+
+    def fake_collect(*_args, **_kwargs):
+        calls.append(True)
+        return FailedCndt()
+
+    monkeypatch.setattr(orchestrator, "supabase", database)
+    monkeypatch.setattr(orchestrator, "_phase3_4", fake_phase3_4)
+    monkeypatch.setattr(
+        "app.services.tst_cndt_service.collect_cndt_for_operation",
+        fake_collect,
+    )
+
+    asyncio.run(orchestrator._after_phase2("op-1"))
+
+    inserted = next(query.payload for query in database.queries if query.table == "upload_tasks" and query.action == "insert")
+    assert calls == [True]
+    assert {row["document_type"] for row in inserted} == set(orchestrator.MANUAL_COMPONENTS)
+
+
+def test_after_phase2_automatic_valid_cndt_skips_its_manual_upload(monkeypatch):
+    database = FakeSupabase({
+        "component_config": [{"component": component} for component in orchestrator.MANUAL_COMPONENTS],
+        "upload_tasks": [],
+        "component_snapshots": [{
+            "component": "cndt_tst", "status": "completed",
+            "parsed_result": {"fonte": "tst", "valida": True},
+        }],
+    })
+
+    async def fake_phase3_4(operation_id, **_kwargs):
+        return {"operation_id": operation_id, "status": "completed"}
+
+    class ObtainedCndt:
+        obtained = True
+        source = "tst"
+        error = None
+
+    monkeypatch.setattr(orchestrator, "supabase", database)
+    monkeypatch.setattr(orchestrator, "_phase3_4", fake_phase3_4)
+    monkeypatch.setattr(
+        "app.services.tst_cndt_service.collect_cndt_for_operation",
+        lambda *_args, **_kwargs: ObtainedCndt(),
+    )
+
+    asyncio.run(orchestrator._after_phase2("op-1"))
+
+    inserted = next(query.payload for query in database.queries if query.table == "upload_tasks" and query.action == "insert")
+    assert {row["document_type"] for row in inserted} == {"cnd_federal", "fgts"}
+
+
 def test_after_phase2_does_not_reset_completed_manual_certificate(monkeypatch):
     database = FakeSupabase({
         "component_config": [

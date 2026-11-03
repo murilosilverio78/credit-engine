@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     PORTAL_EMPTY_BODY_POLICY: Literal["raise", "empty"] = "raise"
     PNCP_SEARCH_BASE_URL: str = "https://pncp.gov.br"
     PNCP_PROXY_TOKEN: str = ""
+    # CNDT TST browser stays on the Brazilian VPS; Railway calls only this API.
+    CNDT_PROXY_URL: str = ""
+    CNDT_PROXY_TOKEN: str = ""
+    CNDT_PROXY_TIMEOUT_SECONDS: float = 35.0
+    CNDT_CACHE_SAFETY_DAYS: int = 7
     PORTAL_MIN_INTERVAL_SECONDS: float = 2.2
     PORTAL_429_DEFAULT_COOLDOWN_SECONDS: float = 60.0
     PORTAL_429_MAX_COOLDOWN_SECONDS: float = 120.0

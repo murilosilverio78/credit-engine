@@ -914,6 +914,33 @@ async def _after_phase2(
             reusable_components=reusable_components,
         )
 
+    # CNDT is the only former manual certificate with an approved automated
+    # collector. Any exception/failure deliberately leaves the established
+    # manual-upload flow untouched and must never delay the analysis.
+    if "cndt_tst" in manual_components:
+        try:
+            from app.services.tst_cndt_service import collect_cndt_for_operation
+
+            cndt_result = await asyncio.to_thread(
+                collect_cndt_for_operation,
+                operation_id,
+                database=supabase,
+            )
+            logger.info(
+                "pipeline.cndt_automatic_attempt",
+                operation_id=operation_id,
+                obtained=cndt_result.obtained,
+                source=cndt_result.source,
+                error=cndt_result.error,
+            )
+        except Exception as exc:
+            # Defensive boundary around imports/configuration as well as I/O.
+            logger.warning(
+                "pipeline.cndt_automatic_failed",
+                operation_id=operation_id,
+                error_type=exc.__class__.__name__,
+            )
+
     existing = _execute_db(
         operation_id,
         "load_manual_upload_tasks",
@@ -942,14 +969,14 @@ async def _after_phase2(
         str(row.get("component")): row.get("parsed_result") or {}
         for row in (completed_snapshots.data or [])
     }
-    # A certidao federal Broadfactor so dispensa upload quando esta efetivamente
-    # validada. Uma extraida vencida/incompleta continua visivel ao score, mas
-    # preserva a opcao de substituicao manual.
+    # Certidões automatizadas só dispensam upload quando efetivamente validadas.
+    # Uma extraída vencida/incompleta continua visível ao score, mas preserva a
+    # opção de substituição manual.
     automatic_satisfied = {
         component
         for component, parsed in completed_by_component.items()
         if isinstance(parsed, dict)
-        and parsed.get("fonte") == "broadfactor"
+        and parsed.get("fonte") in {"broadfactor", "tst"}
         and parsed.get("valida") is True
     }
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=48)).isoformat()

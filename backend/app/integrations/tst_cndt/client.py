@@ -45,6 +45,7 @@ class CndtSettings:
     captcha_timeout_seconds: int = 120
     portal_timeout_ms: int = 30_000
     max_captcha_attempts: int = 3  # maximum external-captcha cost per run
+    cache_safety_days: int = 7
     debug: bool = False  # safe diagnostics only; never secrets or captcha answers
 
 
@@ -60,11 +61,15 @@ class CndtClient:
         if not valid_cnpj(normalized):
             return CndtFailure(FailureCode.CNPJ_INVALIDO).to_dict()
         try:
-            cached = self.guardrails.reusable(normalized)
+            cached = self.guardrails.reusable(
+                normalized, safety_days=self.settings.cache_safety_days,
+            )
             if cached:
                 return {key: value for key, value in cached.items() if key != "success_date"}
             with self.guardrails.cnpj_lock(normalized):
-                cached = self.guardrails.reusable(normalized)
+                cached = self.guardrails.reusable(
+                    normalized, safety_days=self.settings.cache_safety_days,
+                )
                 if cached:
                     return {key: value for key, value in cached.items() if key != "success_date"}
                 result = self._issue_locked(normalized)
