@@ -398,6 +398,53 @@ def test_missing_ceded_contract_is_technical_collection_pending(monkeypatch):
     assert service.decidir_status_pos_fase2(reasons)["pendencia_coleta"] is True
 
 
+def test_comprasnet_substitui_pncp_indisponivel_quando_cnpj_foi_conferido():
+    operation, snapshots, statuses = valid_context()
+    operation.update(cnpj="12345678000190", contrato_id="00002/2026")
+    statuses["contratos_pncp"] = "failed"
+    snapshots["contratos_comprasnet"].update(
+        contrato_comprasnet={
+            "numero": "00002/2026",
+            "valor_global": 2_093_672.52,
+            "vigencia_inicio": "2026-09-29",
+            "vigencia_fim": "2029-09-28",
+            "objeto": "Serviços sem regime de dedicação exclusiva",
+            "fornecedor_cnpj": "12.345.678/0001-90",
+            "match_confianca": "CNPJ_CONFERIDO",
+        },
+        historico=[],
+    )
+
+    contract = service._contrato_cedido(operation, snapshots, statuses)
+    capacity = service._capacidade_do_contrato(operation, snapshots, statuses, PARAMS)
+
+    assert contract is not None
+    assert contract["fonte_contrato_cedido"] == "COMPRASNET"
+    assert contract["dedicacao_exclusiva"] is False
+    assert capacity is not None
+    assert capacity["fonte_contrato_cedido"] == "COMPRASNET"
+    assert capacity["capacidade"] > 0
+
+
+def test_comprasnet_sem_confianca_ou_pdf_nao_substitui_pncp():
+    operation, snapshots, statuses = valid_context()
+    operation.update(cnpj="12345678000190", contrato_id="00002/2026")
+    statuses["contratos_pncp"] = "failed"
+    snapshots["contratos_comprasnet"].update(
+        contrato_comprasnet={
+            "numero": "00002/2026",
+            "valor_global": 2_093_672.52,
+            "vigencia_inicio": "2026-09-29",
+            "vigencia_fim": "2029-09-28",
+            "fornecedor_cnpj": "12.345.678/0001-90",
+            "match_confianca": "SEM_MATCH",
+        },
+        uasgs_tentadas=[],
+    )
+
+    assert service._contrato_cedido(operation, snapshots, statuses) is None
+
+
 def test_capacity_uses_original_framed_value_and_rounds_down_idempotently(monkeypatch):
     operation, snapshots, statuses = valid_context()
     operation["valor_enquadrado"] = 650_999

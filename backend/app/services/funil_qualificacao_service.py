@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timezone
 from math import floor
 from typing import Any
@@ -195,27 +196,80 @@ def _received_history(snapshots: dict[str, Any]) -> tuple[int, int]:
 def _contrato_cedido(
     operation: dict[str, Any], snapshots: dict[str, Any], statuses: dict[str, str]
 ) -> dict[str, Any] | None:
-    if statuses.get("contratos_pncp") != "completed":
-        return None
     pncp = snapshots.get("contratos_pncp")
-    if not isinstance(pncp, dict) or pncp.get("contrato_cedido_match") == "NAO_ENCONTRADO":
+    if (
+        statuses.get("contratos_pncp") == "completed"
+        and isinstance(pncp, dict)
+        and pncp.get("contrato_cedido_match") != "NAO_ENCONTRADO"
+        and isinstance(pncp.get("contrato_cedido"), dict)
+    ):
+        cedido = pncp["contrato_cedido"]
+        contract = {
+            "valor_global": cedido.get("valor_global") or operation.get("valor_global_contrato"),
+            "vigencia_inicio": cedido.get("data_inicio_vigencia") or operation.get("contrato_vigencia_inicio"),
+            "vigencia_fim": cedido.get("data_fim_vigencia") or operation.get("contrato_vigencia_fim"),
+            "dedicacao_exclusiva": (
+                cedido.get("dedicacao_exclusiva")
+                if cedido.get("dedicacao_exclusiva") is not None
+                else operation.get("contrato_dedicacao_exclusiva")
+            ),
+            "fonte_contrato_cedido": "PNCP",
+        }
+        if all(contract[key] for key in ("valor_global", "vigencia_inicio", "vigencia_fim")):
+            return contract
+    return _contrato_cedido_comprasnet(operation, snapshots, statuses)
+
+
+def _only_digits(value: Any) -> str:
+    return re.sub(r"\D", "", str(value or ""))
+
+
+def _contrato_cedido_comprasnet(
+    operation: dict[str, Any], snapshots: dict[str, Any], statuses: dict[str, str]
+) -> dict[str, Any] | None:
+    """Use Comprasnet only when its match is independently trustworthy."""
+    if statuses.get("contratos_comprasnet") != "completed":
         return None
-    cedido = pncp.get("contrato_cedido")
-    if not isinstance(cedido, dict):
+    comprasnet = snapshots.get("contratos_comprasnet") or {}
+    contract = comprasnet.get("contrato_comprasnet") or {}
+    if not isinstance(contract, dict):
         return None
-    contract = {
-        "valor_global": cedido.get("valor_global") or operation.get("valor_global_contrato"),
-        "vigencia_inicio": cedido.get("data_inicio_vigencia") or operation.get("contrato_vigencia_inicio"),
-        "vigencia_fim": cedido.get("data_fim_vigencia") or operation.get("contrato_vigencia_fim"),
-        "dedicacao_exclusiva": (
-            cedido.get("dedicacao_exclusiva")
-            if cedido.get("dedicacao_exclusiva") is not None
-            else operation.get("contrato_dedicacao_exclusiva")
+    pdf_origin = any(
+        isinstance(item, dict) and item.get("origem") == "CONTRATO_PDF"
+        for item in (comprasnet.get("uasgs_tentadas") or [])
+    )
+    supplier_matches = _only_digits(contract.get("fornecedor_cnpj")) == _only_digits(
+        operation.get("cnpj")
+    )
+    if contract.get("match_confianca") != "CNPJ_CONFERIDO" and not (
+        pdf_origin and supplier_matches
+    ):
+        return None
+    ceded_number = _only_digits(operation.get("contrato_id"))
+    history = next(
+        (
+            item for item in (comprasnet.get("historico") or [])
+            if isinstance(item, dict)
+            and ceded_number
+            and _only_digits(item.get("numero")) == ceded_number
         ),
+        {},
+    )
+    source = {
+        **history,
+        **{key: value for key, value in contract.items() if value not in (None, "")},
     }
-    if not contract["valor_global"] or not contract["vigencia_inicio"] or not contract["vigencia_fim"]:
+    if not all(source.get(key) for key in ("valor_global", "vigencia_inicio", "vigencia_fim")):
         return None
-    return contract
+    from app.workers.tasks.contratos_pncp import detectar_dedicacao_exclusiva
+
+    return {
+        "valor_global": source["valor_global"],
+        "vigencia_inicio": source["vigencia_inicio"],
+        "vigencia_fim": source["vigencia_fim"],
+        "dedicacao_exclusiva": detectar_dedicacao_exclusiva(source.get("objeto")),
+        "fonte_contrato_cedido": "COMPRASNET",
+    }
 
 
 def _faturas_comprasnet_verificadas(comprasnet: dict[str, Any]) -> bool:
@@ -283,6 +337,11 @@ def _capacidade_do_contrato(
     ) not in (None, "")
     return {
         **result,
+        "memoria": {
+            **result["memoria"],
+            "fonte_contrato_cedido": contract["fonte_contrato_cedido"],
+        },
+        "fonte_contrato_cedido": contract["fonte_contrato_cedido"],
         "base": base,
         "valor_enquadrado": framed,
         "reduziu": framed < base,

@@ -17,6 +17,7 @@ def test_contract_view_projects_one_to_many_payment_and_risk_without_external_ca
     assert view["execucao"]["recebido"] == 200.0
     assert view["fluxo_mensal"][0]["valor_pago"] == 200.0
     assert view["risco"]["antecipacao_concorrente"]["valor"]["ativa_mesmo_contrato"] is True
+    assert view["identificacao"]["fonte_contrato_cedido"] == "COMPRASNET"
 
 
 def test_contract_view_uses_current_contract_value_not_cumulative_amendments():
