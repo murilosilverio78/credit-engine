@@ -1330,6 +1330,7 @@ export default function OperationDetailPage() {
   const params = useParams<{ id: string }>();
   const operationId = params.id;
   const [refreshIn, setRefreshIn] = useState(5);
+  const [recollectionUntil, setRecollectionUntil] = useState(0);
   const operationQuery = useQuery({
     queryFn: () => getOperation(operationId),
     queryKey: ["operation", operationId],
@@ -1345,6 +1346,7 @@ export default function OperationDetailPage() {
         status === "manual_review" ||
         scoreStatus === "running" ||
         !status
+        || Date.now() < recollectionUntil
       ) {
         return 5_000;
       }
@@ -1370,7 +1372,10 @@ export default function OperationDetailPage() {
   });
   const recollectMutation = useMutation({
     mutationFn: () => recollectOperation(operationId),
-    onSuccess: () => operationQuery.refetch(),
+    onSuccess: () => {
+      setRecollectionUntil(Date.now() + 3 * 60 * 1000);
+      operationQuery.refetch();
+    },
   });
   const operation = operationQuery.data;
   const uploads = uploadsQuery.data ?? [];
@@ -1397,6 +1402,15 @@ export default function OperationDetailPage() {
 
     return () => window.clearInterval(interval);
   }, [operation?.status, operationQuery.dataUpdatedAt]);
+
+  useEffect(() => {
+    if (!recollectionUntil) return;
+    const timeout = window.setTimeout(
+      () => setRecollectionUntil(0),
+      Math.max(recollectionUntil - Date.now(), 0),
+    );
+    return () => window.clearTimeout(timeout);
+  }, [recollectionUntil]);
 
   if (
     operationQuery.isError &&
@@ -1466,14 +1480,17 @@ export default function OperationDetailPage() {
         uploads={uploads}
       />
       {operation.pendencia_coleta ? (
-        <button
-          className="fixed bottom-5 right-5 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
-          disabled={recollectMutation.isPending}
-          onClick={() => recollectMutation.mutate()}
-          type="button"
-        >
-          {recollectMutation.isPending ? "Recoletando…" : "Recoletar"}
-        </button>
+        <div className="fixed bottom-5 right-5 space-y-2 text-right">
+          {Date.now() < recollectionUntil ? <p className="text-xs text-muted-foreground">Recoleta em andamento</p> : null}
+          <button
+            className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
+            disabled={recollectMutation.isPending || Date.now() < recollectionUntil}
+            onClick={() => recollectMutation.mutate()}
+            type="button"
+          >
+            {recollectMutation.isPending ? "Recoletando…" : "Recoletar"}
+          </button>
+        </div>
       ) : null}
     </div>
   );

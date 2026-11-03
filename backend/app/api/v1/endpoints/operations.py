@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request,
 from pydantic import BaseModel, field_validator
 from typing import Literal, Optional
 from datetime import date, datetime, timedelta, timezone
-import asyncio
 import re
+from threading import Lock
 
 from app.core.auth import get_current_user
 from app.core.database import supabase
@@ -18,6 +18,12 @@ audit = AuditService()
 
 RATING_RANK = {"A": 1, "B": 2, "C": 3, "D": 4, "E": 5}
 SCORE_REPROCESSING_STALE_MINUTES = 15
+RECOLETA_COMPONENTS = (
+    "contratos_pncp", "contratos_comprasnet", "pagamentos_portal",
+    "recursos_recebidos", "brasil_api",
+)
+_recoletas_em_andamento: set[str] = set()
+_recoletas_lock = Lock()
 
 VALID_TRANSITIONS = {
     "approve":            {"completed"},
@@ -467,33 +473,21 @@ async def get_operation(operation_id: str):
     return operation
 
 
-@router.post("/{operation_id}/recoletar")
-async def recoletar_operacao(
-    operation_id: str,
-    request: Request,
-    current_user: dict = Depends(get_current_user),
-):
-    """Re-executes only incomplete phase-two components without using cache."""
-    role = current_user.get("role", "")
-    if role not in {"analista", "gerente", "diretor", "comite"}:
-        raise HTTPException(status_code=403, detail="Alçada de analista ou superior exigida")
-    operation = _operation_snapshot(operation_id)
-    if operation.get("status") in {"processing", "running"}:
-        raise HTTPException(status_code=409, detail="Análise já está em processamento")
-    components = (
-        "contratos_pncp", "contratos_comprasnet", "pagamentos_portal",
-        "recursos_recebidos", "brasil_api",
-    )
+def _componentes_recoleta(operation_id: str) -> list[str]:
     rows = (
         supabase.table("component_snapshots")
         .select("component,status")
         .eq("operation_id", operation_id)
-        .in_("component", list(components))
+        .in_("component", list(RECOLETA_COMPONENTS))
         .execute()
         .data
         or []
     )
     statuses = {str(row.get("component")): row.get("status") for row in rows}
+    return [component for component in RECOLETA_COMPONENTS if statuses.get(component) != "completed"]
+
+
+def _executar_recoleta(operation_id: str, components: list[str]) -> None:
     from app.workers.tasks.brasil_api import run_brasil_api
     from app.workers.tasks.contratos_comprasnet import run_contratos_comprasnet
     from app.workers.tasks.contratos_pncp import run_contratos_pncp
@@ -507,40 +501,55 @@ async def recoletar_operacao(
         "recursos_recebidos": run_recursos_recebidos,
         "brasil_api": run_brasil_api,
     }
-    results = []
     for component in components:
-        if statuses.get(component) == "completed":
-            continue
         try:
-            result = await asyncio.to_thread(
-                runners[component], operation_id, use_cache=False
-            )
+            runners[component](operation_id, use_cache=False)
         except Exception as exc:
-            result = {"component": component, "status": "failed", "erro": str(exc)}
-        results.append({"component": component, **(result or {})})
-    reavaliacao = None
-    if operation.get("cotacao_id"):
-        from app.services.funil_qualificacao_service import (
-            atualizar_estagio_pos_fase2,
-            decidir_status_pos_fase2,
-        )
-        stage, reasons = await asyncio.to_thread(
-            atualizar_estagio_pos_fase2, str(operation["cotacao_id"]), operation_id
-        )
-        outcome = decidir_status_pos_fase2(reasons)
-        supabase.table("operations").update({
-            "status": outcome["status"], "pendencia_coleta": outcome["pendencia_coleta"],
-        }).eq("id", operation_id).execute()
-        reavaliacao = {"estagio": stage, **outcome}
+            # BaseComponentTask já persiste o erro e preserva snapshots válidos.
+            logger = __import__("structlog").get_logger()
+            logger.warning("operation.recollection_component_failed", operation_id=operation_id, component=component, error=str(exc))
+    try:
+        operation = _operation_snapshot(operation_id)
+        if operation.get("cotacao_id"):
+            from app.services.funil_qualificacao_service import atualizar_estagio_pos_fase2
+            atualizar_estagio_pos_fase2(str(operation["cotacao_id"]), operation_id)
+        audit.log(operation_id, "operation_recollection_completed", payload={"components": components})
+    finally:
+        with _recoletas_lock:
+            _recoletas_em_andamento.discard(operation_id)
+
+
+@router.post("/{operation_id}/recoletar", status_code=202)
+async def recoletar_operacao(
+    operation_id: str,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Schedules allowed phase-two recollection without changing operation state."""
+    role = current_user.get("role", "")
+    if role not in {"analista", "gerente", "diretor", "comite"}:
+        raise HTTPException(status_code=403, detail="Alçada de analista ou superior exigida")
+    operation = _operation_snapshot(operation_id)
+    if not operation.get("pendencia_coleta") or operation.get("status") not in {
+        "aguardando_relatorio", "reprovada_triagem",
+    }:
+        raise HTTPException(status_code=409, detail="Operação não está pendente de coleta")
+    with _recoletas_lock:
+        if operation_id in _recoletas_em_andamento:
+            raise HTTPException(status_code=409, detail="Recoleta já está em andamento")
+        _recoletas_em_andamento.add(operation_id)
+    components = _componentes_recoleta(operation_id)
+    background_tasks.add_task(_executar_recoleta, operation_id, components)
     audit.log(
         operation_id=operation_id,
         action="operation_recollection_requested",
         actor_id=current_user.get("id"),
         actor_type=role,
         ip_address=request.client.host if request.client else None,
-        payload={"components": [item["component"] for item in results]},
+        payload={"components": components},
     )
-    return {"operation_id": operation_id, "componentes": results, "reavaliacao_funil": reavaliacao}
+    return {"operation_id": operation_id, "status": "accepted", "componentes": components}
 
 
 @router.post("/{operation_id}/reprocessar-score", status_code=202)

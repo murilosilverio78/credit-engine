@@ -2,6 +2,8 @@ import asyncio
 import os
 from types import SimpleNamespace
 
+import pytest
+from fastapi import BackgroundTasks, HTTPException
 from starlette.requests import Request
 
 for key in ("SECRET_KEY", "TWOCAPTCHA_API_KEY", "RESEND_API_KEY"):
@@ -43,13 +45,15 @@ class _Database:
         return _Query([])
 
 
-def test_recoleta_reexecuta_falha_sem_cache_e_reavalia_funil(monkeypatch):
+def test_recoleta_pendente_agenda_sem_cache_e_reavalia_em_background(monkeypatch):
     from app.services import funil_qualificacao_service
     from app.workers.tasks import contratos_pncp
 
     monkeypatch.setattr(operations, "supabase", _Database())
     monkeypatch.setattr(
-        operations, "_operation_snapshot", lambda _id: {"status": "completed", "cotacao_id": "C-1"}
+        operations, "_operation_snapshot", lambda _id: {
+            "status": "aguardando_relatorio", "pendencia_coleta": True, "cotacao_id": "C-1"
+        }
     )
     calls = []
     monkeypatch.setattr(
@@ -64,18 +68,34 @@ def test_recoleta_reexecuta_falha_sem_cache_e_reavalia_funil(monkeypatch):
         "atualizar_estagio_pos_fase2",
         lambda *_args: ("QUALIFICADA", []),
     )
-    monkeypatch.setattr(
-        funil_qualificacao_service,
-        "decidir_status_pos_fase2",
-        lambda _reasons: {"status": "aguardando_relatorio", "pendencia_coleta": False, "motivos_classificados": {}},
-    )
-    monkeypatch.setattr(operations.audit, "log", lambda **_kwargs: None)
+    monkeypatch.setattr(operations.audit, "log", lambda *_args, **_kwargs: None)
     request = Request({"type": "http", "method": "POST", "path": "/", "headers": [], "client": ("127.0.0.1", 1)})
+    background = BackgroundTasks()
 
     result = asyncio.run(
-        operations.recoletar_operacao("op-1", request, {"id": "user", "role": "analista"})
+        operations.recoletar_operacao("op-1", background, request, {"id": "user", "role": "analista"})
     )
 
+    assert result["status"] == "accepted"
+    assert result["componentes"] == ["contratos_pncp"]
+    assert calls == []
+    asyncio.run(background())
     assert calls == [("op-1", False)]
-    assert result["componentes"][0]["snapshot_preservado"] is True
-    assert result["reavaliacao_funil"]["status"] == "aguardando_relatorio"
+
+
+def test_recoleta_recusa_operacao_concluida_sem_alterar_status(monkeypatch):
+    monkeypatch.setattr(
+        operations,
+        "_operation_snapshot",
+        lambda _id: {"status": "completed", "pendencia_coleta": False},
+    )
+    request = Request({"type": "http", "method": "POST", "path": "/", "headers": []})
+
+    with pytest.raises(HTTPException, match="Operação não está pendente de coleta") as caught:
+        asyncio.run(
+            operations.recoletar_operacao(
+                "op-concluida", BackgroundTasks(), request, {"role": "analista"}
+            )
+        )
+
+    assert caught.value.status_code == 409
