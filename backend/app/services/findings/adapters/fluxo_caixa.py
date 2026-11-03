@@ -417,6 +417,34 @@ def reconcile_payments(
             matched_invoices.add(id(invoice))
             matched.append((invoice, aggregate))
 
+    # Preserve the original 1:N behaviour: one OB can explicitly name and
+    # settle several NFs. This pass intentionally does not require the OB
+    # amount to equal each individual invoice; it only consumes still-unused
+    # orders/invoices after exact OB+DF grouping above.
+    for order_index, order in sorted(
+        enumerate(eligible_orders), key=lambda item: _date(item[1].get("data")) or date.max,
+    ):
+        if order_index in used_orders:
+            continue
+        order_date = _date(order.get("data"))
+        if order_date is None:
+            continue
+        observation_tokens = _reference_tokens(order.get("observacao"))
+        referenced = [
+            invoice for invoice in settled
+            if id(invoice) not in matched_invoices
+            and (liquidated := _date(invoice.get("data_liquidacao")))
+            and liquidated <= order_date
+            and _reference_tokens(invoice.get("numero") or invoice.get("numero_fatura") or invoice.get("nota"))
+            & observation_tokens
+        ]
+        if referenced:
+            used_orders.add(order_index)
+            aggregate = {**order, "_matched_orders": [order]}
+            for invoice in referenced:
+                matched_invoices.add(id(invoice))
+                matched.append((invoice, aggregate))
+
     for invoice in settled:
         if id(invoice) in matched_invoices:
             continue

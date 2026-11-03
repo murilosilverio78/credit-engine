@@ -197,6 +197,20 @@ def test_reconcile_payments_sums_ob_and_df_for_the_same_invoice():
     assert len(matched[0][1]["_matched_orders"]) == 2
 
 
+def test_reconcile_payments_keeps_one_ob_for_multiple_explicit_invoices():
+    invoices = [
+        {"numero": "10", "data_liquidacao": "2026-06-20", "valorliquido": "100,00"},
+        {"numero": "11", "data_liquidacao": "2026-06-20", "valorliquido": "50,00"},
+    ]
+    orders = [{
+        "data": "2026-06-21", "valor": "150,00",
+        "observacao": "INSTR.(S) DE COBRANCA(S) NUM.(S): 10, 11",
+    }]
+    matched = reconcile_payments(invoices, orders, "00005/2026")
+    assert len(matched) == 2
+    assert {id(order) for _, aggregate in matched for order in aggregate["_matched_orders"]} == {id(orders[0])}
+
+
 def test_installment_uses_priced_value_not_requested_value():
     operation = _operation() | {
         "valor_solicitado": 599_000, "limite_aprovado": 52_000,
