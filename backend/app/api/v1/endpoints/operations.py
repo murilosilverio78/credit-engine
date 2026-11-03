@@ -511,8 +511,37 @@ def _executar_recoleta(operation_id: str, components: list[str]) -> None:
     try:
         operation = _operation_snapshot(operation_id)
         if operation.get("cotacao_id"):
-            from app.services.funil_qualificacao_service import atualizar_estagio_pos_fase2
-            atualizar_estagio_pos_fase2(str(operation["cotacao_id"]), operation_id)
+            from app.services.funil_qualificacao_service import (
+                atualizar_estagio_pos_fase2,
+                decidir_status_pos_fase2,
+            )
+
+            _stage, motivos = atualizar_estagio_pos_fase2(
+                str(operation["cotacao_id"]), operation_id
+            )
+            outcome = decidir_status_pos_fase2(motivos)
+            # A aprovação pode ocorrer enquanto a coleta está em execução.
+            # Só a operação ainda pendente de coleta pode ter estado alterado.
+            current = _operation_snapshot(operation_id)
+            previous_status = current.get("status")
+            if previous_status in {"aguardando_relatorio", "reprovada_triagem"}:
+                next_status = outcome["status"]
+                supabase.table("operations").update({
+                    "status": next_status,
+                    "pendencia_coleta": outcome["pendencia_coleta"],
+                }).eq("id", operation_id).execute()
+                if next_status != previous_status:
+                    audit.log(
+                        operation_id=operation_id,
+                        action="operation_status_changed",
+                        actor_type="system",
+                        previous_value={"status": previous_status},
+                        new_value={"status": next_status},
+                        payload={
+                            "contexto": "recoleta",
+                            "motivos_classificados": outcome["motivos_classificados"],
+                        },
+                    )
         audit.log(operation_id, "operation_recollection_completed", payload={"components": components})
     finally:
         with _recoletas_lock:
