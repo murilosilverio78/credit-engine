@@ -338,3 +338,11 @@ def test_run_cria_snapshot_ausente_e_nao_associa_quando_falha(monkeypatch):
         "component": "contratos_pncp",
         "status": "pending",
     }]
+from app.workers.tasks.contratos_pncp import detectar_dedicacao_exclusiva
+
+
+def test_dedicacao_exclusiva_respeita_negacao_e_ambiguidade():
+    assert detectar_dedicacao_exclusiva("SEM REGIME DE DEDICAÇÃO EXCLUSIVA DE MÃO DE OBRA") is False
+    assert detectar_dedicacao_exclusiva("EM REGIME DE DEDICAÇÃO EXCLUSIVA DE MÃO DE OBRA") is True
+    assert detectar_dedicacao_exclusiva("serviços contínuos de limpeza") is False
+    assert detectar_dedicacao_exclusiva("com dedicação exclusiva, mas sem dedicação exclusiva") is None

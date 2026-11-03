@@ -17,7 +17,10 @@ from app.workers.base import BaseComponentTask
 _task = BaseComponentTask()
 RETRIES = (2, 6)
 DEDICACAO = re.compile(
-    r"dedicacao exclusiva de mao de obra|cessao de mao de obra|regime de dedicacao exclusiva"
+    r"dedicacao exclusiva(?: de mao de obra)?|cessao de mao de obra|regime de dedicacao exclusiva"
+)
+NEGACAO_DEDICACAO = re.compile(
+    r"sem (?:regime de )?dedicacao exclusiva|nao ha dedicacao exclusiva|sem cessao de mao de obra"
 )
 
 
@@ -47,6 +50,22 @@ def _number(value: Any) -> float:
         return 0.0
 
 
+def detectar_dedicacao_exclusiva(objeto: Any) -> bool | None:
+    """Classify dedication without treating an explicit negation as evidence.
+
+    ``None`` is reserved for contradictory wording, which must not silently
+    become a positive signal in capacity calculations.
+    """
+    text = _plain(objeto)
+    positive = bool(DEDICACAO.search(text))
+    negative = bool(NEGACAO_DEDICACAO.search(text))
+    if positive and negative:
+        return None
+    if negative:
+        return False
+    return True if positive else False
+
+
 def _normalize(item: dict[str, Any]) -> dict[str, Any]:
     objeto = item.get("description") or item.get("objeto") or ""
     return {
@@ -66,7 +85,7 @@ def _normalize(item: dict[str, Any]) -> dict[str, Any]:
         "data_fim_vigencia": item.get("data_fim_vigencia"),
         "tipo_contrato_nome": item.get("tipo_contrato_nome"),
         "modalidade_licitacao_nome": item.get("modalidade_licitacao_nome"),
-        "dedicacao_exclusiva": bool(DEDICACAO.search(_plain(objeto))),
+        "dedicacao_exclusiva": detectar_dedicacao_exclusiva(objeto),
     }
 
 
