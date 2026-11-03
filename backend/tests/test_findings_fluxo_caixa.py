@@ -1,7 +1,7 @@
 import pytest
 
 from app.integrations.comprasnet.parsing import parse_data, parse_number
-from app.services.findings.adapters.fluxo_caixa import emit_fluxo_caixa
+from app.services.findings.adapters.fluxo_caixa import emit_fluxo_caixa, reconcile_payments
 from app.services.findings.schemas import Estado
 
 
@@ -183,6 +183,18 @@ def test_coherent_commitment_uses_liquidated_amount_once():
         ]), fingerprint="f", operation=_operation(),
     ))
     assert findings["saldo_empenho_ano"].valor["saldo"] == 40
+
+
+def test_reconcile_payments_sums_ob_and_df_for_the_same_invoice():
+    invoice = {"numero": "185", "data_liquidacao": "2026-06-20", "valorliquido": "5.447,58"}
+    orders = [
+        {"data": "2026-06-21", "valor": "514,79", "observacao": "INSTR.(S) DE COBRANCA(S) NUM.(S): 185"},
+        {"data": "2026-06-21", "valor": "4.932,79", "observacao": "INSTR.(S) DE COBRANCA(S) NUM.(S): 185"},
+    ]
+    matched = reconcile_payments([invoice], orders, "00005/2026")
+    assert len(matched) == 1
+    assert matched[0][1]["valor"] == pytest.approx(5_447.58)
+    assert len(matched[0][1]["_matched_orders"]) == 2
 
 
 def test_installment_uses_priced_value_not_requested_value():

@@ -393,28 +393,29 @@ def reconcile_payments(
     matched: list[tuple[dict[str, Any], dict[str, Any]]] = []
     contract_refs = _reference_tokens(contract_number)
 
-    # A single OB can explicitly settle several invoices. Process it by date so
-    # each invoice receives the first payment order that names its NF.
-    for order_index, order in sorted(
-        enumerate(eligible_orders), key=lambda item: _date(item[1].get("data")) or date.max,
-    ):
-        order_date = _date(order.get("data"))
-        if order_date is None:
+    # A payment can be split between OB and DF/withholding.  Group every
+    # eligible order explicitly citing the same NF before comparing its sum.
+    for invoice in settled:
+        invoice_tokens = _reference_tokens(
+            invoice.get("numero") or invoice.get("numero_fatura") or invoice.get("nota")
+        )
+        liquidated = _date(invoice.get("data_liquidacao"))
+        if not invoice_tokens or not liquidated:
             continue
-        observation_tokens = _reference_tokens(order.get("observacao"))
-        referenced = [
-            invoice for invoice in settled
-            if id(invoice) not in matched_invoices
-            and (liquidated := _date(invoice.get("data_liquidacao")))
-            and liquidated <= order_date
-            and _reference_tokens(invoice.get("numero") or invoice.get("numero_fatura") or invoice.get("nota"))
-            & observation_tokens
+        group = [
+            (index, order) for index, order in enumerate(eligible_orders)
+            if index not in used_orders
+            and (order_date := _date(order.get("data")))
+            and order_date >= liquidated
+            and invoice_tokens & _reference_tokens(order.get("observacao"))
         ]
-        if referenced:
-            used_orders.add(order_index)
-            for invoice in referenced:
-                matched_invoices.add(id(invoice))
-                matched.append((invoice, order))
+        total = sum(_number(order.get("valor")) or 0.0 for _, order in group)
+        expected = _number(invoice.get("valorliquido")) or 0.0
+        if group and abs(total - expected) <= 0.05:
+            used_orders.update(index for index, _ in group)
+            aggregate = {**group[-1][1], "valor": total, "_matched_orders": [order for _, order in group]}
+            matched_invoices.add(id(invoice))
+            matched.append((invoice, aggregate))
 
     for invoice in settled:
         if id(invoice) in matched_invoices:
@@ -485,7 +486,11 @@ def _payment_findings(
         invoice for invoice in settled
         if id(invoice) not in matched_ids and (reference - _date(invoice.get("data_liquidacao"))).days > 30
     ]
-    matched_order_ids = {id(order) for _, order in matched}
+    matched_order_ids = {
+        id(source)
+        for _, order in matched
+        for source in (order.get("_matched_orders") or [order])
+    }
     matched_orders_year = [
         order for order in eligible_orders
         if id(order) in matched_order_ids and (_date(order.get("data")) or date.min).year == reference.year
