@@ -101,9 +101,8 @@ class CndtClient:
                         for selector in required:
                             page.locator(selector).wait_for(state="attached")
                         page.locator("#captcha-imagem").wait_for(state="visible")
-                        page.wait_for_function(
-                            "document.querySelector('#captcha-imagem')?.src.startsWith('data:image/')",
-                        )
+                        if not self._wait_for_captcha_image(page):
+                            return CndtFailure(FailureCode.FORMULARIO_ALTERADO).to_dict()
                     except PlaywrightTimeoutError:
                         return CndtFailure(FailureCode.FORMULARIO_ALTERADO).to_dict()
                     for _ in range(self.settings.max_captcha_attempts):
@@ -129,15 +128,7 @@ class CndtClient:
                             return CndtFailure(FailureCode.BLOQUEIO_ANTIBOT).to_dict()
                         if "captcha" not in message.lower():
                             return CndtFailure(FailureCode.PDF_NAO_GERADO).to_dict()
-                        try:
-                            page.wait_for_function(
-                                """(previous) => {
-                                    const source = document.querySelector('#captcha-imagem')?.src || '';
-                                    return source.startsWith('data:image/') && source !== previous;
-                                }""",
-                                previous_captcha_source,
-                            )
-                        except PlaywrightTimeoutError:
+                        if not self._wait_for_captcha_image(page, previous_captcha_source):
                             return CndtFailure(FailureCode.FORMULARIO_ALTERADO).to_dict()
                     return CndtFailure(FailureCode.CAPTCHA_NAO_RESOLVIDO).to_dict()
                 finally:
@@ -149,6 +140,20 @@ class CndtClient:
         except Exception:
             logger.exception("cndt.unexpected_failure", extra={"cnpj": mask_cnpj(cnpj)})
             return CndtFailure(FailureCode.PORTAL_INDISPONIVEL).to_dict()
+
+    def _wait_for_captcha_image(self, page: Any, previous: str | None = None) -> bool:
+        """Poll the captcha ``src`` through locators.
+
+        The portal's Content-Security-Policy forbids ``unsafe-eval``, which
+        rules out ``page.wait_for_function`` with a script string.
+        """
+        deadline = time.monotonic() + self.settings.portal_timeout_ms / 1000
+        while time.monotonic() < deadline:
+            source = page.locator("#captcha-imagem").get_attribute("src") or ""
+            if source.startswith("data:image/") and (previous is None or source != previous):
+                return True
+            time.sleep(0.2)
+        return False
 
     @staticmethod
     def _is_antibot(content: str) -> bool:

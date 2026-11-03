@@ -80,3 +80,32 @@ def test_rate_limit_lock_cache_and_mask(tmp_path):
     guardrails.remember_success(cnpj, {"storage_key": str(pdf), "data_validade": expiry, "status": "obtida"})
     assert guardrails.reusable(cnpj)["storage_key"] == str(pdf)
     assert mask_cnpj(cnpj) == "***.***.***/****-99"
+
+
+def test_captcha_wait_polls_locators_without_script_evaluation(tmp_path):
+    from app.integrations.tst_cndt.client import CndtClient, CndtSettings
+
+    class FakeLocator:
+        def __init__(self, sources):
+            self.sources = sources
+
+        def get_attribute(self, name):
+            assert name == "src"
+            return self.sources.pop(0) if len(self.sources) > 1 else self.sources[0]
+
+    class FakePage:
+        def __init__(self, sources):
+            self.locator_obj = FakeLocator(sources)
+
+        def locator(self, selector):
+            assert selector == "#captcha-imagem"
+            return self.locator_obj
+
+        def wait_for_function(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("string evaluation is forbidden by the portal CSP")
+
+    client = CndtClient(CndtSettings(output_dir=tmp_path, portal_timeout_ms=1000))
+    assert client._wait_for_captcha_image(FakePage(["", "data:image/png;base64,AAA"]))
+    assert client._wait_for_captcha_image(FakePage(["data:image/png;base64,AAA", "data:image/png;base64,BBB"]), "data:image/png;base64,AAA")
+    short = CndtClient(CndtSettings(output_dir=tmp_path, portal_timeout_ms=300))
+    assert not short._wait_for_captcha_image(FakePage(["data:image/png;base64,AAA"]), "data:image/png;base64,AAA")
