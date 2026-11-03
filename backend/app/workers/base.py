@@ -354,6 +354,13 @@ class BaseComponentTask:
                 cnpj=cnpj,
             )
             cached = None
+        if isinstance(cached, dict) and cached.get("parcial") is True:
+            logger.info(
+                "component.partial_cache_ignored",
+                component=component,
+                cnpj=cnpj,
+            )
+            cached = None
         if cached:
             cached = fix_dict_encoding(cached)
             logger.info("component.cache_hit", component=component, cnpj=cnpj)
@@ -422,6 +429,8 @@ class BaseComponentTask:
                 isinstance(result, dict) and "erro" in result
             ) and not (
                 component == "web_research" and _is_degraded_web_research_result(result)
+            ) and not (
+                isinstance(result, dict) and result.get("parcial") is True
             )
             if use_cache and cacheable_result:
                 cache_svc.set(cnpj, component, result)

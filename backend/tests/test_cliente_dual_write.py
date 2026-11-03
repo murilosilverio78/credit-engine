@@ -480,6 +480,44 @@ def test_execute_cache_hit_nao_grava_cliente_snapshot(monkeypatch):
     assert db.rpc_calls == []
 
 
+def test_execute_resultado_parcial_nao_e_gravado_no_cache(monkeypatch):
+    from app.services.cache_service import CacheService
+
+    db = FakeSupabase()
+    monkeypatch.setattr(cliente_service, "supabase", db)
+    monkeypatch.setattr("app.core.database.supabase", db)
+    _patch_component_dependencies(monkeypatch)
+    writes = []
+    monkeypatch.setattr(
+        CacheService, "set", lambda *_args, **_kwargs: writes.append(_args)
+    )
+
+    result = BaseComponentTask().execute(
+        "op-1", "contratos_pncp", lambda _cnpj: {"parcial": True}, use_cache=True
+    )
+
+    assert result["status"] == "completed"
+    assert writes == []
+
+
+def test_execute_ignora_cache_parcial_e_coleta_novamente(monkeypatch):
+    db = FakeSupabase()
+    monkeypatch.setattr(cliente_service, "supabase", db)
+    monkeypatch.setattr("app.core.database.supabase", db)
+    _patch_component_dependencies(monkeypatch, cached={"parcial": True})
+    calls = []
+
+    result = BaseComponentTask().execute(
+        "op-1",
+        "contratos_pncp",
+        lambda cnpj: calls.append(cnpj) or {"n_contratos": 1},
+        use_cache=True,
+    )
+
+    assert result["status"] == "completed"
+    assert calls == ["12345678000190"]
+
+
 def test_execute_escopo_operacao_nao_tenta_rpc(monkeypatch):
     db = FakeSupabase(component="score_engine", scope="OPERACAO")
     monkeypatch.setattr(cliente_service, "supabase", db)
