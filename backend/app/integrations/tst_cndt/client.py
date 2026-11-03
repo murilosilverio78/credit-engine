@@ -118,25 +118,12 @@ class CndtClient:
                             return CndtFailure(FailureCode.CAPTCHA_NAO_RESOLVIDO).to_dict()
                         page.locator("#cpfCnpj").fill(cnpj)
                         page.locator("#captcha-resposta").fill(answer)
-                        try:
-                            with page.expect_response(lambda response: "/api/certidao" in response.url, timeout=self.settings.portal_timeout_ms) as pending:
-                                page.locator("#botao-emitir").click()
-                        except PlaywrightTimeoutError:
-                            self._diag("resposta", tentativa=attempt, motivo="sem_resposta_de_/api/certidao_no_prazo")
+                        kind, payload, hint = self._submit_and_collect(page, attempt)
+                        if kind == "pdf":
+                            return self._save_and_parse_pdf(payload, cnpj, hint)
+                        if kind in {"timeout", "pdf_vazio"}:
                             return CndtFailure(FailureCode.PDF_NAO_GERADO).to_dict()
-                        response = pending.value
-                        content_type = (response.headers.get("content-type") or "").lower()
-                        body = response.body()
-                        self._diag(
-                            "resposta", tentativa=attempt, status=response.status, content_type=content_type,
-                            tamanho=len(body), url=response.url.split("?")[0],
-                            amostra="pdf" if body.startswith(b"%PDF") else self._mask_digits(body[:400].decode("utf-8", "replace")),
-                        )
-                        if self.settings.debug:
-                            (self.settings.output_dir / "debug_resposta.bin").write_bytes(body)
-                        if "application/pdf" in content_type or body.startswith(b"%PDF"):
-                            return self._save_and_parse_pdf(body, cnpj, response.headers.get("content-disposition"))
-                        message = self._response_message(response)
+                        message = str(payload or "")
                         self._diag("mensagem", texto=self._mask_digits(message, 200))
                         if self._is_antibot(message):
                             return CndtFailure(FailureCode.BLOQUEIO_ANTIBOT).to_dict()
@@ -155,6 +142,77 @@ class CndtClient:
         except Exception:
             logger.exception("cndt.unexpected_failure", extra={"cnpj": mask_cnpj(cnpj)})
             return CndtFailure(FailureCode.PORTAL_INDISPONIVEL).to_dict()
+
+    def _submit_and_collect(self, page: Any, attempt: int) -> tuple[str, Any, Any]:
+        """Click "emitir" and collect the PDF either as a browser download or a network body.
+
+        The portal answers ``/api/certidao`` with ``application/pdf`` but a body
+        Playwright may report empty when the page turns it into a download, so
+        both channels are observed.  Returns ``(kind, payload, hint)`` with kind
+        in ``pdf``, ``pdf_vazio``, ``message`` or ``timeout``.
+        """
+        captured: dict[str, Any] = {"download": None, "response": None, "response_at": 0.0}
+
+        def on_download(download: Any) -> None:
+            captured["download"] = download
+
+        def on_response(response: Any) -> None:
+            if "/api/certidao" in response.url and captured["response"] is None:
+                captured["response"] = response
+                captured["response_at"] = time.monotonic()
+
+        page.on("download", on_download)
+        page.on("response", on_response)
+        try:
+            page.locator("#botao-emitir").click()
+            deadline = time.monotonic() + self.settings.portal_timeout_ms / 1000
+            while time.monotonic() < deadline:
+                if captured["download"] is not None:
+                    break
+                response = captured["response"]
+                if response is not None:
+                    content_type = (response.headers.get("content-type") or "").lower()
+                    if "application/pdf" not in content_type:
+                        break
+                    if time.monotonic() - captured["response_at"] > 8:
+                        break
+                page.wait_for_timeout(200)
+        finally:
+            page.remove_listener("download", on_download)
+            page.remove_listener("response", on_response)
+
+        download = captured["download"]
+        if download is not None:
+            try:
+                content = Path(download.path()).read_bytes()
+            except Exception:
+                content = b""
+            self._diag("download", nome=self._mask_digits(str(download.suggested_filename), 80), tamanho=len(content))
+            if self.settings.debug and content:
+                (self.settings.output_dir / "debug_download.bin").write_bytes(content)
+            return "pdf", content, f'filename="{download.suggested_filename}"'
+
+        response = captured["response"]
+        if response is None:
+            self._diag("resposta", tentativa=attempt, motivo="sem_resposta_de_/api/certidao_no_prazo")
+            return "timeout", None, None
+        content_type = (response.headers.get("content-type") or "").lower()
+        try:
+            body = response.body()
+        except Exception:
+            body = b""
+        self._diag(
+            "resposta", tentativa=attempt, status=response.status, content_type=content_type,
+            tamanho=len(body), url=response.url.split("?")[0],
+            amostra="pdf" if body.startswith(b"%PDF") else self._mask_digits(body[:400].decode("utf-8", "replace")),
+        )
+        if self.settings.debug:
+            (self.settings.output_dir / "debug_resposta.bin").write_bytes(body)
+        if body.startswith(b"%PDF"):
+            return "pdf", body, response.headers.get("content-disposition")
+        if "application/pdf" in content_type:
+            return "pdf_vazio", None, None
+        return "message", self._response_message(response), None
 
     def _diag(self, etapa: str, **dados: Any) -> None:
         if self.settings.debug:

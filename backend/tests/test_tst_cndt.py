@@ -120,3 +120,111 @@ def test_debug_diagnostics_are_off_by_default_and_mask_long_digit_runs(tmp_path)
     verbose = CndtClient(CndtSettings(output_dir=tmp_path, debug=True))
     verbose._diag("x", amostra=verbose._mask_digits("CNPJ 04251091000199 emitido"))
     assert verbose.diagnostics[0]["amostra"] == "CNPJ *** emitido"
+
+
+class _Resp:
+    def __init__(self, url, content_type, body=b"", payload=None, status=200):
+        self.url = url
+        self.headers = {"content-type": content_type}
+        self._body = body
+        self._payload = payload
+        self.status = status
+
+    def body(self):
+        return self._body
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("not json")
+        return self._payload
+
+
+class _Download:
+    def __init__(self, path):
+        self._path = path
+        self.suggested_filename = "certidao.pdf"
+
+    def path(self):
+        return self._path
+
+
+class _Page:
+    def __init__(self, on_click):
+        self.handlers = {}
+        self.on_click = on_click
+
+    def on(self, name, handler):
+        self.handlers[name] = handler
+
+    def remove_listener(self, name, handler):
+        self.handlers.pop(name, None)
+
+    def locator(self, selector):
+        assert selector == "#botao-emitir"
+        page = self
+
+        class _Button:
+            def click(self):
+                page.on_click(page)
+
+        return _Button()
+
+    def wait_for_timeout(self, ms):
+        pending = getattr(self, "pending", [])
+        while pending:
+            name, value = pending.pop(0)
+            self.handlers[name](value)
+
+
+def test_collect_reads_browser_download_when_response_body_is_empty(tmp_path):
+    from app.integrations.tst_cndt.client import CndtClient, CndtSettings
+
+    pdf = tmp_path / "saved.pdf"
+    pdf.write_bytes(b"%PDF-1.4 conteudo")
+
+    def click(page):
+        page.pending = [
+            ("response", _Resp("https://x/api/certidao", "application/pdf", b"")),
+            ("download", _Download(str(pdf))),
+        ]
+
+    client = CndtClient(CndtSettings(output_dir=tmp_path, portal_timeout_ms=2000))
+    kind, payload, hint = client._submit_and_collect(_Page(click), 1)
+    assert kind == "pdf" and payload.startswith(b"%PDF") and "certidao.pdf" in hint
+
+
+def test_collect_reads_pdf_from_response_body(tmp_path):
+    from app.integrations.tst_cndt.client import CndtClient, CndtSettings
+
+    def click(page):
+        page.pending = [("response", _Resp("https://x/api/certidao", "application/pdf", b"%PDF-1.4 x"))]
+
+    client = CndtClient(CndtSettings(output_dir=tmp_path, portal_timeout_ms=2000))
+    kind, payload, _ = client._submit_and_collect(_Page(click), 1)
+    assert kind == "pdf" and payload.startswith(b"%PDF")
+
+
+def test_collect_reports_error_message_and_empty_pdf(tmp_path):
+    from app.integrations.tst_cndt.client import CndtClient, CndtSettings
+
+    def click_error(page):
+        page.pending = [("response", _Resp("https://x/api/certidao", "application/json", b"{}", {"erro": "Captcha incorreto"}, 400))]
+
+    client = CndtClient(CndtSettings(output_dir=tmp_path, portal_timeout_ms=2000))
+    kind, payload, _ = client._submit_and_collect(_Page(click_error), 1)
+    assert kind == "message" and "Captcha" in payload
+
+    def click_empty(page):
+        page.pending = [("response", _Resp("https://x/api/certidao", "application/pdf", b""))]
+
+    short = CndtClient(CndtSettings(output_dir=tmp_path, portal_timeout_ms=12000))
+    import app.integrations.tst_cndt.client as module
+
+    original = module.time.monotonic
+    ticks = iter(range(0, 1000))
+    module.time.monotonic = lambda: float(next(ticks))
+    try:
+        kind, _, _ = short._submit_and_collect(_Page(click_empty), 1)
+    finally:
+        module.time.monotonic = original
+    assert kind == "pdf_vazio"
