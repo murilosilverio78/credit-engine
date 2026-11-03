@@ -1,9 +1,10 @@
 """Version of the deterministic finding-emission rules.
 
-Version 34 inclui as certidoes estadual e municipal da Broadfactor.
+Version 35 includes the corrected Comprasnet commitment and payment matching
+rules, forcing deterministic re-emission instead of deduplicating old runs.
 """
 
-EMITTER_VERSION = "34"
+EMITTER_VERSION = "35"
 
 # Fields outside component snapshots that each adapter actually reads.
 HASH_EXTRAS = {
