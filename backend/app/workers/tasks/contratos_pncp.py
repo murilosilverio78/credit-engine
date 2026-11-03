@@ -10,11 +10,13 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import httpx
+import structlog
 
 from app.core.config import settings
 from app.workers.base import BaseComponentTask
 
 _task = BaseComponentTask()
+logger = structlog.get_logger()
 RETRIES = (2, 6)
 DEDICACAO = re.compile(
     r"dedicacao exclusiva(?: de mao de obra)?|cessao de mao de obra|regime de dedicacao exclusiva"
@@ -297,15 +299,75 @@ def _ensure_snapshot(operation_id: str) -> None:
     ).execute()
 
 
-def _fetch(cnpj: str) -> dict[str, Any]:
+def _result(contracts: list[dict[str, Any]], *, partial: bool = False, pages_read: int = 0, error: str | None = None) -> dict[str, Any]:
+    result = {
+        **_aggregate(contracts, date.today()),
+        "contratos_detalhe": contracts,
+        "fonte": "PNCP",
+        "consultado_em": datetime.now(timezone.utc).isoformat(),
+    }
+    if partial:
+        result.update(
+            {
+                "parcial": True,
+                "paginas_lidas": pages_read,
+                "erro_paginacao": error,
+            }
+        )
+    return result
+
+
+def _operation_for_cedido(operation_id: str | None) -> dict[str, Any]:
+    if not operation_id:
+        return {}
+    from app.core.database import supabase
+
+    return (
+        supabase.table("operations")
+        .select("cotacao_id,contrato_id,valor_global_contrato,saldo_vincendo")
+        .eq("id", operation_id)
+        .maybe_single()
+        .execute()
+        .data
+        or {}
+    )
+
+
+def _fetch(cnpj: str, *, operation_id: str | None = None) -> dict[str, Any]:
     cnpj = re.sub(r"\D", "", cnpj)
     base = settings.PNCP_SEARCH_BASE_URL.rstrip("/") + "/api/search/"
     items: list[dict[str, Any]] = []
     page = 1
     total = 0
+    operation = _operation_for_cedido(operation_id)
     with httpx.Client(timeout=20, verify=settings.HTTPX_VERIFY_SSL) as client:
         while True:
-            payload = _page(client, base, cnpj, page)
+            try:
+                payload = _page(client, base, cnpj, page)
+            except Exception as exc:
+                contracts = [_normalize(item) for item in items]
+                cedido, _match = _cedido(
+                    contracts,
+                    _operation_contract_numbers(operation),
+                    operation.get("valor_global_contrato")
+                    or operation.get("saldo_vincendo"),
+                )
+                if page > 1 and cedido:
+                    response = getattr(exc, "response", None)
+                    logger.warning(
+                        "pncp.pagination_partial",
+                        cnpj=cnpj,
+                        pagina=page,
+                        status=getattr(response, "status_code", None),
+                        exception=exc.__class__.__name__,
+                    )
+                    return _result(
+                        contracts,
+                        partial=True,
+                        pages_read=page - 1,
+                        error=str(exc) or exc.__class__.__name__,
+                    )
+                raise
             batch = payload.get("items") or []
             total = int(payload.get("total") or len(batch))
             items.extend(
@@ -318,15 +380,7 @@ def _fetch(cnpj: str) -> dict[str, Any]:
                 break
             page += 1
             time.sleep(1)
-    contracts = [_normalize(item) for item in items]
-    today = date.today()
-    result = {
-        **_aggregate(contracts, today),
-        "contratos_detalhe": contracts,
-        "fonte": "PNCP",
-        "consultado_em": datetime.now(timezone.utc).isoformat(),
-    }
-    return result
+    return _result([_normalize(item) for item in items])
 
 
 def _associar_contrato_cedido(operation_id: str) -> dict[str, Any]:

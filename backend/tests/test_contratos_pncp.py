@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from app.workers.tasks import contratos_pncp as pncp
+from app.workers.tasks.contratos_pncp import detectar_dedicacao_exclusiva
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pncp_46276066000100.json"
@@ -120,6 +121,55 @@ def test_source_failure_exhausts_retries(monkeypatch):
 
     with pytest.raises(httpx.TimeoutException):
         pncp._fetch("46276066000100")
+
+
+def test_paginacao_falha_depois_do_cedido_retorna_carteira_parcial(monkeypatch):
+    first = fixture_payload()
+    first["items"] = [first["items"][0]]
+    first["total"] = 21
+    contract = first["items"][0]
+    # _page faz três tentativas antes de entregar a falha da segunda página.
+    client = FakeClient(
+        [response(200, first)] + [httpx.TimeoutException("fora")] * 3
+    )
+    monkeypatch.setattr(pncp.httpx, "Client", lambda **_: client)
+    monkeypatch.setattr(pncp.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        pncp,
+        "_operation_for_cedido",
+        lambda _operation_id: {
+            "contrato_id": (
+                f"{contract['numero_contrato_empenho']}{contract['ano']}"
+            ),
+            "valor_global_contrato": contract["valor_global"],
+        },
+    )
+
+    result = pncp._fetch("46276066000100", operation_id="op-1")
+
+    assert result["parcial"] is True
+    assert result["paginas_lidas"] == 1
+    assert result["erro_paginacao"] == "fora"
+    assert result["n_contratos"] == 1
+
+
+def test_paginacao_falha_sem_cedido_continua_falha(monkeypatch):
+    first = fixture_payload()
+    first["items"] = [first["items"][0]]
+    first["total"] = 21
+    client = FakeClient(
+        [response(200, first)] + [httpx.TimeoutException("fora")] * 3
+    )
+    monkeypatch.setattr(pncp.httpx, "Client", lambda **_: client)
+    monkeypatch.setattr(pncp.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        pncp,
+        "_operation_for_cedido",
+        lambda _operation_id: {"contrato_id": "999992026"},
+    )
+
+    with pytest.raises(httpx.TimeoutException, match="fora"):
+        pncp._fetch("46276066000100", operation_id="op-1")
 
 
 def test_matches_contrato_cedido_por_numero_ano_e_desempata_por_valor():
@@ -338,9 +388,6 @@ def test_run_cria_snapshot_ausente_e_nao_associa_quando_falha(monkeypatch):
         "component": "contratos_pncp",
         "status": "pending",
     }]
-from app.workers.tasks.contratos_pncp import detectar_dedicacao_exclusiva
-
-
 def test_dedicacao_exclusiva_respeita_negacao_e_ambiguidade():
     assert detectar_dedicacao_exclusiva("SEM REGIME DE DEDICAÇÃO EXCLUSIVA DE MÃO DE OBRA") is False
     assert detectar_dedicacao_exclusiva("EM REGIME DE DEDICAÇÃO EXCLUSIVA DE MÃO DE OBRA") is True
