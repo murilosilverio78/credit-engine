@@ -27,6 +27,7 @@ import {
   createOverride,
   getComponents,
   getOperation,
+  recollectOperation,
   getOperationOverrides,
   getOperationUploads,
   removeCertificateUpload,
@@ -1367,6 +1368,10 @@ export default function OperationDetailPage() {
         ? 5_000
         : false,
   });
+  const recollectMutation = useMutation({
+    mutationFn: () => recollectOperation(operationId),
+    onSuccess: () => operationQuery.refetch(),
+  });
   const operation = operationQuery.data;
   const uploads = uploadsQuery.data ?? [];
   const pipeline = useMemo(
@@ -1460,6 +1465,16 @@ export default function OperationDetailPage() {
         onRefresh={operationQuery.refetch}
         uploads={uploads}
       />
+      {operation.pendencia_coleta ? (
+        <button
+          className="fixed bottom-5 right-5 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
+          disabled={recollectMutation.isPending}
+          onClick={() => recollectMutation.mutate()}
+          type="button"
+        >
+          {recollectMutation.isPending ? "Recoletando…" : "Recoletar"}
+        </button>
+      ) : null}
     </div>
   );
 }

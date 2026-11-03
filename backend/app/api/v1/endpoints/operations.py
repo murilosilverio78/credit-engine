@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request,
 from pydantic import BaseModel, field_validator
 from typing import Literal, Optional
 from datetime import date, datetime, timedelta, timezone
+import asyncio
 import re
 
 from app.core.auth import get_current_user
@@ -464,6 +465,82 @@ async def get_operation(operation_id: str):
         raise HTTPException(status_code=404, detail="Operação não encontrada")
 
     return operation
+
+
+@router.post("/{operation_id}/recoletar")
+async def recoletar_operacao(
+    operation_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Re-executes only incomplete phase-two components without using cache."""
+    role = current_user.get("role", "")
+    if role not in {"analista", "gerente", "diretor", "comite"}:
+        raise HTTPException(status_code=403, detail="Alçada de analista ou superior exigida")
+    operation = _operation_snapshot(operation_id)
+    if operation.get("status") in {"processing", "running"}:
+        raise HTTPException(status_code=409, detail="Análise já está em processamento")
+    components = (
+        "contratos_pncp", "contratos_comprasnet", "pagamentos_portal",
+        "recursos_recebidos", "brasil_api",
+    )
+    rows = (
+        supabase.table("component_snapshots")
+        .select("component,status")
+        .eq("operation_id", operation_id)
+        .in_("component", list(components))
+        .execute()
+        .data
+        or []
+    )
+    statuses = {str(row.get("component")): row.get("status") for row in rows}
+    from app.workers.tasks.brasil_api import run_brasil_api
+    from app.workers.tasks.contratos_comprasnet import run_contratos_comprasnet
+    from app.workers.tasks.contratos_pncp import run_contratos_pncp
+    from app.workers.tasks.pagamentos_portal import run_pagamentos_portal
+    from app.workers.tasks.recursos_recebidos import run_recursos_recebidos
+
+    runners = {
+        "contratos_pncp": run_contratos_pncp,
+        "contratos_comprasnet": run_contratos_comprasnet,
+        "pagamentos_portal": run_pagamentos_portal,
+        "recursos_recebidos": run_recursos_recebidos,
+        "brasil_api": run_brasil_api,
+    }
+    results = []
+    for component in components:
+        if statuses.get(component) == "completed":
+            continue
+        try:
+            result = await asyncio.to_thread(
+                runners[component], operation_id, use_cache=False
+            )
+        except Exception as exc:
+            result = {"component": component, "status": "failed", "erro": str(exc)}
+        results.append({"component": component, **(result or {})})
+    reavaliacao = None
+    if operation.get("cotacao_id"):
+        from app.services.funil_qualificacao_service import (
+            atualizar_estagio_pos_fase2,
+            decidir_status_pos_fase2,
+        )
+        stage, reasons = await asyncio.to_thread(
+            atualizar_estagio_pos_fase2, str(operation["cotacao_id"]), operation_id
+        )
+        outcome = decidir_status_pos_fase2(reasons)
+        supabase.table("operations").update({
+            "status": outcome["status"], "pendencia_coleta": outcome["pendencia_coleta"],
+        }).eq("id", operation_id).execute()
+        reavaliacao = {"estagio": stage, **outcome}
+    audit.log(
+        operation_id=operation_id,
+        action="operation_recollection_requested",
+        actor_id=current_user.get("id"),
+        actor_type=role,
+        ip_address=request.client.host if request.client else None,
+        payload={"components": [item["component"] for item in results]},
+    )
+    return {"operation_id": operation_id, "componentes": results, "reavaliacao_funil": reavaliacao}
 
 
 @router.post("/{operation_id}/reprocessar-score", status_code=202)

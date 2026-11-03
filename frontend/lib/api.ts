@@ -191,6 +191,12 @@ export function getOperation(operationId: string) {
   return request<OperationDetails>(`/api/v1/operations/${operationId}`);
 }
 
+export function recollectOperation(operationId: string) {
+  return request(`/api/v1/operations/${encodeURIComponent(operationId)}/recoletar`, {
+    method: "POST",
+  });
+}
+
 export type AssignedContractView = Record<string, unknown>;
 
 export function getOperationAssignedContract(operationId: string) {

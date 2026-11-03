@@ -98,6 +98,7 @@ export interface Operation {
   cotacao_id?: string | null;
   estagio?: FunilEstagio | null;
   estagio_motivo?: string | null;
+  pendencia_coleta?: boolean;
   n_documentos?: number | null;
   tipos_documento?: string[] | null;
   pricing_skipped_reason?: string | null;
