@@ -17,7 +17,7 @@ from app.workers.base import BaseComponentTask
 
 _task = BaseComponentTask()
 logger = structlog.get_logger()
-RETRIES = (2, 6)
+RETRIES = (3, 10, 20)
 DEDICACAO = re.compile(
     r"dedicacao exclusiva(?: de mao de obra)?|cessao de mao de obra|regime de dedicacao exclusiva"
 )
@@ -311,6 +311,7 @@ def _result(contracts: list[dict[str, Any]], *, partial: bool = False, pages_rea
             {
                 "parcial": True,
                 "paginas_lidas": pages_read,
+                "pagina_falhou": pages_read + 1,
                 "erro_paginacao": error,
             }
         )
@@ -355,7 +356,7 @@ def _fetch(cnpj: str, *, operation_id: str | None = None) -> dict[str, Any]:
                 if page > 1 and cedido:
                     response = getattr(exc, "response", None)
                     logger.warning(
-                        "pncp.pagination_partial",
+                        "pncp.pagina_falhou",
                         cnpj=cnpj,
                         pagina=page,
                         status=getattr(response, "status_code", None),

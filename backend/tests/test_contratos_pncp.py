@@ -100,7 +100,7 @@ def test_paginated_search_retries_5xx_and_obeys_pages(monkeypatch):
 
     assert result["n_contratos"] == 2
     assert [call[1]["pagina"] for call in client.calls] == [1, 1, 2]
-    assert pauses == [2, 1]
+    assert pauses == [3, 1]
 
 
 def test_empty_response_is_completed_zero_result(monkeypatch):
@@ -115,7 +115,7 @@ def test_empty_response_is_completed_zero_result(monkeypatch):
 
 
 def test_source_failure_exhausts_retries(monkeypatch):
-    client = FakeClient([httpx.TimeoutException("indisponivel")] * 3)
+    client = FakeClient([httpx.TimeoutException("indisponivel")] * 4)
     monkeypatch.setattr(pncp.httpx, "Client", lambda **_: client)
     monkeypatch.setattr(pncp.time, "sleep", lambda _: None)
 
@@ -130,7 +130,7 @@ def test_paginacao_falha_depois_do_cedido_retorna_carteira_parcial(monkeypatch):
     contract = first["items"][0]
     # _page faz três tentativas antes de entregar a falha da segunda página.
     client = FakeClient(
-        [response(200, first)] + [httpx.TimeoutException("fora")] * 3
+        [response(200, first)] + [httpx.TimeoutException("fora")] * 4
     )
     monkeypatch.setattr(pncp.httpx, "Client", lambda **_: client)
     monkeypatch.setattr(pncp.time, "sleep", lambda _: None)
@@ -149,6 +149,7 @@ def test_paginacao_falha_depois_do_cedido_retorna_carteira_parcial(monkeypatch):
 
     assert result["parcial"] is True
     assert result["paginas_lidas"] == 1
+    assert result["pagina_falhou"] == 2
     assert result["erro_paginacao"] == "fora"
     assert result["n_contratos"] == 1
 
@@ -158,7 +159,7 @@ def test_paginacao_falha_sem_cedido_continua_falha(monkeypatch):
     first["items"] = [first["items"][0]]
     first["total"] = 21
     client = FakeClient(
-        [response(200, first)] + [httpx.TimeoutException("fora")] * 3
+        [response(200, first)] + [httpx.TimeoutException("fora")] * 4
     )
     monkeypatch.setattr(pncp.httpx, "Client", lambda **_: client)
     monkeypatch.setattr(pncp.time, "sleep", lambda _: None)
