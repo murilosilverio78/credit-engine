@@ -251,7 +251,7 @@ function capacityTerm(operation: OperationDetails) {
   const source = String(operation.contrato_vigencia_fim ?? "").slice(0, 10) === horizon.slice(0, 10)
     ? "fim do contrato"
     : "aniversário";
-  return `${installments.toLocaleString("pt-BR")} meses — até ${formatDate(horizon)} (${source})`;
+  return `${installments.toLocaleString("pt-BR")} meses, até ${formatPureDate(horizon)} (${source})`;
 }
 
 function operationTerm(operation: OperationDetails) {
@@ -302,6 +302,11 @@ function formatDate(value: unknown) {
   }
 
   return new Intl.DateTimeFormat("pt-BR").format(date);
+}
+
+function formatPureDate(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
 }
 
 function formatDateTime(value: Date) {

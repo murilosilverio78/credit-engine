@@ -118,6 +118,11 @@ function formatDate(date: string) {
     .replace(",", "");
 }
 
+function formatPureDate(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
+}
+
 function formatElapsed(createdAt: string, now: number) {
   const elapsedSeconds = Math.max(
     0,
@@ -170,7 +175,7 @@ function capacityTerm(operation: OperationDetails) {
   const source = String(operation.contrato_vigencia_fim ?? "").slice(0, 10) === horizon.slice(0, 10)
     ? "fim do contrato"
     : "aniversário";
-  return `${installments.toLocaleString("pt-BR")} meses — até ${formatDate(horizon)} (${source})`;
+  return `${installments.toLocaleString("pt-BR")} meses, até ${formatPureDate(horizon)} (${source})`;
 }
 
 function proposalTerm(operation: OperationDetails) {
