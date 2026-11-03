@@ -100,6 +100,7 @@ type CreateOperationField = keyof AnalysisFormValues;
 
 type CreateOperationErrorResult = {
   formMessage: string | null;
+  existingOperationId?: string;
   fieldErrors: Array<{ field: CreateOperationField; message: string }>;
 };
 
@@ -128,6 +129,20 @@ function parseCreateOperationError(
         ? candidate.message
         : null;
 
+    if (status === 409 && message) {
+      try {
+        const body = JSON.parse(message) as { detail?: { code?: string; operation_id?: string; message?: string } };
+        if (body.detail?.code === "COTACAO_JA_EM_ANALISE") {
+          return {
+            formMessage: body.detail.message || "Já existe análise para esta cotação",
+            existingOperationId: body.detail.operation_id,
+            fieldErrors: [],
+          };
+        }
+      } catch {
+        // A mensagem genérica abaixo preserva o tratamento de erro atual.
+      }
+    }
     if (status !== 422) {
       return {
         formMessage:
@@ -277,6 +292,7 @@ function FieldError({ message }: { message?: string }) {
 export default function NewOperationPage() {
   const router = useRouter();
   const [formMessage, setFormMessage] = useState<string | null>(null);
+  const [existingOperationId, setExistingOperationId] = useState<string | null>(null);
   const {
     clearErrors,
     formState: { errors },
@@ -317,6 +333,7 @@ export default function NewOperationPage() {
     onError: (error) => {
       const parsed = parseCreateOperationError(error);
       setFormMessage(parsed.formMessage);
+      setExistingOperationId(parsed.existingOperationId || null);
       parsed.fieldErrors.forEach(({ field, message }) => {
         setError(field, { message });
       });
@@ -338,6 +355,7 @@ export default function NewOperationPage() {
   function submit(values: AnalysisFormValues) {
     clearErrors();
     setFormMessage(null);
+    setExistingOperationId(null);
 
     const payload: PropostaInput = {
       cnpj: digitsOnly(values.cnpj),
@@ -457,7 +475,7 @@ export default function NewOperationPage() {
                   className="mb-1.5 block text-xs font-medium text-muted-foreground"
                   htmlFor="contrato_saldo"
                 >
-                  Saldo do contrato (R$)
+                  Saldo vincendo do contrato (sem o teto de 70%)
                 </label>
                 <input
                   {...register("contrato_saldo")}
@@ -475,7 +493,7 @@ export default function NewOperationPage() {
                   placeholder="R$ 0,00"
                 />
                 <p className="mt-1 text-[11px] text-muted-foreground">
-                  Opcional — usado para calcular o limite máximo (70% do saldo)
+                  Opcional — informe o saldo bruto do contrato, antes do teto operacional.
                 </p>
                 <FieldError message={errors.contrato_saldo?.message} />
               </div>
@@ -564,7 +582,12 @@ export default function NewOperationPage() {
                 data-testid="op-form-error"
                 role="alert"
               >
-                {formMessage}
+                {formMessage}{" "}
+                {existingOperationId ? (
+                  <Link className="underline" href={`/operations/${existingOperationId}`}>
+                    Abrir análise existente
+                  </Link>
+                ) : null}
               </p>
             ) : null}
             {createOperationMutation.isSuccess ? (

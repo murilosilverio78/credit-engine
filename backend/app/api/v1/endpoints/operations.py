@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, Response
 from pydantic import BaseModel, field_validator
 from typing import Literal, Optional
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import re
 
 from app.core.auth import get_current_user
@@ -265,6 +265,28 @@ def _check_alcada(operation: dict, alcada: dict):
         )
 
 
+def _cotacao_ativa_por_cnpj(cnpj: str) -> dict | None:
+    """Returns the newest unexpired persisted Broadfactor quote for a manual analysis."""
+    rows = (
+        supabase.table("cotacoes_broadfactor")
+        .select("cotacao_id,cnpj,saldo_vincendo,margem_disponivel,data_expiracao,data_cotacao")
+        .eq("cnpj", cnpj)
+        .execute()
+        .data
+        or []
+    )
+    today = date.today()
+    active = []
+    for quote in rows:
+        try:
+            expires = date.fromisoformat(str(quote.get("data_expiracao") or "")[:10])
+        except ValueError:
+            continue
+        if expires >= today:
+            active.append(quote)
+    return max(active, key=lambda quote: str(quote.get("data_cotacao") or ""), default=None)
+
+
 @router.post("/", status_code=201)
 async def create_operation(payload: PropostaInput, background_tasks: BackgroundTasks):
     if is_shutting_down():
@@ -278,20 +300,50 @@ async def create_operation(payload: PropostaInput, background_tasks: BackgroundT
     from app.services.operation_service import OperationService
     from app.workers.tasks.orchestrator import start_analysis
 
+    quote = None
+    cotacao_id = payload.cotacao_id
+    saldo_digitado = payload.contrato_saldo
+    margem_disponivel = payload.margem_disponivel
+    contrato_saldo = payload.contrato_saldo
+    if payload.origem_dados == "MANUAL" and not cotacao_id:
+        quote = _cotacao_ativa_por_cnpj(payload.cnpj)
+        if quote:
+            cotacao_id = str(quote["cotacao_id"])
+            existing = (
+                supabase.table("operations")
+                .select("id")
+                .eq("cotacao_id", cotacao_id)
+                .maybe_single()
+                .execute()
+                .data
+                or {}
+            )
+            if existing.get("id"):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "COTACAO_JA_EM_ANALISE",
+                        "operation_id": existing["id"],
+                        "message": "Já existe análise para esta cotação",
+                    },
+                )
+            contrato_saldo = quote.get("saldo_vincendo")
+            margem_disponivel = quote.get("margem_disponivel")
+
     eligibility = check_eligibility(
         cnpj=payload.cnpj,
         valor_solicitado=payload.valor_solicitado,
-        contrato_saldo=payload.contrato_saldo,
-        margem_disponivel=payload.margem_disponivel,
+        contrato_saldo=contrato_saldo,
+        margem_disponivel=margem_disponivel,
         prazo_dias=payload.prazo_dias,
         prazo_vincendo_meses=payload.prazo_vincendo_meses,
     )
     if not eligibility.elegivel:
         record_ingestion_discard(
-            cotacao_id=payload.cotacao_id,
+            cotacao_id=cotacao_id,
             cnpj=payload.cnpj,
             valor_solicitado=payload.valor_solicitado,
-            margem_disponivel=payload.margem_disponivel,
+            margem_disponivel=margem_disponivel,
             valor_enquadrado=eligibility.valor_enquadrado,
             motivo=eligibility.motivo or "Falha de elegibilidade",
             estagio="elegibilidade",
@@ -309,14 +361,14 @@ async def create_operation(payload: PropostaInput, background_tasks: BackgroundT
     operation = await svc.create(
         cnpj=payload.cnpj,
         origem_dados=payload.origem_dados,
-        cotacao_id=payload.cotacao_id,
+        cotacao_id=cotacao_id,
         valor_solicitado=payload.valor_solicitado,
         valor_enquadrado=eligibility.valor_enquadrado,
         saldo_vincendo=eligibility.saldo_vincendo,
         contrato_id=payload.contrato_id,
         uasg=payload.uasg,
-        contrato_saldo=payload.contrato_saldo,
-        margem_disponivel=payload.margem_disponivel,
+        contrato_saldo=contrato_saldo,
+        margem_disponivel=margem_disponivel,
         prazo_dias=payload.prazo_dias,
         prazo_vincendo_meses=payload.prazo_vincendo_meses,
         prazo_final_meses=eligibility.prazo_final_meses,
@@ -325,6 +377,18 @@ async def create_operation(payload: PropostaInput, background_tasks: BackgroundT
         ),
         source=payload.source,
     )
+
+    if quote and saldo_digitado is not None:
+        audit.log(
+            operation_id=str(operation["id"]),
+            action="manual_operation_quote_linked",
+            payload={
+                "cotacao_id": cotacao_id,
+                "saldo_digitado": saldo_digitado,
+                "saldo_vincendo_cotacao": contrato_saldo,
+                "margem_disponivel_cotacao": margem_disponivel,
+            },
+        )
 
     background_tasks.add_task(start_analysis, str(operation["id"]))
 
