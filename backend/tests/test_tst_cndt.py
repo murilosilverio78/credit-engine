@@ -109,3 +109,14 @@ def test_captcha_wait_polls_locators_without_script_evaluation(tmp_path):
     assert client._wait_for_captcha_image(FakePage(["data:image/png;base64,AAA", "data:image/png;base64,BBB"]), "data:image/png;base64,AAA")
     short = CndtClient(CndtSettings(output_dir=tmp_path, portal_timeout_ms=300))
     assert not short._wait_for_captcha_image(FakePage(["data:image/png;base64,AAA"]), "data:image/png;base64,AAA")
+
+
+def test_debug_diagnostics_are_off_by_default_and_mask_long_digit_runs(tmp_path):
+    from app.integrations.tst_cndt.client import CndtClient, CndtSettings
+
+    quiet = CndtClient(CndtSettings(output_dir=tmp_path))
+    quiet._diag("x", valor=1)
+    assert quiet.diagnostics == []
+    verbose = CndtClient(CndtSettings(output_dir=tmp_path, debug=True))
+    verbose._diag("x", amostra=verbose._mask_digits("CNPJ 04251091000199 emitido"))
+    assert verbose.diagnostics[0]["amostra"] == "CNPJ *** emitido"

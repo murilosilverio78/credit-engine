@@ -7,6 +7,7 @@ from io import BytesIO
 import logging
 import os
 from pathlib import Path
+import re
 import time
 from typing import Any
 
@@ -44,6 +45,7 @@ class CndtSettings:
     captcha_timeout_seconds: int = 120
     portal_timeout_ms: int = 30_000
     max_captcha_attempts: int = 3  # maximum external-captcha cost per run
+    debug: bool = False  # safe diagnostics only; never secrets or captcha answers
 
 
 class CndtClient:
@@ -51,6 +53,7 @@ class CndtClient:
         self.settings = settings
         self.settings.output_dir.mkdir(parents=True, exist_ok=True)
         self.guardrails = LocalGuardrails(self.settings.output_dir)
+        self.diagnostics: list[dict[str, Any]] = []
 
     def issue(self, cnpj: str) -> dict[str, Any]:
         normalized = digits(cnpj)
@@ -105,11 +108,12 @@ class CndtClient:
                             return CndtFailure(FailureCode.FORMULARIO_ALTERADO).to_dict()
                     except PlaywrightTimeoutError:
                         return CndtFailure(FailureCode.FORMULARIO_ALTERADO).to_dict()
-                    for _ in range(self.settings.max_captcha_attempts):
+                    for attempt in range(1, self.settings.max_captcha_attempts + 1):
                         self.guardrails.consume_rate_slot()
                         previous_captcha_source = page.locator("#captcha-imagem").get_attribute("src") or ""
                         captcha = self._captcha_image(page)
                         answer = self._solve_captcha(captcha, api_key)
+                        self._diag("captcha", tentativa=attempt, resolvido=bool(answer), tamanho_resposta=len(answer or ""))
                         if not answer:
                             return CndtFailure(FailureCode.CAPTCHA_NAO_RESOLVIDO).to_dict()
                         page.locator("#cpfCnpj").fill(cnpj)
@@ -118,15 +122,26 @@ class CndtClient:
                             with page.expect_response(lambda response: "/api/certidao" in response.url, timeout=self.settings.portal_timeout_ms) as pending:
                                 page.locator("#botao-emitir").click()
                         except PlaywrightTimeoutError:
+                            self._diag("resposta", tentativa=attempt, motivo="sem_resposta_de_/api/certidao_no_prazo")
                             return CndtFailure(FailureCode.PDF_NAO_GERADO).to_dict()
                         response = pending.value
                         content_type = (response.headers.get("content-type") or "").lower()
-                        if "application/pdf" in content_type:
-                            return self._save_and_parse_pdf(response.body(), cnpj, response.headers.get("content-disposition"))
+                        body = response.body()
+                        self._diag(
+                            "resposta", tentativa=attempt, status=response.status, content_type=content_type,
+                            tamanho=len(body), url=response.url.split("?")[0],
+                            amostra="pdf" if body.startswith(b"%PDF") else self._mask_digits(body[:400].decode("utf-8", "replace")),
+                        )
+                        if self.settings.debug:
+                            (self.settings.output_dir / "debug_resposta.bin").write_bytes(body)
+                        if "application/pdf" in content_type or body.startswith(b"%PDF"):
+                            return self._save_and_parse_pdf(body, cnpj, response.headers.get("content-disposition"))
                         message = self._response_message(response)
+                        self._diag("mensagem", texto=self._mask_digits(message, 200))
                         if self._is_antibot(message):
                             return CndtFailure(FailureCode.BLOQUEIO_ANTIBOT).to_dict()
                         if "captcha" not in message.lower():
+                            self._diag("decisao", motivo="resposta_nao_pdf_e_sem_mensagem_de_captcha")
                             return CndtFailure(FailureCode.PDF_NAO_GERADO).to_dict()
                         if not self._wait_for_captcha_image(page, previous_captcha_source):
                             return CndtFailure(FailureCode.FORMULARIO_ALTERADO).to_dict()
@@ -140,6 +155,14 @@ class CndtClient:
         except Exception:
             logger.exception("cndt.unexpected_failure", extra={"cnpj": mask_cnpj(cnpj)})
             return CndtFailure(FailureCode.PORTAL_INDISPONIVEL).to_dict()
+
+    def _diag(self, etapa: str, **dados: Any) -> None:
+        if self.settings.debug:
+            self.diagnostics.append({"etapa": etapa, **dados})
+
+    @staticmethod
+    def _mask_digits(text: str, limit: int = 300) -> str:
+        return re.sub(r"\d{8,}", "***", text)[:limit]
 
     def _wait_for_captcha_image(self, page: Any, previous: str | None = None) -> bool:
         """Poll the captcha ``src`` through locators.
@@ -211,6 +234,10 @@ class CndtClient:
         except Exception:
             return CndtFailure(FailureCode.PDF_NAO_GERADO).to_dict()
         parsed = parse_cndt_text(text, cnpj)
+        self._diag(
+            "pdf", paginas=len(text.split("\f")), texto_inicio=self._mask_digits(" ".join(text.split()), 300),
+            campos={key: bool(parsed.get(key)) for key in ("resultado", "cnpj_certidao", "orgao_emissor", "data_validade", "valida")},
+        )
         if not parsed.get("resultado") or not parsed.get("cnpj_certidao") or not parsed.get("orgao_emissor"):
             return CndtFailure(FailureCode.PDF_NAO_GERADO).to_dict()
         filename = self._filename(disposition, cnpj)
