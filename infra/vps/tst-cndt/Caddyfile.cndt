@@ -1,8 +1,10 @@
-# Include this block in the existing Caddyfile on the Brazilian VPS.
-# CNDT_PROXY_TOKEN comes from Caddy's own protected environment, never source.
+# Acrescente este bloco ao Caddyfile existente no VPS brasileiro.
+# A autenticação (header X-Proxy-Token, comparação em tempo constante) é feita
+# pelo próprio serviço, que responde 401 sem token válido; por isso o Caddy não
+# precisa conhecer o segredo.
 certidoes.murilosilverio.ia.br {
-    @sem_token not header X-Proxy-Token {$CNDT_PROXY_TOKEN}
-    respond @sem_token "unauthorized" 401
-
+    request_body {
+        max_size 4KB
+    }
     reverse_proxy 127.0.0.1:8113
 }

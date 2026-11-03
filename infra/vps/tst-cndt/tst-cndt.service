@@ -9,6 +9,8 @@ User=tstcndt
 Group=tstcndt
 WorkingDirectory=/opt/credit-engine/backend
 EnvironmentFile=/etc/tst-cndt.env
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+Environment=HOME=/var/lib/tst-cndt
 ExecStart=/opt/tst-cndt-venv/bin/uvicorn app.integrations.tst_cndt.vps_app:app --host 127.0.0.1 --port 8113 --workers 1 --no-access-log
 Restart=on-failure
 RestartSec=5
