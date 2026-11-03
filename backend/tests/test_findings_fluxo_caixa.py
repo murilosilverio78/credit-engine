@@ -162,6 +162,29 @@ def test_commitments_without_issue_dates_use_all_rows():
     assert findings["saldo_empenho_ano"].valor["criterio_ano"] == "SEM_DATA_EMISSAO"
 
 
+def test_inconsistent_comprasnet_commitments_do_not_emit_insufficiency():
+    commitments = [
+        {"numero": "2026NE000214", "empenhado": "0", "liquidado": "0", "pago": "10.000,00", "aliquidar": "-10.000,00", "data_emissao": "2026-01-05"},
+        {"numero": "2026NE000230", "empenhado": "0", "liquidado": "0", "pago": "13.171,37", "aliquidar": "-13.171,37", "data_emissao": "2026-02-05"},
+    ]
+    findings = _by_code(emit_fluxo_caixa(
+        _snapshots([_invoice(month) for month in range(4, 10)], commitments=commitments),
+        fingerprint="f", operation=_operation(),
+    ))
+    assert findings["saldo_empenho_ano"].estado == Estado.NAO_VERIFICADO
+    assert findings["saldo_empenho_ano"].pendencia["motivo"] == "empenho incoerente no Comprasnet"
+    assert "empenho_insuficiente" not in findings
+
+
+def test_coherent_commitment_uses_liquidated_amount_once():
+    findings = _by_code(emit_fluxo_caixa(
+        _snapshots([_invoice(month) for month in range(4, 10)], commitments=[
+            {"empenhado": "100", "liquidado": "60", "pago": "60", "aliquidar": "40", "data_emissao": "2026-01-05"},
+        ]), fingerprint="f", operation=_operation(),
+    ))
+    assert findings["saldo_empenho_ano"].valor["saldo"] == 40
+
+
 def test_installment_uses_priced_value_not_requested_value():
     operation = _operation() | {
         "valor_solicitado": 599_000, "limite_aprovado": 52_000,

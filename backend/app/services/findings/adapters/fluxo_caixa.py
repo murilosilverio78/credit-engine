@@ -693,18 +693,24 @@ def emit_fluxo_caixa(
         if has_commitment_dates else all_commitments
     )
     def commitment_inconsistent(item: dict[str, Any]) -> bool:
-        to_settle = _number(item.get("a_liquidar"))
+        raw_to_settle = item.get("aliquidar", item.get("a_liquidar"))
+        to_settle = _number(raw_to_settle) if raw_to_settle not in (None, "") else None
         committed = _number(item.get("empenhado")) or 0.0
         settled = _number(item.get("liquidado")) or 0.0
         paid = _number(item.get("pago")) or 0.0
-        return (to_settle is not None and to_settle < 0) or committed < settled + paid
+        return (
+            (to_settle is not None and to_settle < 0)
+            or committed < settled
+            or committed < paid
+            or (committed == 0 and paid > 0)
+        )
 
-    inconsistent_commitments = source_portal and any(
+    inconsistent_commitments = any(
         commitment_inconsistent(item) for item in commitments
     )
     saldo = sum(
         (_number(item.get("empenhado")) or 0.0)
-        - ((_number(item.get("liquidado")) or 0.0) + (_number(item.get("pago")) or 0.0))
+        - (_number(item.get("liquidado")) or 0.0)
         for item in commitments
     )
     factor, factor_source, installment, installment_source = _coverage_inputs(operation)
@@ -734,7 +740,7 @@ def emit_fluxo_caixa(
     if not has_commitment_dates:
         balance_value["criterio_ano"] = "SEM_DATA_EMISSAO"
     result.append(
-        _unverified("saldo_empenho_ano", "empenhos_detalhe", fingerprint, "empenho com saldo negativo no Comprasnet")
+        _unverified("saldo_empenho_ano", "empenhos_detalhe", fingerprint, "empenho incoerente no Comprasnet")
         if inconsistent_commitments else finding("saldo_empenho_ano", Escopo.OPERACAO, balance_value, component="contratos_comprasnet", path="empenhos_detalhe", fingerprint=fingerprint)
     )
     if monthly_gross_basis and saldo < need and not inconsistent_commitments:
