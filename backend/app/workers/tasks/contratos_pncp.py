@@ -57,8 +57,11 @@ def detectar_dedicacao_exclusiva(objeto: Any) -> bool | None:
     become a positive signal in capacity calculations.
     """
     text = _plain(objeto)
-    positive = bool(DEDICACAO.search(text))
     negative = bool(NEGACAO_DEDICACAO.search(text))
+    # A positive phrase embedded in "sem dedicacao exclusiva" is part of the
+    # negation, not contradictory evidence. Look for a positive mention in
+    # the remaining text to identify an actually ambiguous object.
+    positive = bool(DEDICACAO.search(NEGACAO_DEDICACAO.sub("", text)))
     if positive and negative:
         return None
     if negative:
