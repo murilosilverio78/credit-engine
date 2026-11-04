@@ -43,6 +43,53 @@ def _parse_json_response(text: str) -> dict:
 
 
 class UploadService:
+    OPEN_TASK_STATUSES = ("pending", "waiting_upload")
+
+    def _set_task_terminal_state(
+        self,
+        task_ids: list[str],
+        *,
+        status: str,
+        completed_at: str,
+        error_message: Optional[str],
+        clear_file_content: bool,
+        expected_statuses: tuple[str, ...] | None = None,
+    ) -> int:
+        if not task_ids:
+            return 0
+        payload = {
+            "status": status,
+            "completed_at": completed_at,
+            "error_message": error_message,
+        }
+        if clear_file_content:
+            payload["file_content"] = None
+        query = supabase.table("upload_tasks").update(payload).in_("id", task_ids)
+        if expected_statuses:
+            query = query.in_("status", list(expected_statuses))
+        result = query.execute()
+        return len(result.data or [])
+
+    def satisfy_open_tasks(self, operation_id: str, document_type: str) -> int:
+        """Close manual-upload tasks satisfied by an automatic certificate."""
+        result = (
+            supabase.table("upload_tasks")
+            .select("id")
+            .eq("operation_id", operation_id)
+            .eq("document_type", document_type)
+            .in_("status", list(self.OPEN_TASK_STATUSES))
+            .execute()
+        )
+        task_ids = [str(row["id"]) for row in (result.data or []) if row.get("id")]
+        return self._set_task_terminal_state(
+            task_ids,
+            status="completed",
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            error_message=None,
+            clear_file_content=True,
+            expected_statuses=self.OPEN_TASK_STATUSES,
+        )
+
     async def list_pending(self, operation_id: Optional[str] = None) -> list[dict]:
         """List the pending queue or full upload progress for one operation."""
         fields = (
@@ -217,14 +264,13 @@ class UploadService:
                 error=str(exc),
             )
 
-        task_update = {
-            "status": "failed" if snapshot_status == "failed" else "completed",
-            "completed_at": completed_at,
-            "error_message": error_message,
-        }
-        if extraction_succeeded:
-            task_update["file_content"] = None
-        supabase.table("upload_tasks").update(task_update).eq("id", task_id).execute()
+        self._set_task_terminal_state(
+            [task_id],
+            status="failed" if snapshot_status == "failed" else "completed",
+            completed_at=completed_at,
+            error_message=error_message,
+            clear_file_content=extraction_succeeded,
+        )
         if extraction_succeeded:
             logger.info("upload.inline_cleared", operation_id=operation_id, task_id=task_id)
 

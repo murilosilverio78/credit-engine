@@ -61,6 +61,9 @@ def _iso(value: Any) -> str | None:
 class TstCndtProxyClient:
     """Small client with a bounded request and no sensitive logging."""
 
+    def __init__(self, *, timeout_seconds: float | None = None):
+        self.timeout_seconds = timeout_seconds
+
     def issue(self, cnpj: str) -> tuple[dict[str, Any], bytes | None]:
         if not settings.CNDT_PROXY_URL or not settings.CNDT_PROXY_TOKEN:
             return {"status": "falha", "erro": "PORTAL_INDISPONIVEL", "fonte": "tst"}, None
@@ -69,7 +72,14 @@ class TstCndtProxyClient:
                 settings.CNDT_PROXY_URL.rstrip("/") + "/v1/cndt/emitir",
                 headers={"X-Proxy-Token": settings.CNDT_PROXY_TOKEN},
                 json={"cnpj": cnpj},
-                timeout=max(float(settings.CNDT_PROXY_TIMEOUT_SECONDS), 1.0),
+                timeout=max(
+                    float(
+                        self.timeout_seconds
+                        if self.timeout_seconds is not None
+                        else settings.CNDT_PROXY_TIMEOUT_SECONDS
+                    ),
+                    1.0,
+                ),
                 follow_redirects=False,
             )
             if response.status_code != 200:

@@ -1,4 +1,5 @@
 import asyncio
+from datetime import date, datetime
 import secrets
 import time
 from typing import Annotated
@@ -70,6 +71,16 @@ class RecalcularCapacidadeRequest(BaseModel):
 
 class CapturarDocumentosRequest(BaseModel):
     cotacao_ids: list[str] | None = None
+
+
+class CndtCollectRequest(BaseModel):
+    timeout_seconds: float = Field(default=90, ge=1, le=120)
+
+
+class CndtCollectActiveRequest(BaseModel):
+    limite: int = Field(default=3, ge=1, le=10)
+    dry_run: bool = True
+    operation_ids: list[UUID] | None = None
 
 
 def verify_internal_token(
@@ -156,6 +167,221 @@ async def trigger_operation_watchdog(
     _: None = Depends(verify_internal_token),
 ):
     return await asyncio.to_thread(run_operation_watchdog)
+
+
+def _cndt_valid_until(value: object) -> date | None:
+    text = str(value or "").strip()
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
+def _select_active_cndt_operations(
+    database,
+    operation_ids: list[str] | None = None,
+) -> list[str]:
+    query = (
+        database.table("cotacoes_broadfactor")
+        .select("operation_id")
+        .eq("ambiente", "PRODUCAO")
+        .neq("estagio", "ENCERRADA")
+    )
+    if operation_ids is not None:
+        query = query.in_("operation_id", operation_ids)
+    rows = query.execute().data or []
+    active_ids = list(
+        dict.fromkeys(
+            str(row["operation_id"])
+            for row in rows
+            if row.get("operation_id")
+        )
+    )
+    if not active_ids:
+        return []
+
+    snapshots = (
+        database.table("component_snapshots")
+        .select("operation_id,status,parsed_result")
+        .in_("operation_id", active_ids)
+        .eq("component", "cndt_tst")
+        .execute()
+        .data
+        or []
+    )
+    snapshots_by_operation = {
+        str(row["operation_id"]): row
+        for row in snapshots
+        if row.get("operation_id")
+    }
+    today = date.today()
+    return [
+        operation_id
+        for operation_id in active_ids
+        if not (
+            snapshots_by_operation.get(operation_id, {}).get("status") == "completed"
+            and isinstance(
+                snapshots_by_operation.get(operation_id, {}).get("parsed_result"),
+                dict,
+            )
+            and (
+                _cndt_valid_until(
+                    snapshots_by_operation[operation_id]["parsed_result"].get(
+                        "data_validade"
+                    )
+                )
+                or date.min
+            )
+            >= today
+        )
+    ]
+
+
+def _collect_cndt_internal(
+    operation_id: str,
+    *,
+    database,
+    timeout_seconds: float | None = None,
+) -> dict:
+    try:
+        from app.services.audit_service import AuditService
+        from app.services.tst_cndt_service import (
+            TstCndtProxyClient,
+            collect_cndt_for_operation,
+        )
+        from app.services.upload_service import UploadService
+
+        proxy = (
+            TstCndtProxyClient(timeout_seconds=timeout_seconds)
+            if timeout_seconds is not None
+            else None
+        )
+        result = collect_cndt_for_operation(
+            operation_id,
+            database=database,
+            proxy=proxy,
+        )
+        if result.obtained:
+            satisfied = UploadService().satisfy_open_tasks(operation_id, "cndt_tst")
+            AuditService().log(
+                operation_id=operation_id,
+                action="component_completed",
+                payload={
+                    "component": "cndt_tst",
+                    "contexto": "coleta_automatica_interna",
+                    "fonte": result.source,
+                    "upload_tasks_satisfeitas": satisfied,
+                },
+            )
+    except Exception as exc:
+        logger = __import__("structlog").get_logger()
+        logger.warning(
+            "internal.cndt_collection_failed",
+            operation_id=operation_id,
+            error_type=exc.__class__.__name__,
+        )
+        return {
+            "operation_id": operation_id,
+            "obtida": False,
+            "fonte": "tst",
+            "erro": "ERRO_INTERNO",
+        }
+    return {
+        "operation_id": operation_id,
+        "obtida": result.obtained,
+        "fonte": result.source,
+        "erro": result.error,
+    }
+
+
+@router.post("/operations/{operation_id}/certidoes/cndt/coletar")
+async def collect_operation_cndt(
+    operation_id: UUID,
+    request: CndtCollectRequest | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    from app.core.database import supabase
+
+    timeout_seconds = request.timeout_seconds if request else 90
+    result = await asyncio.to_thread(
+        _collect_cndt_internal,
+        str(operation_id),
+        database=supabase,
+        timeout_seconds=timeout_seconds,
+    )
+    return {**result, "proxima_acao": "Reprocessar score"}
+
+
+@router.post("/certidoes/cndt/coletar-ativas")
+async def collect_active_cndts(
+    request: CndtCollectActiveRequest | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    from app.core.database import supabase
+
+    request = request or CndtCollectActiveRequest()
+    requested_ids = (
+        [str(item) for item in request.operation_ids]
+        if request.operation_ids is not None
+        else None
+    )
+    try:
+        candidates = await asyncio.to_thread(
+            _select_active_cndt_operations,
+            supabase,
+            requested_ids,
+        )
+    except Exception as exc:
+        logger = __import__("structlog").get_logger()
+        logger.warning(
+            "internal.cndt_active_selection_failed",
+            error_type=exc.__class__.__name__,
+        )
+        return {
+            "processadas": 0,
+            "restantes": [],
+            "operacoes": [],
+            "proxima_acao": "Reprocessar score",
+        }
+
+    selected = candidates[: request.limite]
+    remaining = candidates[request.limite :]
+    if request.dry_run:
+        return {
+            "processadas": 0,
+            "restantes": remaining,
+            "operacoes": [
+                {
+                    "operation_id": operation_id,
+                    "obtida": False,
+                    "fonte": None,
+                    "erro": None,
+                }
+                for operation_id in selected
+            ],
+            "proxima_acao": "Reprocessar score",
+        }
+
+    started = _monotonic()
+    operations: list[dict] = []
+    for index, operation_id in enumerate(selected):
+        if _monotonic() - started >= 45:
+            remaining = selected[index:] + remaining
+            break
+        result = await asyncio.to_thread(
+            _collect_cndt_internal,
+            operation_id,
+            database=supabase,
+        )
+        operations.append(result)
+    return {
+        "processadas": len(operations),
+        "restantes": remaining,
+        "operacoes": operations,
+        "proxima_acao": "Reprocessar score",
+    }
 
 
 @router.post("/findings/reemitir")
