@@ -39,6 +39,11 @@ class Query:
         self.payload = payload
         return self
 
+    def insert(self, payload: dict[str, Any]):
+        self.action = "insert"
+        self.payload = payload
+        return self
+
     def eq(self, field: str, value: Any):
         self.filters.append(("eq", field, value))
         return self
@@ -84,6 +89,10 @@ class Query:
         if self.action == "update":
             for row in matched:
                 row.update(deepcopy(self.payload))
+        elif self.action == "insert":
+            inserted = deepcopy(self.payload)
+            self.db.tables[self.table_name].append(inserted)
+            return Result([inserted])
         return Result(deepcopy(matched))
 
 
@@ -145,6 +154,7 @@ def _database(
                     "status_ingestao": "OPERACAO_CRIADA",
                 }
             ],
+            "audit_trail": [],
         }
     )
 
@@ -165,6 +175,9 @@ def test_stale_heartbeat_marks_operation_snapshot_and_quote_failed():
         "erros": 0,
         "retomadas": 0,
         "retomadas_esgotadas": 1,
+        "componentes_orfaos": 0,
+        "restaurados": 0,
+        "marcados_failed": 0,
     }
     operation = db.tables["operations"][0]
     assert operation["status"] == "failed"
@@ -364,3 +377,156 @@ def test_timeout_parameter_falls_back_when_table_is_unavailable():
         invalidate_watchdog_config_cache()
 
     assert value == DEFAULT_HEARTBEAT_TIMEOUT_MINUTES == 15.0
+
+
+def _orphan_database(
+    *,
+    started_minutes_ago: int,
+    operation_status: str = "aguardando_relatorio",
+    parsed_result: dict[str, Any] | None = None,
+    completed_at: datetime | None = None,
+) -> FakeSupabase:
+    db = _database(
+        heartbeat_at=NOW - timedelta(minutes=1),
+        status=operation_status,
+    )
+    operation = db.tables["operations"][0]
+    operation["pendencia_coleta"] = True
+    snapshot = db.tables["component_snapshots"][0]
+    snapshot.update(
+        {
+            "component": "contratos_pncp",
+            "started_at": (NOW - timedelta(minutes=started_minutes_ago)).isoformat(),
+            "parsed_result": parsed_result,
+            "completed_at": completed_at.isoformat() if completed_at else None,
+        }
+    )
+    return db
+
+
+def _mock_funnel(monkeypatch, *, status="aguardando_relatorio", pending=False):
+    calls: list[tuple[str, str]] = []
+
+    def update_stage(cotacao_id: str, operation_id: str):
+        calls.append((cotacao_id, operation_id))
+        return "DOCUMENTADA", []
+
+    monkeypatch.setattr(
+        operation_watchdog_service,
+        "atualizar_estagio_pos_fase2",
+        update_stage,
+    )
+    monkeypatch.setattr(
+        operation_watchdog_service,
+        "decidir_status_pos_fase2",
+        lambda _reasons: {
+            "status": status,
+            "pendencia_coleta": pending,
+            "motivos_classificados": {"reprovacao": [], "tecnico": []},
+        },
+    )
+    return calls
+
+
+def test_orphan_with_previous_result_is_restored_and_audited(monkeypatch):
+    db = _orphan_database(
+        started_minutes_ago=15,
+        parsed_result={"n_contratos": 3},
+        completed_at=NOW - timedelta(hours=1),
+    )
+    calls = _mock_funnel(monkeypatch)
+
+    result = run_operation_watchdog(now=NOW, db=db)
+
+    snapshot = db.tables["component_snapshots"][0]
+    assert snapshot["status"] == "completed"
+    assert snapshot["error_message"] == operation_watchdog_service.ORPHAN_ERROR_MESSAGE
+    assert result["componentes_orfaos"] == 1
+    assert result["restaurados"] == 1
+    assert result["marcados_failed"] == 0
+    assert calls == [("C-1", "op-1")]
+    audit = db.tables["audit_trail"][0]
+    assert audit["action"] == "component_refresh_failed"
+    assert audit["payload"] == {
+        "component": "contratos_pncp",
+        "motivo": "orfao_watchdog",
+        "restaurado": True,
+    }
+
+
+def test_orphan_without_previous_result_is_failed_and_operation_reevaluated(
+    monkeypatch,
+):
+    db = _orphan_database(
+        started_minutes_ago=15,
+        operation_status="reprovada_triagem",
+    )
+    calls = _mock_funnel(monkeypatch)
+
+    result = run_operation_watchdog(now=NOW, db=db)
+
+    snapshot = db.tables["component_snapshots"][0]
+    assert snapshot["status"] == "failed"
+    assert snapshot["completed_at"] == NOW.isoformat()
+    assert result["componentes_orfaos"] == 1
+    assert result["restaurados"] == 0
+    assert result["marcados_failed"] == 1
+    assert calls == [("C-1", "op-1")]
+    assert db.tables["operations"][0]["status"] == "aguardando_relatorio"
+    assert db.tables["operations"][0]["pendencia_coleta"] is False
+
+
+def test_recent_running_component_is_untouched(monkeypatch):
+    db = _orphan_database(started_minutes_ago=3)
+    calls = _mock_funnel(monkeypatch)
+
+    result = run_operation_watchdog(now=NOW, db=db)
+
+    assert result["componentes_orfaos"] == 0
+    assert db.tables["component_snapshots"][0]["status"] == "running"
+    assert calls == []
+
+
+def test_running_component_in_processing_operation_is_left_to_main_watchdog(
+    monkeypatch,
+):
+    db = _orphan_database(
+        started_minutes_ago=15,
+        operation_status="processing",
+    )
+    calls = _mock_funnel(monkeypatch)
+
+    result = run_operation_watchdog(now=NOW, db=db)
+
+    assert result["componentes_orfaos"] == 0
+    assert result["candidatas"] == 0
+    assert db.tables["component_snapshots"][0]["status"] == "running"
+    assert calls == []
+
+
+def test_orphan_claim_does_not_overwrite_restarted_component(monkeypatch):
+    db = _orphan_database(
+        started_minutes_ago=15,
+        parsed_result={"n_contratos": 3},
+        completed_at=NOW - timedelta(hours=1),
+    )
+    calls = _mock_funnel(monkeypatch)
+    restarted_at = (NOW - timedelta(minutes=1)).isoformat()
+
+    def restart_before_claim(query: Query) -> None:
+        if query.table_name == "component_snapshots":
+            db.tables["component_snapshots"][0]["started_at"] = restarted_at
+            db.before_update = None
+
+    db.before_update = restart_before_claim
+
+    result = run_operation_watchdog(now=NOW, db=db)
+
+    snapshot = db.tables["component_snapshots"][0]
+    assert snapshot["status"] == "running"
+    assert snapshot["started_at"] == restarted_at
+    assert result["componentes_orfaos"] == 1
+    assert result["restaurados"] == 0
+    assert result["corridas_ignoradas"] == 1
+    assert db.tables["audit_trail"] == []
+    assert calls == []

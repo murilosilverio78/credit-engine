@@ -8,6 +8,10 @@ from typing import Any
 import structlog
 
 from app.services.analysis_runtime import enqueue_analysis
+from app.services.funil_qualificacao_service import (
+    atualizar_estagio_pos_fase2,
+    decidir_status_pos_fase2,
+)
 from app.workers.base import _execute_snapshot_write
 
 
@@ -15,7 +19,10 @@ logger = structlog.get_logger()
 PARAMETER_KEY = "watchdog_heartbeat_timeout_minutos"
 DEFAULT_HEARTBEAT_TIMEOUT_MINUTES = 15.0
 DEFAULT_MAX_RETOMADAS = 1
+DEFAULT_COMPONENT_ORPHAN_MINUTES = 10.0
 WATCHED_OPERATION_STATUSES = ("pending", "processing")
+RECOLLECTION_OPERATION_STATUSES = ("aguardando_relatorio", "reprovada_triagem")
+ORPHAN_ERROR_MESSAGE = "recoleta interrompida (container reiniciado)"
 _BASE_OPERATION_FIELDS = "id,cotacao_id,status,heartbeat_at,created_at"
 _RESUME_OPERATION_FIELDS = f"{_BASE_OPERATION_FIELDS},retomadas_count"
 _CACHE_TTL_SECONDS = 60.0
@@ -221,10 +228,185 @@ def _claim_stale_operation_for_resume(
     return _execute_db("claim_operation_for_resume", request)
 
 
+def _record_audit(
+    db: Any,
+    operation_id: str,
+    action: str,
+    payload: dict[str, Any],
+    *,
+    previous_value: dict[str, Any] | None = None,
+    new_value: dict[str, Any] | None = None,
+) -> None:
+    data: dict[str, Any] = {
+        "operation_id": operation_id,
+        "action": action,
+        "actor_type": "system",
+        "payload": payload,
+    }
+    if previous_value is not None:
+        data["previous_value"] = previous_value
+    if new_value is not None:
+        data["new_value"] = new_value
+    _execute_db(
+        "record_orphan_component_audit",
+        lambda: db.table("audit_trail").insert(data).execute(),
+    )
+
+
+def _reevaluate_recollection_operation(
+    db: Any,
+    operation_id: str,
+    operation: dict[str, Any],
+) -> None:
+    if (
+        not operation.get("cotacao_id")
+        or operation.get("status") not in RECOLLECTION_OPERATION_STATUSES
+        or operation.get("pendencia_coleta") is not True
+    ):
+        return
+
+    _stage, reasons = atualizar_estagio_pos_fase2(
+        str(operation["cotacao_id"]), operation_id
+    )
+    outcome = decidir_status_pos_fase2(reasons)
+    current_result = _execute_db(
+        "reload_operation_after_orphan_recovery",
+        lambda: db.table("operations")
+        .select("id,status,pendencia_coleta")
+        .eq("id", operation_id)
+        .execute(),
+    )
+    current = (current_result.data or [None])[0] or {}
+    previous_status = current.get("status")
+    if (
+        previous_status not in RECOLLECTION_OPERATION_STATUSES
+        or current.get("pendencia_coleta") is not True
+    ):
+        return
+
+    next_status = outcome["status"]
+    updated = _execute_db(
+        "update_operation_after_orphan_recovery",
+        lambda: db.table("operations")
+        .update(
+            {
+                "status": next_status,
+                "pendencia_coleta": outcome["pendencia_coleta"],
+            }
+        )
+        .eq("id", operation_id)
+        .eq("status", previous_status)
+        .eq("pendencia_coleta", True)
+        .execute(),
+    )
+    if updated.data and next_status != previous_status:
+        _record_audit(
+            db,
+            operation_id,
+            "operation_status_changed",
+            {
+                "contexto": "watchdog_orfao",
+                "motivos_classificados": outcome["motivos_classificados"],
+            },
+            previous_value={"status": previous_status},
+            new_value={"status": next_status},
+        )
+
+
+def _recover_orphan_components(
+    db: Any,
+    *,
+    reference_time: datetime,
+    orphan_minutes: float,
+    summary: dict[str, Any],
+) -> None:
+    cutoff_iso = (reference_time - timedelta(minutes=orphan_minutes)).isoformat()
+    snapshots_result = _execute_db(
+        "load_orphan_components",
+        lambda: db.table("component_snapshots")
+        .select("operation_id,component,status,started_at,completed_at,parsed_result")
+        .eq("status", "running")
+        .lt("started_at", cutoff_iso)
+        .execute(),
+    )
+    snapshots = snapshots_result.data or []
+    operation_ids = sorted(
+        {str(row.get("operation_id")) for row in snapshots if row.get("operation_id")}
+    )
+    if not operation_ids:
+        return
+
+    operations_result = _execute_db(
+        "load_orphan_component_operations",
+        lambda: db.table("operations")
+        .select("id,cotacao_id,status,pendencia_coleta")
+        .in_("id", operation_ids)
+        .execute(),
+    )
+    operations = {
+        str(row["id"]): row
+        for row in (operations_result.data or [])
+        if row.get("id")
+    }
+    eligible = [
+        snapshot
+        for snapshot in snapshots
+        if str(snapshot.get("operation_id")) in operations
+        and operations[str(snapshot.get("operation_id"))].get("status")
+        not in WATCHED_OPERATION_STATUSES
+    ]
+    summary["componentes_orfaos"] += len(eligible)
+    affected_operations: set[str] = set()
+
+    for snapshot in eligible:
+        operation_id = str(snapshot["operation_id"])
+        restored = (
+            snapshot.get("parsed_result") is not None
+            and snapshot.get("completed_at") is not None
+        )
+        update = {
+            "status": "completed" if restored else "failed",
+            "error_message": ORPHAN_ERROR_MESSAGE,
+        }
+        if not restored:
+            update["completed_at"] = reference_time.isoformat()
+        claimed = _execute_db(
+            "recover_orphan_component",
+            lambda snapshot=snapshot, update=update: db.table("component_snapshots")
+            .update(update)
+            .eq("operation_id", snapshot["operation_id"])
+            .eq("component", snapshot["component"])
+            .eq("status", "running")
+            .eq("started_at", snapshot["started_at"])
+            .execute(),
+        )
+        if not claimed.data:
+            summary["corridas_ignoradas"] += 1
+            continue
+
+        counter = "restaurados" if restored else "marcados_failed"
+        summary[counter] += 1
+        affected_operations.add(operation_id)
+        _record_audit(
+            db,
+            operation_id,
+            "component_refresh_failed",
+            {
+                "component": snapshot["component"],
+                "motivo": "orfao_watchdog",
+                "restaurado": restored,
+            },
+        )
+
+    for operation_id in affected_operations:
+        _reevaluate_recollection_operation(db, operation_id, operations[operation_id])
+
+
 def run_operation_watchdog(
     *,
     timeout_minutes: float | None = None,
     max_retomadas: int | None = None,
+    orphan_minutes: float | None = None,
     now: datetime | None = None,
     db: Any | None = None,
 ) -> dict[str, Any]:
@@ -252,6 +434,21 @@ def run_operation_watchdog(
             max_retomadas = DEFAULT_MAX_RETOMADAS
     max_retomadas = max(int(max_retomadas), 0)
 
+    if orphan_minutes is None:
+        try:
+            from app.core.config import settings
+
+            orphan_minutes = settings.COMPONENTE_ORFAO_MINUTOS
+        except Exception as exc:
+            logger.warning(
+                "operation_watchdog.orphan_timeout_fallback",
+                error=str(exc),
+            )
+            orphan_minutes = DEFAULT_COMPONENT_ORPHAN_MINUTES
+    orphan_minutes = float(orphan_minutes)
+    if orphan_minutes <= 0:
+        raise ValueError("orphan_minutes must be greater than zero")
+
     reference_time = now or datetime.now(timezone.utc)
     if reference_time.tzinfo is None:
         reference_time = reference_time.replace(tzinfo=timezone.utc)
@@ -270,7 +467,21 @@ def run_operation_watchdog(
         "erros": 0,
         "retomadas": 0,
         "retomadas_esgotadas": 0,
+        "componentes_orfaos": 0,
+        "restaurados": 0,
+        "marcados_failed": 0,
     }
+
+    try:
+        _recover_orphan_components(
+            db,
+            reference_time=reference_time,
+            orphan_minutes=orphan_minutes,
+            summary=summary,
+        )
+    except Exception as exc:
+        summary["erros"] += 1
+        logger.error("operation_watchdog.orphan_recovery_failed", error=str(exc))
 
     try:
         candidates, resume_column_available = _load_stale_operations(
