@@ -18,6 +18,7 @@ from app.workers.base import BaseComponentTask
 _task = BaseComponentTask()
 logger = structlog.get_logger()
 RETRIES = (3, 10, 20)
+PNCP_REQUEST_TIMEOUT_S = 20.0
 DEDICACAO = re.compile(
     r"dedicacao exclusiva(?: de mao de obra)?|cessao de mao de obra|regime de dedicacao exclusiva"
 )
@@ -248,8 +249,24 @@ def _aggregate(contracts: list[dict[str, Any]], today: date) -> dict[str, Any]:
     }
 
 
-def _page(client: httpx.Client, base: str, cnpj: str, page: int) -> dict[str, Any]:
+class PncpDeadlineExceeded(TimeoutError):
+    """Raised when the total PNCP collection deadline is exhausted."""
+
+
+def _page(
+    client: httpx.Client,
+    base: str,
+    cnpj: str,
+    page: int,
+    *,
+    deadline: float,
+) -> dict[str, Any]:
     for attempt in range(len(RETRIES) + 1):
+        remaining = deadline - time.monotonic()
+        if remaining < PNCP_REQUEST_TIMEOUT_S:
+            raise PncpDeadlineExceeded(
+                "tempo maximo da coleta PNCP esgotado antes da proxima tentativa"
+            )
         try:
             response = client.get(
                 base,
@@ -270,11 +287,21 @@ def _page(client: httpx.Client, base: str, cnpj: str, page: int) -> dict[str, An
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code < 500 or attempt == len(RETRIES):
                 raise
-            time.sleep(RETRIES[attempt])
+            retry_delay = RETRIES[attempt]
+            if deadline - time.monotonic() < retry_delay + PNCP_REQUEST_TIMEOUT_S:
+                raise PncpDeadlineExceeded(
+                    "tempo maximo da coleta PNCP esgotado durante retentativas"
+                ) from exc
+            time.sleep(retry_delay)
         except httpx.TimeoutException:
             if attempt == len(RETRIES):
                 raise
-            time.sleep(RETRIES[attempt])
+            retry_delay = RETRIES[attempt]
+            if deadline - time.monotonic() < retry_delay + PNCP_REQUEST_TIMEOUT_S:
+                raise PncpDeadlineExceeded(
+                    "tempo maximo da coleta PNCP esgotado durante retentativas"
+                )
+            time.sleep(retry_delay)
     raise RuntimeError("tentativas PNCP esgotadas")
 
 
@@ -335,16 +362,20 @@ def _operation_for_cedido(operation_id: str | None) -> dict[str, Any]:
 
 
 def _fetch(cnpj: str, *, operation_id: str | None = None) -> dict[str, Any]:
+    deadline = time.monotonic() + settings.PNCP_TEMPO_MAXIMO_S
     cnpj = re.sub(r"\D", "", cnpj)
     base = settings.PNCP_SEARCH_BASE_URL.rstrip("/") + "/api/search/"
     items: list[dict[str, Any]] = []
     page = 1
     total = 0
     operation = _operation_for_cedido(operation_id)
-    with httpx.Client(timeout=20, verify=settings.HTTPX_VERIFY_SSL) as client:
+    with httpx.Client(
+        timeout=PNCP_REQUEST_TIMEOUT_S,
+        verify=settings.HTTPX_VERIFY_SSL,
+    ) as client:
         while True:
             try:
-                payload = _page(client, base, cnpj, page)
+                payload = _page(client, base, cnpj, page, deadline=deadline)
             except Exception as exc:
                 contracts = [_normalize(item) for item in items]
                 cedido, _match = _cedido(
@@ -380,6 +411,25 @@ def _fetch(cnpj: str, *, operation_id: str | None = None) -> dict[str, Any]:
             if page * 20 >= total or not batch:
                 break
             page += 1
+            if deadline - time.monotonic() <= 1:
+                exc = PncpDeadlineExceeded(
+                    "tempo maximo da coleta PNCP esgotado entre paginas"
+                )
+                contracts = [_normalize(item) for item in items]
+                cedido, _match = _cedido(
+                    contracts,
+                    _operation_contract_numbers(operation),
+                    operation.get("valor_global_contrato")
+                    or operation.get("saldo_vincendo"),
+                )
+                if cedido:
+                    return _result(
+                        contracts,
+                        partial=True,
+                        pages_read=page - 1,
+                        error=str(exc),
+                    )
+                raise exc
             time.sleep(1)
     return _result([_normalize(item) for item in items])
 

@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     PORTAL_EMPTY_BODY_POLICY: Literal["raise", "empty"] = "raise"
     PNCP_SEARCH_BASE_URL: str = "https://pncp.gov.br"
     PNCP_PROXY_TOKEN: str = ""
+    PNCP_TEMPO_MAXIMO_S: float = 90.0
     # CNDT TST browser stays on the Brazilian VPS; Railway calls only this API.
     CNDT_PROXY_URL: str = ""
     CNDT_PROXY_TOKEN: str = ""

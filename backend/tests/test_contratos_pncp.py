@@ -41,6 +41,28 @@ class FakeClient:
         return item
 
 
+class FakeClock:
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+class SlowClient(FakeClient):
+    def __init__(self, responses, clock, request_seconds=20):
+        super().__init__(responses)
+        self.clock = clock
+        self.request_seconds = request_seconds
+
+    def get(self, url, params, headers=None):
+        self.clock.sleep(self.request_seconds)
+        return super().get(url, params, headers)
+
+
 def test_normaliza_fixture_real_e_identifica_dedicacao_exclusiva():
     contracts = [pncp._normalize(item) for item in fixture_payload()["items"]]
 
@@ -171,6 +193,52 @@ def test_paginacao_falha_sem_cedido_continua_falha(monkeypatch):
 
     with pytest.raises(httpx.TimeoutException, match="fora"):
         pncp._fetch("46276066000100", operation_id="op-1")
+
+
+def test_tempo_total_nao_inicia_retry_sem_janela(monkeypatch):
+    clock = FakeClock()
+    client = SlowClient([httpx.TimeoutException("lento")] * 4, clock)
+    monkeypatch.setattr(pncp.httpx, "Client", lambda **_: client)
+    monkeypatch.setattr(pncp.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(pncp.time, "sleep", clock.sleep)
+    monkeypatch.setattr(pncp.settings, "PNCP_TEMPO_MAXIMO_S", 90)
+
+    with pytest.raises(pncp.PncpDeadlineExceeded):
+        pncp._fetch("46276066000100")
+
+    assert clock.now <= 90
+    assert len(client.calls) == 3
+
+
+def test_tempo_total_retorna_parcial_quando_cedido_ja_foi_lido(monkeypatch):
+    clock = FakeClock()
+    first = fixture_payload()
+    first["items"] = [first["items"][0]]
+    first["total"] = 21
+    contract = first["items"][0]
+    client = SlowClient(
+        [response(200, first)] + [httpx.TimeoutException("lento")] * 4,
+        clock,
+    )
+    monkeypatch.setattr(pncp.httpx, "Client", lambda **_: client)
+    monkeypatch.setattr(pncp.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(pncp.time, "sleep", clock.sleep)
+    monkeypatch.setattr(pncp.settings, "PNCP_TEMPO_MAXIMO_S", 90)
+    monkeypatch.setattr(
+        pncp,
+        "_operation_for_cedido",
+        lambda _operation_id: {
+            "contrato_id": f"{contract['numero_contrato_empenho']}{contract['ano']}",
+            "valor_global_contrato": contract["valor_global"],
+        },
+    )
+
+    result = pncp._fetch("46276066000100", operation_id="op-1")
+
+    assert clock.now <= 90
+    assert result["parcial"] is True
+    assert result["paginas_lidas"] == 1
+    assert result["n_contratos"] == 1
 
 
 def test_matches_contrato_cedido_por_numero_ano_e_desempata_por_valor():
