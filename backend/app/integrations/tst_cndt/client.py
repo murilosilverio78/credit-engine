@@ -23,6 +23,33 @@ TST_URL = "https://cndt-certidao.tst.jus.br/gerarCertidao"
 _ANTIBOT_MARKERS = ("incapsula", "imperva", "shieldsquare", "access denied", "captcha challenge")
 
 
+def solve_image_captcha(image_base64: str, api_key: str, timeout_seconds: int) -> str | None:
+    """Use 2captcha's documented image/base64 API without logging secrets."""
+    try:
+        submitted = requests.post("https://2captcha.com/in.php", data={
+            "key": api_key, "method": "base64", "body": image_base64, "json": 1,
+        }, timeout=20).json()
+    except (requests.RequestException, ValueError):
+        return None
+    if submitted.get("status") != 1:
+        return None
+    captcha_id = submitted.get("request")
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        time.sleep(5)
+        try:
+            solved = requests.get("https://2captcha.com/res.php", params={
+                "key": api_key, "action": "get", "id": captcha_id, "json": 1,
+            }, timeout=20).json()
+        except (requests.RequestException, ValueError):
+            return None
+        if solved.get("status") == 1:
+            return str(solved.get("request") or "")
+        if solved.get("request") != "CAPCHA_NOT_READY":
+            return None
+    return None
+
+
 def valid_cnpj(value: str) -> bool:
     digits_only = digits(value)
     if len(digits_only) != 14 or digits_only == digits_only[0] * 14:
@@ -255,30 +282,7 @@ class CndtClient:
 
     def _solve_captcha(self, image_base64: str, api_key: str) -> str | None:
         """Use 2captcha's documented image/base64 API; no tokens are logged."""
-        try:
-            submitted = requests.post("https://2captcha.com/in.php", data={
-                "key": api_key, "method": "base64", "body": image_base64,
-                "json": 1,
-            }, timeout=20).json()
-        except (requests.RequestException, ValueError):
-            return None
-        if submitted.get("status") != 1:
-            return None
-        captcha_id = submitted.get("request")
-        deadline = time.monotonic() + self.settings.captcha_timeout_seconds
-        while time.monotonic() < deadline:
-            time.sleep(5)
-            try:
-                solved = requests.get("https://2captcha.com/res.php", params={
-                    "key": api_key, "action": "get", "id": captcha_id, "json": 1,
-                }, timeout=20).json()
-            except (requests.RequestException, ValueError):
-                return None
-            if solved.get("status") == 1:
-                return str(solved.get("request") or "")
-            if solved.get("request") != "CAPCHA_NOT_READY":
-                return None
-        return None
+        return solve_image_captcha(image_base64, api_key, self.settings.captcha_timeout_seconds)
 
     @staticmethod
     def _response_message(response: Any) -> str:

@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import time
 from typing import Iterator
 
@@ -28,9 +29,18 @@ class GuardrailError(RuntimeError):
 class LocalGuardrails:
     """Coordinate one shared output directory without a server-side database."""
 
-    def __init__(self, state_dir: Path, *, max_attempts_per_minute: int = 5) -> None:
+    def __init__(
+        self,
+        state_dir: Path,
+        *,
+        max_attempts_per_minute: int = 5,
+        namespace: str = "cndt",
+    ) -> None:
         self.state_dir = state_dir
         self.max_attempts_per_minute = max_attempts_per_minute
+        # Different collectors can share an output directory on the VPS.  Keep
+        # their rate windows and cached documents isolated in that case.
+        self.namespace = re.sub(r"[^a-z0-9_-]", "", namespace.lower()) or "collector"
         self.state_dir.mkdir(parents=True, exist_ok=True)
         (self.state_dir / ".locks").mkdir(exist_ok=True)
 
@@ -48,15 +58,15 @@ class LocalGuardrails:
 
     def consume_rate_slot(self, *, now: float | None = None) -> None:
         current = now if now is not None else time.time()
-        events = [item for item in self._read_json(".cndt-rate.json", []) if isinstance(item, (int, float)) and item > current - 60]
+        events = [item for item in self._read_json(f".{self.namespace}-rate.json", []) if isinstance(item, (int, float)) and item > current - 60]
         if len(events) >= self.max_attempts_per_minute:
             raise GuardrailError("limite_global_de_tentativas")
         events.append(current)
-        self._write_json(".cndt-rate.json", events)
+        self._write_json(f".{self.namespace}-rate.json", events)
 
     @contextmanager
     def cnpj_lock(self, cnpj: str) -> Iterator[None]:
-        lock = self.state_dir / ".locks" / f"{cnpj_hash(cnpj)}.lock"
+        lock = self.state_dir / ".locks" / f"{self.namespace}-{cnpj_hash(cnpj)}.lock"
         try:
             descriptor = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError as exc:
@@ -72,25 +82,26 @@ class LocalGuardrails:
                 pass
 
     def reusable(self, cnpj: str, *, safety_days: int = 0) -> dict | None:
-        cache = self._read_json(".cndt-cache.json", {})
+        cache = self._read_json(f".{self.namespace}-cache.json", {})
         item = cache.get(cnpj_hash(cnpj)) if isinstance(cache, dict) else None
         if not isinstance(item, dict):
             return None
         path = Path(str(item.get("storage_key") or ""))
-        if path.is_file() and item.get("data_validade"):
+        validity = item.get("data_validade") or item.get("data_fim_validade")
+        if path.is_file() and validity:
             try:
                 reusable_after = date.today().fromordinal(
                     date.today().toordinal() + max(int(safety_days), 0)
                 )
-                if datetime.strptime(item["data_validade"], "%d/%m/%Y").date() >= reusable_after:
+                if datetime.strptime(str(validity), "%d/%m/%Y").date() >= reusable_after:
                     return item
             except ValueError:
                 pass
         return None
 
     def remember_success(self, cnpj: str, result: dict) -> None:
-        cache = self._read_json(".cndt-cache.json", {})
+        cache = self._read_json(f".{self.namespace}-cache.json", {})
         if not isinstance(cache, dict):
             cache = {}
         cache[cnpj_hash(cnpj)] = {**result, "success_date": date.today().isoformat()}
-        self._write_json(".cndt-cache.json", cache)
+        self._write_json(f".{self.namespace}-cache.json", cache)
