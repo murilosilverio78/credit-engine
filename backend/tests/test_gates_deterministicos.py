@@ -1,6 +1,11 @@
 """Characterization tests for the current deterministic sanction gates."""
+from datetime import date
+
+import pytest
+
 from app.workers.tasks.score_engine import (
     _fontes_sancao_nao_verificadas,
+    _is_active_record,
     gates_deterministicos,
 )
 
@@ -21,6 +26,46 @@ def test_pessoa_juridica_sanction_flags_all_create_the_same_gate():
         assert gates_deterministicos({"pessoa_juridica": {field: True}}) == [
             "Sancao ativa identificada em bases restritivas"
         ]
+
+
+@pytest.mark.parametrize(
+    ("record", "active"),
+    [
+        ({"dataFimSancao": "01/01/2000"}, False),
+        ({"dataFimSancao": "2099-05-05"}, True),
+        ({"dataFimSancao": "invalida", "situacao": "ATIVO"}, True),
+        ({"situacao": "ATIVO"}, True),
+        ({"situacao": "ENCERRADO", "dataFimSancao": "05/05/2099"}, False),
+    ],
+)
+def test_active_record_uses_date_then_legacy_tokens(record, active):
+    assert _is_active_record(record) is active
+
+
+def test_active_record_date_boundaries_and_orbenk(monkeypatch):
+    from app.workers.tasks import score_engine
+
+    class Today(date):
+        @classmethod
+        def today(cls):
+            return cls(2027, 5, 5)
+
+    monkeypatch.setattr(score_engine, "date", Today)
+    assert score_engine._is_active_record({"dataFimSancao": "04/05/2027"}) is False
+    assert score_engine._is_active_record({"dataFimSancao": "05/05/2027"}) is True
+    assert score_engine._is_active_record({"dataFimSancao": "06/05/2027"}) is True
+    assert score_engine._is_active_record({"id": 388292, "dataFimSancao": "05/05/2027"}) is True
+
+
+def test_detailed_sanctions_override_pessoa_juridica_summary_when_complete():
+    snapshots = {
+        "pessoa_juridica": {"possui_sancao": True},
+        "ceis": {"total_registros": 1, "registros": [{"dataFimSancao": "01/01/2000"}]},
+        "cnep": {"total_registros": 0, "registros": []},
+        "cepim": {"total_registros": 0, "registros": []},
+    }
+    # CARE SURGICAL: the Portal summary stays true although detailed CEIS is expired.
+    assert gates_deterministicos(snapshots) == []
 
 
 def test_sanction_components_characterize_active_inactive_empty_and_absent_records():

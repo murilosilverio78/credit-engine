@@ -1186,11 +1186,32 @@ def score_regularidade(snapshots: dict[str, Any]) -> dict[str, Any]:
 
 
 def _is_active_record(record: dict[str, Any]) -> bool:
-    joined = " ".join(str(record.get(key) or "") for key in ("situacao", "status", "situacao_cadastral", "data_fim"))
+    """Resolve vigência com a precedência comum a gate, score e achados."""
+    joined = " ".join(
+        str(record.get(key) or "")
+        for key in ("situacao", "status", "situacao_cadastral", "dataFimSancao", "data_fim")
+    )
     text = joined.lower()
     inactive_tokens = ("inativo", "baixado", "encerrado", "cancelado", "suspenso")
     if any(token in text for token in inactive_tokens):
         return False
+
+    raw_end = record.get("dataFimSancao") or record.get("data_fim")
+    end_date: date | None = None
+    if isinstance(raw_end, datetime):
+        end_date = raw_end.date()
+    elif isinstance(raw_end, date):
+        end_date = raw_end
+    elif isinstance(raw_end, str):
+        for pattern in ("%d/%m/%Y", "%Y-%m-%d"):
+            try:
+                end_date = datetime.strptime(raw_end.strip()[:10], pattern).date()
+                break
+            except ValueError:
+                continue
+    if end_date is not None:
+        return end_date >= date.today()
+
     return any(token in text for token in ("ativo", "vigente", "impedimento", "proibicao", "proibição"))
 
 
@@ -1206,7 +1227,17 @@ def gates_deterministicos(snapshots: dict[str, Any]) -> list[str]:
         bloqueios.append(f"Situacao cadastral diferente de ATIVA: {situacao}")
 
     pessoa = _first_snapshot(snapshots, "pessoa_juridica")
-    if pessoa.get("possui_sancao") or any(pessoa.get(key) for key in ("sancionado_ceis", "sancionado_cnep", "sancionado_cepim", "sancionado_ceaf")):
+    detailed_sanctions_complete = all(
+        isinstance(snapshots.get(component), dict)
+        for component in ("ceis", "cnep", "cepim")
+    )
+    if (
+        not detailed_sanctions_complete
+        and (pessoa.get("possui_sancao") or any(
+            pessoa.get(key)
+            for key in ("sancionado_ceis", "sancionado_cnep", "sancionado_cepim", "sancionado_ceaf")
+        ))
+    ):
         bloqueios.append("Sancao ativa identificada em bases restritivas")
 
     for component in ("ceis", "cnep", "cepim", "ceaf"):

@@ -238,7 +238,11 @@ def emit_cadastro_regularidade(
         for component in sanction_components
         if pessoa.get(f"sancionado_{component}")
     ]
-    if pessoa.get("possui_sancao") or pessoa_flags:
+    detailed_sanctions_complete = all(
+        statuses.get(component, "missing") == "completed"
+        for component in ("ceis", "cnep", "cepim")
+    )
+    if (pessoa.get("possui_sancao") or pessoa_flags) and not detailed_sanctions_complete:
         sanction_details.append(
             {
                 "cadastro": "PESSOA_JURIDICA",
