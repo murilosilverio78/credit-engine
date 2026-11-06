@@ -76,14 +76,19 @@ Os códigos de hoje continuam válidos. O que muda é que cada motivo passa a se
 | `indisponibilidade_fonte:<comp>`, `situacao_cadastral_nao_verificada` | REVISAR_DADO | Consulta <fonte> indisponível | componente, último erro, horário | Recoletar |
 | `cotacao_expirada` | ENCERRADA | Cotação expirada | último estágio alcançado, datas | Abrir análise (se houver operação) |
 | `cotacao_ausente_na_listagem` | ENCERRADA | Cotação saiu da listagem da Broadfactor | último estágio alcançado, datas, nº de documentos | Abrir análise, Avisar comercial |
+| `QUOTATION_INACTIVE` | ENCERRADA | Cotação inativa na Broadfactor | último estágio alcançado, datas | Abrir análise (se houver operação) |
+| `arquivada_manual` (novo, fatia 3) | ENCERRADA | Arquivada por <usuário> | autor, data, justificativa | nenhuma |
+| `cedente_nao_pj:<tipo>` | VETO | Cedente não é pessoa jurídica | tipo recebido | Arquivar |
+| `erro_documentos_broadfactor:<erro>` | REVISAR_DADO | Falha ao consultar documentos na Broadfactor | horário; o texto da exceção só no detalhe técnico | Recoletar |
+| `cobertura_insuficiente:<r>` (legado, não é mais produzido) | CREDITO | Cobertura de recebimentos insuficiente | razão, mínimo | Enviar para análise completa |
 
 Botão "Enviar para análise completa": desabilitado com veto; com reprovação de crédito, pede justificativa, registra na `audit_trail` e dispara a análise paga como o "Gerar relatório" de hoje.
 
 ## 6. Contrato de dados
 
-### 6.1 Motivo estruturado
+### 6.1 Motivo estruturado (revisado após o diagnóstico da fatia 0)
 
-Nova coluna `cotacoes_broadfactor.estagio_motivos jsonb` (migration 076), gravada junto com `estagio_motivo` (o texto continua sendo gravado, por compatibilidade):
+Sem coluna nova e sem backfill. Um único tradutor no backend (`backend/app/services/cotacao_resumo/motivos.py`) recebe o `estagio_motivo` atual (incluindo os textos dos gates de sanção e cadastro) e os snapshots da operação, e devolve a lista estruturada na leitura:
 
 ```json
 [
@@ -94,7 +99,7 @@ Nova coluna `cotacoes_broadfactor.estagio_motivos jsonb` (migration 076), gravad
 ]
 ```
 
-Backfill da coluna a partir de `estagio_motivo` para as cotações existentes.
+Código não reconhecido vira classe REVISAR_DADO com o texto original, e o tradutor registra log de aviso. A divergência PNCP × Comprasnet é calculada na leitura, comparando `contrato_cedido.valor_global/data_inicio_vigencia/data_fim_vigencia` (PNCP) com `contrato_comprasnet.valor_global/vigencia_inicio/vigencia_fim`.
 
 ### 6.2 Endpoint `GET /api/v1/cotacoes/{cotacao_id}/resumo`
 
@@ -134,7 +139,20 @@ Todas registram em `audit_trail` com autor e alçada.
 
 ## 7. Correção obrigatória junto (bug)
 
-`score_engine._is_active_record` procura `situacao`/`status`/`situacao_cadastral`/`data_fim`, mas o CEIS do Portal usa `dataFimSancao` (dd/mm/aaaa) e `tipoSancao`. Por isso o motivo "Sancao ativa em CEIS" nunca é gerado e o veto depende só do resumo de `pessoa_juridica`. Corrigir para considerar ativo o registro com `dataFimSancao` vazia ou maior ou igual à data atual, e incluir teste com o registro real da ORBENK.
+`score_engine._is_active_record` procura `situacao`/`status`/`situacao_cadastral`/`data_fim`, mas o CEIS do Portal usa `dataFimSancao` (dd/mm/aaaa) e `tipoSancao`. Por isso o motivo "Sancao ativa em CEIS" nunca é gerado e o veto depende só do resumo de `pessoa_juridica`.
+
+Regra nova, nesta ordem:
+1. token explícito de inativo (`inativo`, `baixado`, `encerrado`, `cancelado`, `suspenso`) → inativo;
+2. `dataFimSancao` (ou `data_fim`) parseável: ativo se maior ou igual a hoje, inativo se menor;
+3. data ausente ou inválida → regra de tokens atual.
+
+A mesma função serve o gate, o score e o adaptador de achados (`cadastro_regularidade.py`). Testes: data passada, hoje, futura, inválida, ausente, token inativo com data futura, e o registro real da ORBENK (fim 05/05/2027).
+
+Impacto medido em produção (06/11/2026): 29 registros CEIS vigentes em 10 operações e 2 vencidos, ambos da CARE SURGICAL (2 operações). Ver a regra de precedência do resumo `pessoa_juridica` na seção 7.1.
+
+### 7.1 Resumo `pessoa_juridica` × registros detalhados
+
+O gate "Sancao ativa identificada em bases restritivas" usa o booleano `possui_sancao` do resumo, que fica `true` mesmo quando todos os registros detalhados estão vencidos (caso CARE SURGICAL). Regra: quando CEIS, CNEP e CEPIM foram consultados com sucesso, os registros detalhados prevalecem e o resumo não gera veto sozinho; o resumo só vale como veto quando alguma dessas bases está indisponível. (Pendente de confirmação do Murilo.)
 
 ## 8. Critérios de aceite (casos reais de produção)
 
@@ -153,6 +171,6 @@ Gerais: abrir qualquer linha de qualquer aba leva à tela da cotação; nenhuma 
 | Fatia | Escopo | Valida |
 |---|---|---|
 | 0 | Diagnóstico somente leitura | Claude revisa e Murilo aprova o plano |
-| 1 | Migration 076, motivo estruturado + backfill, correção do `_is_active_record`, endpoint de resumo | JSON dos 5 casos em produção |
-| 2 | Tela da cotação, rota a partir das abas, fim do polling em parada | Tela em produção × protótipo, 5 casos |
-| 3 | Endpoints de ação e botões, com auditoria | Ação simulada em cotação de TESTE |
+| 1 | Correção do `_is_active_record` e da precedência 7.1, tradutor de motivos, `GET /cotacoes/{id}/resumo` (somente leitura, sem migration) | JSON dos 5 casos em produção |
+| 2 | Tela `/cotacoes/[cotacao_id]`, todas as linhas das abas abrindo nela, `/operations/[id]` sem cronômetro nem polling em estados não vivos, Playwright com mock de API (`page.route`) e `data-testid` | Tela em produção × protótipo, 5 casos |
+| 3 | Migration 076 (enum `quote_reframed`, `quote_free_checks_requested`, `quote_full_analysis_requested`, `quote_archived`), endpoints de ação com alçada e auditoria, recalculador de capacidade exposto por fronteira autenticada, análise completa aceitando reprovação CREDITO com justificativa, arquivar como ENCERRADA/`arquivada_manual` | Ação em cotação de TESTE |
