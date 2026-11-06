@@ -81,19 +81,35 @@ def _sanction(origen: str, component: str, snapshots: dict[str, Any]) -> dict[st
     end = record.get("dataFimSancao") or record.get("data_fim")
     end_date = _date(end)
     remaining = (end_date - date.today()).days if end_date else None
-    scope = record.get("abrangencia") or record.get("abrangenciaSancao") or "—"
-    organ = record.get("orgaoSancionador") or record.get("orgao") or record.get("orgaoResponsavel") or "—"
-    tipo = record.get("tipoSancao") or record.get("tipo") or "—"
-    fundamento = record.get("fundamentoLegal") or record.get("fundamento") or "—"
-    process = record.get("processo") or record.get("numeroProcesso") or "—"
-    publication = record.get("publicacao") or record.get("dataPublicacao") or "—"
+    scope = record.get("abrangenciaDefinidaDecisaoJudicial") or record.get("abrangencia") or record.get("abrangenciaSancao") or "—"
+    raw_organ = record.get("orgaoSancionador") or record.get("orgao") or record.get("orgaoResponsavel") or "—"
+    if isinstance(raw_organ, dict):
+        organ_name = raw_organ.get("nome") or raw_organ.get("descricao") or "—"
+        esfera = str(raw_organ.get("esfera") or "").lower()
+        organ = f"{organ_name} · esfera {esfera}" if esfera else str(organ_name)
+    else:
+        organ, esfera = str(raw_organ), ""
+    raw_tipo = record.get("tipoSancao") or record.get("tipo") or "—"
+    tipo = raw_tipo.get("descricaoPortal") or raw_tipo.get("descricaoResumida") or "—" if isinstance(raw_tipo, dict) else raw_tipo
+    raw_fundamento = record.get("fundamentacao")
+    if isinstance(raw_fundamento, list):
+        fundamento = "; ".join(str(item.get("descricao") or item.get("codigo") or "") for item in raw_fundamento if isinstance(item, dict)) or "—"
+    else:
+        fundamento = record.get("fundamentoLegal") or record.get("fundamento") or "—"
+    process = record.get("numeroProcesso") or record.get("processo") or "—"
+    publication = record.get("textoPublicacao") or record.get("publicacao") or record.get("dataPublicacao") or "—"
     vigencia = _fmt_date(record.get("dataInicioSancao") or record.get("data_inicio")) + " a " + _fmt_date(end)
     if remaining is not None:
         vigencia += f" · {remaining} dias restantes"
     label = component.upper() if component != "acordos_leniencia" else "acordo de leniência"
+    texto = f"Sanção ativa aplicada por {organ}."
+    if esfera and esfera.upper() != "FEDERAL":
+        texto += " A abrangência não alcança contratos com a União, mas a política trata qualquer sanção ativa como veto."
+    else:
+        texto += " A política trata qualquer sanção ativa como veto."
     return _base(
         f"SANCAO_{component.upper()}", origen, "VETO", f"Sanção ativa no {label}",
-        "A política trata qualquer sanção ativa como veto.",
+        texto,
         [
             _evidence("Órgão sancionador", organ),
             _evidence("Tipo", tipo), _evidence("Fundamento", fundamento),

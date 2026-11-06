@@ -364,7 +364,7 @@ function Topbar({
             ? "animate-pulse bg-blue-100 text-blue-800"
             : manualReview
               ? "bg-amber-100 text-amber-800"
-            : operation.status === "failed"
+            : operation.status === "failed" || operation.status === "reprovada_triagem"
               ? "bg-red-100 text-red-800"
               : "bg-emerald-100 text-emerald-800",
         )}
@@ -1391,12 +1391,12 @@ export default function OperationDetailPage() {
         : [],
     [componentsQuery.data, operation],
   );
+  const scoreRunning = operation?.components?.some((component) => component.component === "score_engine" && component.status === "running") ?? false;
+  const isLive = Boolean(operation && (operation.status === "pending" || operation.status === "processing" || operation.status === "manual_review" || scoreRunning || Date.now() < recollectionUntil));
+  const isStoppedQuote = operation?.status === "reprovada_triagem" || operation?.status === "cotacao_encerrada" || operation?.status === "aguardando_relatorio";
 
   useEffect(() => {
-    if (
-      operation?.status !== "pending" &&
-      operation?.status !== "processing"
-    ) {
+    if (!isLive) {
       return;
     }
 
@@ -1406,7 +1406,7 @@ export default function OperationDetailPage() {
     }, 1000);
 
     return () => window.clearInterval(interval);
-  }, [operation?.status, operationQuery.dataUpdatedAt]);
+  }, [isLive, operationQuery.dataUpdatedAt]);
 
   useEffect(() => {
     if (!recollectionUntil) return;
@@ -1444,9 +1444,6 @@ export default function OperationDetailPage() {
     );
   }
 
-  const processing =
-    operation.status === "pending" || operation.status === "processing";
-  const manualReview = operation.status === "manual_review";
   const canOverride =
     operation.status === "completed" ||
     operation.status === "failed" ||
@@ -1454,10 +1451,14 @@ export default function OperationDetailPage() {
     operation.status === "rejected" ||
     operation.status === "escalated";
 
+  if (isStoppedQuote) {
+    return <div className="flex min-h-dvh flex-col bg-muted/40"><Topbar operation={operation} /><section className="flex flex-1 items-center justify-center p-5"><div className="max-w-md rounded-lg border border-border bg-background p-6 text-center"><h1 className="text-base font-semibold">Esta operação não está em processamento</h1><p className="mt-2 text-sm text-muted-foreground">A cotação foi encerrada ou parou na triagem; o resumo preserva os motivos e as consultas realizadas.</p>{operation.cotacao_id ? <Link className="mt-4 inline-flex min-h-11 items-center rounded-md bg-foreground px-4 text-sm font-medium text-background" href={`/cotacoes/${operation.cotacao_id}`}>Ver resumo da cotação</Link> : null}</div></section></div>;
+  }
+
   return (
     <div className="flex min-h-dvh flex-col bg-muted/40">
       <Topbar operation={operation} />
-      {manualReview ? null : processing ? (
+      {isLive ? (
         <ProcessingView
           operation={operation}
           pipeline={pipeline}
@@ -1470,13 +1471,7 @@ export default function OperationDetailPage() {
           pipeline={pipeline}
           uploads={uploads}
         />
-      ) : (
-        <ProcessingView
-          operation={operation}
-          pipeline={pipeline}
-          refreshIn={refreshIn}
-        />
-      )}
+      ) : null}
       <CertificateUploadSection
         isLoading={uploadsQuery.isLoading}
         operation={operation}

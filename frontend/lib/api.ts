@@ -32,6 +32,7 @@ import type {
   FunilEstagio,
   Rating,
   UserRole,
+  CotacaoResumo,
 } from "@/lib/types";
 import { clearAuthToken, getAuthToken } from "@/lib/auth-token";
 
@@ -189,6 +190,10 @@ export function createOperation(payload: PropostaInput) {
 
 export function getOperation(operationId: string) {
   return request<OperationDetails>(`/api/v1/operations/${operationId}`);
+}
+
+export function getCotacaoResumo(cotacaoId: string) {
+  return request<CotacaoResumo>(`/api/v1/cotacoes/${encodeURIComponent(cotacaoId)}/resumo`);
 }
 
 export function recollectOperation(operationId: string) {

@@ -25,7 +25,7 @@ def _orbenk_snapshots():
     return {
         "brasil_api": {"situacao_cadastral": "ATIVA"},
         "pessoa_juridica": {"possui_sancao": True},
-        "ceis": {"total_registros": 1, "registros": [{"id": 388292, "dataFimSancao": "05/05/2027", "dataInicioSancao": "06/05/2026", "orgaoSancionador": "Prefeitura Municipal de Porto Alegre (RS) · esfera municipal", "tipoSancao": "Impedimento/proibição de contratar com prazo determinado", "fundamentoLegal": "Lei 14.133, art. 156, III"}]},
+        "ceis": {"total_registros": 1, "registros": [{"id": 388292, "dataFimSancao": "05/05/2027", "dataInicioSancao": "06/05/2026", "orgaoSancionador": {"nome": "Prefeitura Municipal de Porto Alegre (RS)", "esfera": "MUNICIPAL", "siglaUf": "RS"}, "tipoSancao": {"descricaoPortal": "Impedimento/proibição de contratar com prazo determinado", "descricaoResumida": "Impedimento"}, "fundamentacao": [{"codigo": "LEI_14133", "descricao": "Lei 14.133, art. 156, III"}], "abrangenciaDefinidaDecisaoJudicial": "Todos os Poderes da esfera do órgão sancionador", "numeroProcesso": "26.0.000009506-0", "textoPublicacao": "DOM Porto Alegre, seção 7782, p. 53"}]},
         "cnep": {"total_registros": 0, "registros": []}, "cepim": {"total_registros": 0, "registros": []},
         "acordos_leniencia": {"total_acordos": 0, "acordos": []},
         "contratos_pncp": {"contrato_cedido": {"valor_global": 183600, "data_inicio_vigencia": "2025-09-15", "data_fim_vigencia": "2026-09-15"}},
@@ -61,9 +61,18 @@ def test_orbenk_veto_and_contract_divergence_summary():
     assert summary["selo"]["classe"] == "VETO"
     assert summary["motivos"][0]["codigo"] == "SANCAO_CEIS"
     assert summary["motivos"][1]["classe"] == "REVISAR_DADO"
+    sanction = summary["motivos"][0]
+    evidence = {item["rotulo"]: item["valor"] for item in sanction["evidencias"]}
+    assert evidence["Órgão sancionador"] == "Prefeitura Municipal de Porto Alegre (RS) · esfera municipal"
+    assert evidence["Fundamento"] == "Lei 14.133, art. 156, III"
+    assert evidence["Processo e publicação"] == "26.0.000009506-0 · DOM Porto Alegre, seção 7782, p. 53"
+    assert all(isinstance(value, str) and value != "—" for value in evidence.values())
+    assert "não alcança contratos com a União" in sanction["texto"]
     assert next(row for row in summary["consultas"]["itens"] if row["nome"] == "CEIS")["resultado"] == "1 sanção ativa"
+    assert next(row for row in summary["consultas"]["itens"] if row["nome"] == "Contrato no Comprasnet")["tom"] == "atencao"
     full = next(action for action in summary["acoes"] if action["id"] == "enviar_analise_completa")
     assert full["habilitada"] is False and full["motivo_bloqueio"] == "Bloqueado: existe veto ativo"
+    assert summary["parada"]["resumo"].startswith("2 motivos. Sanção ativa no CEIS prevalece.")
 
 
 def test_proclima_qualified_summary():
@@ -80,6 +89,29 @@ def test_green_house_closed_summary():
     assert summary["selo"]["classe"] == "ENCERRADA"
     assert summary["trilha"]["estagio_max"] == "QUALIFICADA"
     assert {action["id"] for action in summary["acoes"]} == {"abrir_analise", "avisar_comercial"}
+
+
+def test_list_rules_use_real_type_and_minimum_ticket_reason():
+    summary = montar_resumo(
+        _quote("C-tipo", "LISTA_ESPERA", "tipo_nao_elegivel:-; abaixo_ticket_minimo", tipo="-"),
+        None, {}, {}, parametros={"ticket_minimo": 50_000},
+    )
+    rows = {row["nome"]: row for row in summary["consultas"]["itens"]}
+    assert rows["Tipo de recebível"] == {"nome": "Tipo de recebível", "coleta": "regra", "resultado": "-", "tom": "ruim"}
+    assert rows["Valor"]["resultado"] == "abaixo do ticket mínimo"
+    assert rows["Valor"]["tom"] == "ruim"
+    assert "Documentos Broadfactor" not in rows
+
+
+def test_reenquadrar_uses_the_proposal_evidence_and_enquadrada_shows_documents():
+    summary = montar_resumo(
+        _quote("C-apollo", "LISTA_ESPERA", "acima_ticket_maximo", tipo="CONTRATO", valor_enquadrado=1_626_770.44),
+        None, {}, {}, parametros={"ticket_maximo": 700_000},
+    )
+    assert summary["acoes"][0]["rotulo"] == "Reenquadrar em R$ 700.000,00"
+    assert summary["acoes"][0]["rotulo"].removeprefix("Reenquadrar em ") == next(e["valor"] for e in summary["motivos"][0]["evidencias"] if e["rotulo"] == "Proposta possível")
+    enquadrada = montar_resumo(_quote("C-jjx", "ENQUADRADA", "sem_documentos_broadfactor", tipo="CONTRATO"), None, {}, {})
+    assert any(row["nome"] == "Documentos Broadfactor" for row in enquadrada["consultas"]["itens"])
 
 
 @pytest.mark.parametrize(

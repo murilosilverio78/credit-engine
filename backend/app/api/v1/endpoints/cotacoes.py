@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from app.core.database import supabase
-from app.services.cotacao_resumo.motivos import traduzir_motivos
+from app.services.cotacao_resumo.motivos import divergencia_pncp_comprasnet, traduzir_motivos
 from app.workers.tasks.score_engine import _component_list, _is_active_record
 
 router = APIRouter()
@@ -37,12 +37,16 @@ def _consultas(snapshots: dict[str, Any], statuses: dict[str, str], stage: str, 
         return {"nome": name, "coleta": "ok" if statuses.get(component) == "completed" else "não executada", "resultado": result if statuses.get(component) == "completed" else "não executada", "tom": tom if statuses.get(component) == "completed" else "neutro"}
 
     if stage in {"LISTA_ESPERA", "ENQUADRADA"}:
-        acima_maximo = "acima_ticket_maximo" in (cotacao.get("estagio_motivo") or "")
+        motivo = cotacao.get("estagio_motivo") or ""
+        tipo_invalido = "tipo_nao_elegivel" in motivo or "cedente_nao_pj" in motivo
+        abaixo_minimo = "abaixo_ticket_minimo" in motivo
+        acima_maximo = "acima_ticket_maximo" in motivo
         rows = [
-            {"nome": "Tipo de recebível", "coleta": "regra", "resultado": "CONTRATO, elegível", "tom": "bom"},
-            {"nome": "Valor", "coleta": "regra", "resultado": "acima do ticket máximo" if acima_maximo else "dentro do ticket", "tom": "atencao" if acima_maximo else "bom"},
-            {"nome": "Documentos Broadfactor", "coleta": "regra", "resultado": f"{cotacao.get('n_documentos') or 0} documentos", "tom": "atencao" if not cotacao.get("n_documentos") else "bom"},
+            {"nome": "Tipo de recebível", "coleta": "regra", "resultado": str(cotacao.get("tipo") or "—"), "tom": "ruim" if tipo_invalido else "bom"},
+            {"nome": "Valor", "coleta": "regra", "resultado": "abaixo do ticket mínimo" if abaixo_minimo else "acima do ticket máximo" if acima_maximo else "dentro do ticket", "tom": "ruim" if abaixo_minimo else "atencao" if acima_maximo else "bom"},
         ]
+        if stage == "ENQUADRADA":
+            rows.append({"nome": "Documentos Broadfactor", "coleta": "regra", "resultado": f"{cotacao.get('n_documentos') or 0} documentos", "tom": "atencao" if not cotacao.get("n_documentos") else "bom"})
         return {
             "titulo": "REGRAS APLICADAS (SEM CUSTO)",
             "itens": rows,
@@ -75,7 +79,8 @@ def _consultas(snapshots: dict[str, Any], statuses: dict[str, str], stage: str, 
     contract = comprasnet.get("contrato_comprasnet") or {}
     months = contract.get("prazo_vincendo_meses")
     comprasnet_result = f"{months} meses vincendos" if months is not None else ("localizado" if comprasnet.get("status_consulta") == "ENCONTRADO" else "não localizado")
-    rows.append(item("Contrato no Comprasnet", "contratos_comprasnet", comprasnet_result, "bom" if comprasnet.get("status_consulta") == "ENCONTRADO" else "atencao"))
+    divergent = divergencia_pncp_comprasnet(snapshots)["divergente"]
+    rows.append(item("Contrato no Comprasnet", "contratos_comprasnet", comprasnet_result, "atencao" if divergent else "bom" if comprasnet.get("status_consulta") == "ENCONTRADO" else "atencao"))
     payments = snapshots.get("pagamentos_portal") or {}
     orders = payments.get("ordens_bancarias") or []
     rows.append(item("Pagamentos (Portal)", "pagamentos_portal", "nada consta" if payments.get("status_consulta") == "ENCONTRADO" and not orders else ("informativo" if payments.get("status_consulta") == "ENCONTRADO" else "não aplicável"), "bom" if payments.get("status_consulta") == "ENCONTRADO" and not orders else "neutro"))
@@ -93,7 +98,7 @@ def montar_resumo(cotacao: dict[str, Any], operation: dict[str, Any] | None, sna
     stage = cotacao.get("estagio") or "LISTA_ESPERA"
     if classe == "EM_ANDAMENTO" and stage == "ENCERRADA":
         classe = "ENCERRADA"
-    first = motivos[0] if motivos else None
+    first = max(motivos, key=lambda item: _SEVERITY[item["classe"]]) if motivos else None
     status = (operation or {}).get("status")
     aba = "REPROVADAS" if status == "reprovada_triagem" else "COTACOES_ENCERRADAS" if status == "cotacao_encerrada" else stage
     expires = _format_date(cotacao.get("data_expiracao"))
@@ -104,7 +109,8 @@ def montar_resumo(cotacao: dict[str, Any], operation: dict[str, Any] | None, sna
     ]
     actions: list[dict[str, Any]] = []
     if classe == "COMERCIAL":
-        actions = [{"id": "reenquadrar", "rotulo": "Reenquadrar", "nota": "Leva para Enquadrada e registra na trilha de auditoria.", "habilitada": True, "motivo_bloqueio": None, "exige_justificativa": False}, {"id": "arquivar", "rotulo": "Arquivar", "nota": "Tira da fila sem contato com o cliente.", "habilitada": True, "motivo_bloqueio": None, "exige_justificativa": False}]
+        proposal = next((e["valor"] for item in motivos for e in item["evidencias"] if e["rotulo"] == "Proposta possível"), "—")
+        actions = [{"id": "reenquadrar", "rotulo": f"Reenquadrar em {proposal}", "nota": "Leva para Enquadrada e registra na trilha de auditoria.", "habilitada": True, "motivo_bloqueio": None, "exige_justificativa": False}, {"id": "arquivar", "rotulo": "Arquivar", "nota": "Tira da fila sem contato com o cliente.", "habilitada": True, "motivo_bloqueio": None, "exige_justificativa": False}]
     elif classe == "CLIENTE":
         actions = [{"id": "pedir_documentos", "rotulo": "Pedir documentos ao cliente", "nota": "Abre mensagem pronta para WhatsApp.", "habilitada": True, "motivo_bloqueio": None, "exige_justificativa": False}, {"id": "consultas_gratuitas", "rotulo": "Rodar consultas gratuitas mesmo assim", "nota": "Libera seguir sem documentos.", "habilitada": True, "motivo_bloqueio": None, "exige_justificativa": False}]
     elif classe in {"CREDITO", "VETO", "REVISAR_DADO"}:
@@ -118,7 +124,10 @@ def montar_resumo(cotacao: dict[str, Any], operation: dict[str, Any] | None, sna
     contract_number = (operation or {}).get("contrato_id") or cotacao.get("contrato_id")
     uasg = (operation or {}).get("uasg") or ((snapshots.get("contratos_comprasnet") or {}).get("contrato_comprasnet") or {}).get("uasg")
     contract_label = f"{contract_number} · UASG {uasg}" if contract_number and uasg else contract_number
-    return {"cotacao_id": cotacao.get("cotacao_id"), "operation_id": cotacao.get("operation_id"), "cnpj": cotacao.get("cnpj"), "razao_social": cotacao.get("nome_fornecedor") or (operation or {}).get("razao_social"), "contrato": contract_label, "aba_origem": aba, "selo": {"texto": labels[classe], "classe": classe}, "kpis": kpis, "trilha": {"estagio_atual": stage, "estagio_max": cotacao.get("estagio_max"), "encerrada": classe == "ENCERRADA"}, "parada": {"classe": classe, "parou_em": cotacao.get("estagio_atualizado_em"), "titulo": first["titulo"] if first else "Passou em todos os filtros gratuitos", "resumo": first["texto"] if first else "Nenhum motivo de parada. O próximo passo é a análise completa."}, "motivos": motivos, "acoes": actions, "consultas": _consultas(snapshots, statuses, stage, cotacao)}
+    resumo = first["texto"] if first else "Nenhum motivo de parada. O próximo passo é a análise completa."
+    if len(motivos) > 1 and first:
+        resumo = f"{len(motivos)} motivos. {first['titulo']} prevalece. {first['texto']}"
+    return {"cotacao_id": cotacao.get("cotacao_id"), "operation_id": cotacao.get("operation_id"), "cnpj": cotacao.get("cnpj"), "razao_social": cotacao.get("nome_fornecedor") or (operation or {}).get("razao_social"), "contrato": contract_label, "aba_origem": aba, "selo": {"texto": labels[classe], "classe": classe}, "kpis": kpis, "trilha": {"estagio_atual": stage, "estagio_max": cotacao.get("estagio_max"), "encerrada": classe == "ENCERRADA"}, "parada": {"classe": classe, "parou_em": cotacao.get("estagio_atualizado_em"), "titulo": first["titulo"] if first else "Passou em todos os filtros gratuitos", "resumo": resumo}, "motivos": motivos, "acoes": actions, "consultas": _consultas(snapshots, statuses, stage, cotacao)}
 
 
 @router.get("/{cotacao_id}/resumo")
