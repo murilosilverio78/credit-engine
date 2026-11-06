@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Cotação: onde parou e por quê</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F4F5F7}
+a{color:#175CD3}a:hover{color:#1849A9}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #F4F5F7; font-family: Inter, system-ui, sans-serif; color: #101828">
+
+  <div style="background: #101828; color: #FFFFFF; padding: 12px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+    <div style="font-weight: 600; font-size: 15px; margin-right: 8px">Credit Engine <span style="color: #98A2B3; font-weight: 400">· protótipo</span></div>
+    <div style="font-size: 13px; color: #D0D5DD">Ver exemplo da aba:</div>
+    <div style="display: flex; flex-wrap: wrap; gap: 6px">
+      <sc-for list="{{tabs}}" as="t" hint-placeholder-count="5">
+        <button type="button" onClick="{{t.pick}}" style="{{t.style}}">{{t.label}}</button>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="max-width: 880px; margin: 0 auto; padding: 20px 16px 48px; display: flex; flex-direction: column; gap: 16px">
+
+    <a href="#" style="font-size: 14px; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; min-height: 44px">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+      Cotações · aba {{s.abaLista}}
+    </a>
+
+    <div style="background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+      <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: flex-start">
+        <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #475467">{{s.cotacao}} · {{s.cnpj}}</div>
+          <h1 style="margin: 0; font-size: 22px; line-height: 1.25; font-weight: 700">{{s.nome}}</h1>
+          <div style="font-size: 13px; color: #475467">{{s.contrato}}</div>
+        </div>
+        <span style="{{s.badgeStyle}}">{{s.badge}}</span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px">
+        <sc-for list="{{s.kpis}}" as="k" hint-placeholder-count="3">
+          <div style="background: #F9FAFB; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px">
+            <div style="font-size: 12px; color: #475467">{{k.k}}</div>
+            <div style="font-size: 16px; font-weight: 600">{{k.v}}</div>
+            <div style="font-size: 12px; color: #667085">{{k.n}}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 12px; padding: 16px 20px">
+      <div style="font-size: 12px; font-weight: 600; color: #475467; letter-spacing: 0.04em; margin-bottom: 12px">JORNADA DA COTAÇÃO</div>
+      <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px">
+        <sc-for list="{{trilha}}" as="p" hint-placeholder-count="5">
+          <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-start">
+            <div style="{{p.bar}}"></div>
+            <div style="{{p.text}}">{{p.label}}</div>
+            <div style="font-size: 11px; color: #667085">{{p.sub}}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="{{s.cardStyle}}">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+        <span style="{{s.classeStyle}}">{{s.classe}}</span>
+        <span style="font-size: 13px; color: #475467">{{s.parouEm}}</span>
+      </div>
+      <h2 style="margin: 0; font-size: 19px; line-height: 1.3">{{s.titulo}}</h2>
+      <p style="margin: 0; font-size: 15px; line-height: 1.55; color: #344054">{{s.resumo}}</p>
+
+      <sc-if value="{{temMotivos}}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 4px">
+          <div style="font-size: 12px; font-weight: 600; color: #475467; letter-spacing: 0.04em">{{motivosTitulo}}</div>
+          <sc-for list="{{motivos}}" as="m" hint-placeholder-count="2">
+            <div style="background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 10px; overflow: hidden">
+              <button type="button" onClick="{{m.toggle}}" aria-expanded="{{m.aberto}}" style="width: 100%; background: none; border: 0; padding: 14px 16px; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; min-height: 52px">
+                <span style="{{m.chipStyle}}">{{m.chip}}</span>
+                <span style="flex: 1; font-size: 15px; font-weight: 600; color: #101828">{{m.titulo}}</span>
+                <span style="font-size: 13px; color: #175CD3; white-space: nowrap">{{m.verLabel}}</span>
+              </button>
+              <sc-if value="{{m.aberto}}" hint-placeholder-val="{{ true }}">
+                <div style="padding: 0 16px 16px; display: flex; flex-direction: column; gap: 12px">
+                  <p style="margin: 0; font-size: 14px; line-height: 1.55; color: #344054">{{m.texto}}</p>
+                  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1px; background: #EAECF0; border: 1px solid #EAECF0; border-radius: 8px; overflow: hidden">
+                    <sc-for list="{{m.evid}}" as="e" hint-placeholder-count="4">
+                      <div style="background: #FFFFFF; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px">
+                        <div style="font-size: 12px; color: #475467">{{e.k}}</div>
+                        <div style="{{e.style}}">{{e.v}}</div>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="font-size: 12px; color: #667085">{{m.fonte}}</div>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+      <div style="font-size: 12px; font-weight: 600; color: #475467; letter-spacing: 0.04em">O QUE FAZER AGORA</div>
+      <div style="display: flex; flex-wrap: wrap; gap: 10px">
+        <sc-for list="{{acoes}}" as="a" hint-placeholder-count="3">
+          <div style="display: flex; flex-direction: column; gap: 4px; max-width: 260px">
+            <button type="button" onClick="{{a.run}}" disabled="{{a.disabled}}" style="{{a.style}}">{{a.label}}</button>
+            <div style="font-size: 12px; color: #667085; line-height: 1.4">{{a.nota}}</div>
+          </div>
+        </sc-for>
+      </div>
+      <sc-if value="{{temToast}}" hint-placeholder-val="{{ false }}">
+        <div role="status" style="background: #F0F9FF; border: 1px solid #B9E6FE; color: #026AA2; border-radius: 8px; padding: 10px 12px; font-size: 14px">{{toast}}</div>
+      </sc-if>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 12px; overflow: hidden">
+      <button type="button" onClick="{{toggleConsultas}}" aria-expanded="{{consultasAbertas}}" style="width: 100%; background: none; border: 0; padding: 16px 20px; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; min-height: 52px">
+        <span style="flex: 1; font-size: 12px; font-weight: 600; color: #475467; letter-spacing: 0.04em">{{consultasTitulo}}</span>
+        <span style="font-size: 13px; color: #175CD3">{{consultasLabel}}</span>
+      </button>
+      <sc-if value="{{consultasAbertas}}" hint-placeholder-val="{{ false }}">
+        <div style="padding: 0 20px 20px; display: flex; flex-direction: column; gap: 14px">
+          <div style="overflow-x: auto; border: 1px solid #EAECF0; border-radius: 8px">
+            <table style="width: 100%; border-collapse: collapse; font-size: 14px; min-width: 480px">
+              <thead>
+                <tr style="background: #F9FAFB; text-align: left">
+                  <th style="padding: 10px 12px; font-size: 12px; color: #475467; font-weight: 600">Consulta</th>
+                  <th style="padding: 10px 12px; font-size: 12px; color: #475467; font-weight: 600">Coleta</th>
+                  <th style="padding: 10px 12px; font-size: 12px; color: #475467; font-weight: 600">Resultado</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{s.consultas}}" as="c" hint-placeholder-count="5">
+                  <tr style="border-top: 1px solid #EAECF0">
+                    <td style="padding: 10px 12px">{{c.nome}}</td>
+                    <td style="padding: 10px 12px; color: #067647">{{c.coleta}}</td>
+                    <td style="padding: 10px 12px"><span style="{{c.style}}">{{c.res}}</span></td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+          <div style="background: #F9FAFB; border-radius: 8px; padding: 12px; font-size: 13px; color: #475467; line-height: 1.5">{{s.naoExec}}</div>
+        </div>
+      </sc-if>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1500}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { aba: 'documentada', abertos: { 0: true }, consultas: false, toast: '' };
+  }
+
+  dados() {
+    var R = { bg: '#FEF3F2', fg: '#B42318', bd: '#FECDCA' };
+    var B = { bg: '#EFF8FF', fg: '#175CD3', bd: '#B2DDFF' };
+    var A = { bg: '#FFFAEB', fg: '#B54708', bd: '#FEDF89' };
+    var G = { bg: '#ECFDF3', fg: '#067647', bd: '#ABEFC6' };
+    var C = { bg: '#F2F4F7', fg: '#344054', bd: '#D0D5DD' };
+    var ok = 'ok';
+    var nada = { r: 'nada consta', t: G };
+    return {
+      lista: {
+        tab: 'Lista de espera', abaLista: 'Lista de espera', idx: 0, tom: B,
+        cotacao: 'C-1793791899193', cnpj: '72.201.379/0001-09',
+        nome: 'APOLLO SERVICOS TERCEIRIZADOS E MAO DE OBRA ESPEC',
+        contrato: 'Recebível do tipo CONTRATO',
+        badge: 'Parada: valor acima do ticket',
+        kpis: [
+          { k: 'Valor pedido', v: 'R$ 1.900.000,00', n: '' },
+          { k: 'Enquadrável pelo contrato', v: 'R$ 1.626.770,44', n: '50% do saldo vincendo' },
+          { k: 'Expira em', v: '25/11/2026', n: '19 dias' }
+        ],
+        classe: 'Reversível pelo comercial', parouEm: 'Parou na Lista de espera em 04/11/2026',
+        titulo: 'O pedido passa do teto da política, mas dá para oferecer o ticket máximo',
+        resumo: 'Nenhuma consulta foi feita ainda. A cotação foi barrada pelas regras que usam só os dados da Broadfactor. O contrato comporta mais que o ticket máximo, então existe uma proposta possível de R$ 700.000.',
+        motivos: [
+          { chip: 'Ajustável', tom: B, titulo: 'Valor acima do ticket máximo',
+            texto: 'O valor pedido e o valor que o contrato comporta ficam acima de R$ 700.000. Reenquadrar no ticket máximo leva a cotação para a próxima aba sem mudar nenhuma regra.',
+            evid: [
+              { k: 'Valor pedido', v: 'R$ 1.900.000,00' },
+              { k: 'Saldo vincendo do contrato', v: 'R$ 3.253.540,87' },
+              { k: 'Enquadrável (50% do vincendo)', v: 'R$ 1.626.770,44' },
+              { k: 'Ticket máximo da política', v: 'R$ 700.000,00', bad: true },
+              { k: 'Proposta possível', v: 'R$ 700.000,00', good: true }
+            ],
+            fonte: 'Fonte: cotação da Broadfactor e parâmetros de elegibilidade.' }
+        ],
+        acoes: [
+          { label: 'Reenquadrar em R$ 700.000', primary: true, nota: 'Leva para Enquadrada e registra na trilha de auditoria.', msg: 'Cotação reenquadrada em R$ 700.000 e enviada para Enquadrada.' },
+          { label: 'Arquivar', nota: 'Tira da fila sem contato com o cliente.', msg: 'Cotação arquivada.' }
+        ],
+        consultasTitulo: 'REGRAS APLICADAS (SEM CUSTO)',
+        consultas: [
+          { nome: 'Tipo do recebível', coleta: ok, r: 'CONTRATO, elegível', t: G },
+          { nome: 'Valor contra ticket mínimo e máximo', coleta: ok, r: 'acima do máximo', t: A },
+          { nome: 'Dias até a expiração (mínimo 3)', coleta: ok, r: '19 dias', t: G }
+        ],
+        naoExec: 'Ainda não executadas: consultas gratuitas (cadastro, sanções, contratos, pagamentos) e análise paga. Elas rodam quando a cotação chega em Documentada.'
+      },
+      enquadrada: {
+        tab: 'Enquadrada', abaLista: 'Enquadrada', idx: 1, tom: B,
+        cotacao: 'C-1793887270802', cnpj: '23.966.157/0001-71',
+        nome: 'JJX COMERCIO E SERVICOS LTDA',
+        contrato: 'Recebível do tipo CONTRATO',
+        badge: 'Parada: sem documentos',
+        kpis: [
+          { k: 'Valor pedido', v: 'R$ 232.400,00', n: '' },
+          { k: 'Valor enquadrado', v: 'R$ 174.300,00', n: 'abaixo do pedido (50% do vincendo)' },
+          { k: 'Expira em', v: '26/11/2026', n: '20 dias' }
+        ],
+        classe: 'Depende do cliente', parouEm: 'Parou em Enquadrada em 05/11/2026',
+        titulo: 'Passou no valor, mas a Broadfactor ainda não tem documentos do cedente',
+        resumo: 'Isso não indica problema na empresa: a Broadfactor só coleta documentos quando o cliente pede. Sem eles a cotação não avança para as consultas.',
+        motivos: [
+          { chip: 'Aguardando cliente', tom: B, titulo: 'Nenhum documento na Broadfactor',
+            texto: 'Documentos que a análise usa e que ainda não chegaram:',
+            evid: [
+              { k: 'Contrato social', v: 'não recebido', bad: true },
+              { k: 'Último balanço', v: 'não recebido', bad: true },
+              { k: 'Faturamento', v: 'não recebido', bad: true },
+              { k: 'Endividamento', v: 'não recebido', bad: true },
+              { k: 'CND Federal', v: 'não recebido', bad: true },
+              { k: 'IR do sócio avalista', v: 'não recebido', bad: true }
+            ],
+            fonte: 'Fonte: listagem de documentos da Broadfactor, atualizada 2x por dia.' }
+        ],
+        acoes: [
+          { label: 'Pedir documentos ao cliente', primary: true, nota: 'Abre mensagem pronta para WhatsApp com a lista acima.', msg: 'Mensagem de pedido de documentos copiada.' },
+          { label: 'Rodar consultas gratuitas mesmo assim', nota: 'Decisão sua pendente: libera ou não seguir sem documentos.', msg: 'Consultas gratuitas disparadas (simulação).' }
+        ],
+        consultasTitulo: 'REGRAS APLICADAS (SEM CUSTO)',
+        consultas: [
+          { nome: 'Tipo do recebível', coleta: ok, r: 'CONTRATO, elegível', t: G },
+          { nome: 'Valor contra ticket', coleta: ok, r: 'dentro da faixa', t: G },
+          { nome: 'Documentos na Broadfactor', coleta: ok, r: '0 documentos', t: A }
+        ],
+        naoExec: 'Ainda não executadas: consultas gratuitas e análise paga. Rodam quando a cotação tiver documentos (ou se você liberar seguir sem eles).'
+      },
+      documentada: {
+        tab: 'Documentada', abaLista: 'Documentada', idx: 2, tom: R,
+        cotacao: 'C-1793047365028', cnpj: '79.283.065/0001-41',
+        nome: 'ORBENK ADMINISTRACAO E SERVICOS LTDA.',
+        contrato: 'Contrato 00037/2025 · UASG 158493 · dedicação exclusiva de mão de obra',
+        badge: 'Reprovada na triagem',
+        kpis: [
+          { k: 'Valor pedido', v: 'R$ 100.000,00', n: '' },
+          { k: 'Capacidade do contrato', v: 'R$ 0', n: 'ver motivo 2' },
+          { k: 'Expira em', v: '07/11/2026', n: '1 dia' }
+        ],
+        classe: 'Definitiva', parouEm: 'Parou em Documentada em 05/11/2026 às 13:38',
+        titulo: 'Reprovada: sanção ativa no CEIS',
+        resumo: 'As consultas gratuitas encontraram dois motivos. A sanção é veto e prevalece: nenhuma ação libera a operação antes de 05/05/2027. A capacidade zerada parece erro de dado e vale corrigir para não contaminar análises futuras do cedente.',
+        motivos: [
+          { chip: 'Veto', tom: R, titulo: '1. Sanção ativa no CEIS',
+            texto: 'Impedimento de licitar e contratar aplicado pela Prefeitura de Porto Alegre. A abrangência é municipal e não alcança contratos com a União, mas a política trata qualquer sanção ativa como veto.',
+            evid: [
+              { k: 'Órgão sancionador', v: 'Prefeitura Municipal de Porto Alegre (RS) · esfera municipal' },
+              { k: 'Tipo', v: 'Impedimento/proibição de contratar com prazo determinado' },
+              { k: 'Fundamento', v: 'Lei 14.133, art. 156, III' },
+              { k: 'Vigência', v: '06/05/2026 a 05/05/2027 · 180 dias restantes', bad: true },
+              { k: 'Abrangência', v: 'Todos os Poderes da esfera do órgão sancionador' },
+              { k: 'Processo e publicação', v: '26.0.000009506-0 · DOM Porto Alegre, seção 7782, p. 53' }
+            ],
+            fonte: 'Fonte: Portal da Transparência (CEIS), consulta de 05/11/2026. CNEP, CEPIM e acordos de leniência: nada consta.' },
+          { chip: 'Revisar dado', tom: A, titulo: '2. Capacidade do contrato zerada',
+            texto: 'O PNCP mostra o contrato vencido em 15/09/2026, mas o Comprasnet indica 10 meses vincendos. Provável aditivo de prorrogação que o PNCP não refletiu.',
+            evid: [
+              { k: 'Vigência no PNCP', v: '15/09/2025 a 15/09/2026', bad: true },
+              { k: 'Prazo vincendo no Comprasnet', v: '10 meses' },
+              { k: 'Valor global', v: 'R$ 214.732,80 (Comprasnet) · R$ 183.600,00 (PNCP)' },
+              { k: 'Mensal nominal', v: 'R$ 15.300,00' },
+              { k: 'Capacidade calculada', v: 'R$ 0', bad: true },
+              { k: 'Divergência entre fontes', v: 'Sim: vigência e valor global' }
+            ],
+            fonte: 'Fontes: PNCP (contrato 10784782000150-2-000779/2025) e Comprasnet.' }
+        ],
+        acoes: [
+          { label: 'Copiar mensagem de recusa', primary: true, nota: 'Texto pronto para o cliente com o motivo da sanção.', msg: 'Mensagem de recusa copiada.' },
+          { label: 'Lembrar em 05/05/2027', nota: 'Reabre a cotação do cedente quando a sanção vencer.', msg: 'Lembrete criado para 05/05/2027.' },
+          { label: 'Recoletar contrato', nota: 'Corrige o dado de vigência. Não muda a decisão.', msg: 'Recoleta do contrato disparada.' },
+          { label: 'Enviar para análise completa', disabled: true, nota: 'Bloqueado: existe veto ativo.' }
+        ],
+        consultasTitulo: 'CONSULTAS EXECUTADAS (9)',
+        consultas: [
+          { nome: 'Cadastro (BrasilAPI)', coleta: ok, r: 'ATIVA', t: G },
+          { nome: 'Resumo de sanções (Portal)', coleta: ok, r: 'sanção CEIS', t: R },
+          { nome: 'CEIS', coleta: ok, r: '1 sanção ativa', t: R },
+          { nome: 'CNEP', coleta: ok, r: nada.r, t: nada.t },
+          { nome: 'CEPIM', coleta: ok, r: nada.r, t: nada.t },
+          { nome: 'Acordos de leniência', coleta: ok, r: nada.r, t: nada.t },
+          { nome: 'Contrato no PNCP', coleta: ok, r: 'vigência vencida', t: A },
+          { nome: 'Contrato no Comprasnet', coleta: ok, r: '10 meses vincendos', t: C },
+          { nome: 'Pagamentos (Portal)', coleta: ok, r: 'informativo', t: C }
+        ],
+        naoExec: 'Não executados porque a cotação parou na triagem: score, pesquisa reputacional, extração do contrato, documentos financeiros, CNDT e FGTS. Nenhum custo de análise paga foi gerado.'
+      },
+      qualificada: {
+        tab: 'Qualificada', abaLista: 'Qualificada', idx: 3, tom: G,
+        cotacao: 'C-1793367917902', cnpj: '00.578.617/0001-99',
+        nome: 'PROCLIMA ENGENHARIA LTDA',
+        contrato: 'Recebível do tipo CONTRATO · 19 documentos na Broadfactor',
+        badge: 'Pronta para análise',
+        kpis: [
+          { k: 'Valor pedido', v: 'R$ 230.000,00', n: '' },
+          { k: 'Valor enquadrado', v: 'R$ 168.878,86', n: 'abaixo do pedido' },
+          { k: 'Expira em', v: '23/11/2026', n: '17 dias' }
+        ],
+        classe: 'Em andamento', parouEm: 'Qualificada · aguardando seu comando',
+        titulo: 'Passou em todos os filtros gratuitos',
+        resumo: 'Nenhum motivo de parada. O próximo passo é a análise completa (score, pesquisa reputacional, contrato e documentos financeiros), que tem custo de modelo e por isso só roda quando você manda.',
+        motivos: [],
+        acoes: [
+          { label: 'Gerar relatório', primary: true, nota: 'Dispara a análise paga. Acompanhe o progresso nesta tela.', msg: 'Análise completa disparada (simulação).' }
+        ],
+        consultasTitulo: 'CONSULTAS EXECUTADAS (9)',
+        consultas: [
+          { nome: 'Cadastro (BrasilAPI)', coleta: ok, r: 'ATIVA', t: G },
+          { nome: 'CEIS', coleta: ok, r: nada.r, t: nada.t },
+          { nome: 'CNEP', coleta: ok, r: nada.r, t: nada.t },
+          { nome: 'CEPIM', coleta: ok, r: nada.r, t: nada.t },
+          { nome: 'Acordos de leniência', coleta: ok, r: nada.r, t: nada.t },
+          { nome: 'Contrato (PNCP e Comprasnet)', coleta: ok, r: 'localizado', t: G }
+        ],
+        naoExec: 'Ainda não executados: score, pesquisa reputacional, extração do contrato e documentos financeiros. Rodam no "Gerar relatório".'
+      },
+      encerrada: {
+        tab: 'Encerrada', abaLista: 'Encerrada', idx: 3, tom: C, encerrada: true,
+        cotacao: 'C-1793382852614', cnpj: '12.531.678/0001-80',
+        nome: 'GREEN HOUSE SERVICOS DE LOCACAO DE MAO DE OBRA LT',
+        contrato: 'Recebível do tipo CONTRATO · 27 documentos na Broadfactor',
+        badge: 'Encerrada',
+        kpis: [
+          { k: 'Valor pedido', v: 'R$ 490.000,00', n: '' },
+          { k: 'Valor enquadrado', v: 'R$ 424.606,68', n: '' },
+          { k: 'Expiraria em', v: '23/11/2026', n: 'saiu antes do prazo' }
+        ],
+        classe: 'Encerrada', parouEm: 'Chegou até Qualificada antes de encerrar',
+        titulo: 'A cotação saiu da listagem da Broadfactor',
+        resumo: 'Só leitura. A cotação deixou de aparecer na Broadfactor antes de expirar. Causas possíveis: o fornecedor desistiu, fechou com outro financiador ou o órgão alterou o contrato.',
+        motivos: [
+          { chip: 'Encerrada', tom: C, titulo: 'Ausente na listagem da Broadfactor',
+            texto: 'Registro do que já tinha sido feito antes do encerramento:',
+            evid: [
+              { k: 'Último estágio alcançado', v: 'Qualificada' },
+              { k: 'Data da cotação', v: '30/10/2026' },
+              { k: 'Expiraria em', v: '23/11/2026' },
+              { k: 'Documentos recebidos', v: '27' }
+            ],
+            fonte: 'Fonte: comparação entre janelas de ingestão da Broadfactor.' }
+        ],
+        acoes: [
+          { label: 'Abrir análise da operação', nota: 'Consultas e relatório feitos antes do encerramento.', msg: 'Abrindo análise (simulação).' },
+          { label: 'Avisar comercial', nota: 'Para entender se o cliente fechou com outro financiador.', msg: 'Aviso enviado ao comercial (simulação).' }
+        ],
+        consultasTitulo: 'CONSULTAS EXECUTADAS',
+        consultas: [
+          { nome: 'Consultas gratuitas', coleta: ok, r: 'qualificada', t: G }
+        ],
+        naoExec: 'Cotação encerrada: nenhuma consulta nova será executada.'
+      }
+    };
+  }
+
+  chip(t, size) {
+    return 'display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: ' + (size || 12) + 'px; font-weight: 600; background: ' + t.bg + '; color: ' + t.fg + '; border: 1px solid ' + t.bd + '; white-space: nowrap';
+  }
+
+  renderVals() {
+    var self = this;
+    var all = this.dados();
+    var key = this.state.aba;
+    var s = all[key];
+    var ordem = ['lista', 'enquadrada', 'documentada', 'qualificada', 'encerrada'];
+
+    var tabs = ordem.map(function (k) {
+      var on = k === key;
+      return {
+        label: all[k].tab,
+        pick: function () { self.setState({ aba: k, abertos: { 0: true }, consultas: false, toast: '' }); },
+        style: 'min-height: 36px; padding: 6px 12px; border-radius: 999px; font-size: 13px; cursor: pointer; border: 1px solid ' + (on ? '#FFFFFF' : '#475467') + '; background: ' + (on ? '#FFFFFF' : 'transparent') + '; color: ' + (on ? '#101828' : '#F2F4F7') + '; font-weight: ' + (on ? 600 : 400)
+      };
+    });
+
+    var passos = ['Lista de espera', 'Enquadrada', 'Documentada', 'Qualificada', 'Relatório'];
+    var trilha = passos.map(function (label, i) {
+      var cor, sub, peso = 400, txt = '#667085';
+      if (i < s.idx) { cor = '#12B76A'; sub = 'passou'; txt = '#344054'; }
+      else if (i === s.idx) {
+        cor = s.encerrada ? '#98A2B3' : s.tom.fg;
+        sub = s.encerrada ? 'último estágio' : (key === 'qualificada' ? 'aqui agora' : 'parou aqui');
+        peso = 700; txt = '#101828';
+      } else { cor = '#E4E7EC'; sub = s.encerrada && i === s.idx + 1 ? 'encerrada' : ''; }
+      return {
+        label: label, sub: sub,
+        bar: 'width: 100%; height: 6px; border-radius: 3px; background: ' + cor,
+        text: 'font-size: 13px; line-height: 1.25; font-weight: ' + peso + '; color: ' + txt
+      };
+    });
+
+    var motivos = s.motivos.map(function (m, i) {
+      var aberto = !!self.state.abertos[i];
+      return {
+        chip: m.chip, chipStyle: self.chip(m.tom), titulo: m.titulo, texto: m.texto, fonte: m.fonte,
+        aberto: aberto, verLabel: aberto ? 'ocultar' : 'ver evidência',
+        evid: m.evid.map(function (e) {
+          return { k: e.k, v: e.v, style: 'font-size: 14px; line-height: 1.4; font-weight: 500; color: ' + (e.bad ? '#B42318' : (e.good ? '#067647' : '#101828')) };
+        }),
+        toggle: function () {
+          var ab = Object.assign({}, self.state.abertos);
+          ab[i] = !ab[i];
+          self.setState({ abertos: ab });
+        }
+      };
+    });
+
+    var acoes = s.acoes.map(function (a) {
+      var base = 'min-height: 44px; padding: 10px 16px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; ';
+      var st = a.disabled
+        ? base + 'background: #F2F4F7; color: #98A2B3; border: 1px solid #E4E7EC; cursor: not-allowed'
+        : (a.primary ? base + 'background: #101828; color: #FFFFFF; border: 1px solid #101828' : base + 'background: #FFFFFF; color: #344054; border: 1px solid #D0D5DD');
+      return {
+        label: a.label, nota: a.nota, disabled: !!a.disabled, style: st,
+        run: function () { if (!a.disabled) self.setState({ toast: a.msg }); }
+      };
+    });
+
+    var consultas = s.consultas.map(function (c) {
+      return { nome: c.nome, coleta: '✓ ' + c.coleta, res: c.r, style: self.chip(c.t) };
+    });
+
+    return {
+      tabs: tabs,
+      trilha: trilha,
+      s: {
+        abaLista: s.abaLista, cotacao: s.cotacao, cnpj: s.cnpj, nome: s.nome, contrato: s.contrato,
+        badge: s.badge, badgeStyle: this.chip(s.tom, 13), kpis: s.kpis,
+        classe: s.classe, classeStyle: this.chip(s.tom, 13), parouEm: s.parouEm,
+        titulo: s.titulo, resumo: s.resumo, consultas: consultas, naoExec: s.naoExec,
+        cardStyle: 'background: ' + s.tom.bg + '; border: 1px solid ' + s.tom.bd + '; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px'
+      },
+      temMotivos: motivos.length > 0,
+      motivosTitulo: motivos.length > 1 ? 'MOTIVOS (' + motivos.length + ')' : 'MOTIVO',
+      motivos: motivos,
+      acoes: acoes,
+      temToast: !!this.state.toast,
+      toast: this.state.toast,
+      consultasTitulo: s.consultasTitulo,
+      consultasAbertas: this.state.consultas,
+      consultasLabel: this.state.consultas ? 'ocultar' : 'mostrar',
+      toggleConsultas: function () { self.setState({ consultas: !self.state.consultas }); }
+    };
+  }
+}
+</script>
+</body>
+</html>
