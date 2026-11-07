@@ -72,7 +72,7 @@ def test_orbenk_veto_and_contract_divergence_summary():
     assert next(row for row in summary["consultas"]["itens"] if row["nome"] == "Contrato no Comprasnet")["tom"] == "atencao"
     full = next(action for action in summary["acoes"] if action["id"] == "enviar_analise_completa")
     assert full["habilitada"] is False and full["motivo_bloqueio"] == "Bloqueado: existe veto ativo"
-    assert summary["parada"]["resumo"].startswith("2 motivos. Sanção ativa no CEIS prevalece.")
+    assert summary["parada"]["resumo"] == "2 motivos; Sanção ativa no CEIS prevalece. Há um veto definitivo: nenhuma ação libera a operação antes de 05/05/2027."
 
 
 def test_proclima_qualified_summary():
@@ -89,6 +89,8 @@ def test_green_house_closed_summary():
     assert summary["selo"]["classe"] == "ENCERRADA"
     assert summary["trilha"]["estagio_max"] == "QUALIFICADA"
     assert {action["id"] for action in summary["acoes"]} == {"abrir_analise", "avisar_comercial"}
+    assert summary["kpis"][2] == {"rotulo": "Expiraria em", "valor": "2026-11-25", "formato": "DATA", "nota": "saiu antes do prazo"}
+    assert summary["motivos"][0]["evidencias"][0]["valor"] == "Qualificadas"
 
 
 def test_list_rules_use_real_type_and_minimum_ticket_reason():

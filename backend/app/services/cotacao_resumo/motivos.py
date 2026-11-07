@@ -19,6 +19,12 @@ _CLASSES = {
     "ENCERRADA": ("Encerrada", "Encerrada"),
 }
 
+_STAGE_LABELS = {
+    "LISTA_ESPERA": "Não enquadradas", "ENQUADRADA": "Sem documentos",
+    "DOCUMENTADA": "Em verificação", "QUALIFICADA": "Qualificadas",
+    "ENCERRADA": "Encerradas", "RELATORIO": "Relatório",
+}
+
 
 def _brl(value: Any) -> str:
     try:
@@ -198,7 +204,8 @@ def traduzir_motivos(estagio_motivo: str | None, snapshots: dict[str, Any], *, c
         }
         if original in closed:
             code, title, text = closed[original]
-            motivos.append(_base(code, original, "ENCERRADA", title, text, [_evidence("Último estágio alcançado", cotacao.get("estagio_max") or "—"), _evidence("Data da cotação", _fmt_date(cotacao.get("data_cotacao"))), _evidence("Expiração", _fmt_date(cotacao.get("data_expiracao"))), _evidence("Documentos recebidos", cotacao.get("n_documentos") or 0)], "Comparação entre janelas de ingestão da Broadfactor.")); continue
+            last_stage = cotacao.get("estagio_max") or "—"
+            motivos.append(_base(code, original, "ENCERRADA", title, text, [_evidence("Último estágio alcançado", _STAGE_LABELS.get(last_stage, str(last_stage))), _evidence("Data da cotação", _fmt_date(cotacao.get("data_cotacao"))), _evidence("Expiração", _fmt_date(cotacao.get("data_expiracao"))), _evidence("Documentos recebidos", cotacao.get("n_documentos") or 0)], "Comparação entre janelas de ingestão da Broadfactor.")); continue
         logger.warning("cotacao_resumo.unknown_reason", codigo_origem=original)
         motivos.append(_base("MOTIVO_DESCONHECIDO", original, "REVISAR_DADO", "Motivo a revisar", original, [_evidence("Texto original", original, "atencao")], "Código recebido do funil."))
     return motivos

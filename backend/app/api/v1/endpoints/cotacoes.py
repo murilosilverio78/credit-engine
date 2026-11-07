@@ -14,7 +14,6 @@ router = APIRouter()
 
 _SEVERITY = {"EM_ANDAMENTO": 0, "COMERCIAL": 1, "CLIENTE": 2, "REVISAR_DADO": 3, "CREDITO": 4, "VETO": 5, "ENCERRADA": 6}
 
-
 def _params() -> dict[str, Any]:
     try:
         from app.services.eligibility_params_service import get_eligibility_config
@@ -102,10 +101,11 @@ def montar_resumo(cotacao: dict[str, Any], operation: dict[str, Any] | None, sna
     status = (operation or {}).get("status")
     aba = "REPROVADAS" if status == "reprovada_triagem" else "COTACOES_ENCERRADAS" if status == "cotacao_encerrada" else stage
     expires = _format_date(cotacao.get("data_expiracao"))
+    is_expired = "cotacao_expirada" in (cotacao.get("estagio_motivo") or "")
     kpis = [
         {"rotulo": "Valor pedido", "valor": cotacao.get("valor_solicitado"), "formato": "BRL", "nota": None},
         {"rotulo": "Capacidade do contrato" if operation and operation.get("capacidade_contrato") is not None else "Valor enquadrado", "valor": (operation or {}).get("capacidade_contrato", cotacao.get("valor_enquadrado")), "formato": "BRL", "nota": None},
-        {"rotulo": "Expira em", "valor": expires, "formato": "DATA", "nota": None},
+        {"rotulo": "Expiraria em" if classe == "ENCERRADA" else "Expira em", "valor": expires, "formato": "DATA", "nota": "expirou" if classe == "ENCERRADA" and is_expired else "saiu antes do prazo" if classe == "ENCERRADA" else None},
     ]
     actions: list[dict[str, Any]] = []
     if classe == "COMERCIAL":
@@ -124,9 +124,20 @@ def montar_resumo(cotacao: dict[str, Any], operation: dict[str, Any] | None, sna
     contract_number = (operation or {}).get("contrato_id") or cotacao.get("contrato_id")
     uasg = (operation or {}).get("uasg") or ((snapshots.get("contratos_comprasnet") or {}).get("contrato_comprasnet") or {}).get("uasg")
     contract_label = f"{contract_number} · UASG {uasg}" if contract_number and uasg else contract_number
-    resumo = first["texto"] if first else "Nenhum motivo de parada. O próximo passo é a análise completa."
+    proposal = next((e["valor"] for item in motivos for e in item["evidencias"] if e["rotulo"] == "Proposta possível"), "—")
+    sanction_end = next((e["valor"].split(" a ")[-1].split(" ·")[0] for item in motivos for e in item["evidencias"] if e["rotulo"] == "Vigência" and " a " in e["valor"]), None)
+    summaries = {
+        "VETO": f"Há um veto definitivo: nenhuma ação libera a operação{' antes de ' + sanction_end if sanction_end else ''}.",
+        "CREDITO": "Reprovada por critério de crédito. Pode seguir para a análise completa com justificativa.",
+        "REVISAR_DADO": "Um dado precisa ser revisto antes de decidir.",
+        "COMERCIAL": f"Nenhuma consulta foi feita ainda. Existe proposta possível de {proposal}.",
+        "CLIENTE": "Isso não indica problema na empresa: a Broadfactor só coleta documentos quando o cliente pede.",
+        "EM_ANDAMENTO": "Nenhum motivo de parada. O próximo passo é a análise completa, que tem custo de modelo e só roda quando você manda.",
+        "ENCERRADA": "Somente leitura. A cotação não receberá novas consultas.",
+    }
+    resumo = summaries[classe]
     if len(motivos) > 1 and first:
-        resumo = f"{len(motivos)} motivos. {first['titulo']} prevalece. {first['texto']}"
+        resumo = f"{len(motivos)} motivos; {first['titulo']} prevalece. {resumo}"
     return {"cotacao_id": cotacao.get("cotacao_id"), "operation_id": cotacao.get("operation_id"), "cnpj": cotacao.get("cnpj"), "razao_social": cotacao.get("nome_fornecedor") or (operation or {}).get("razao_social"), "contrato": contract_label, "aba_origem": aba, "selo": {"texto": labels[classe], "classe": classe}, "kpis": kpis, "trilha": {"estagio_atual": stage, "estagio_max": cotacao.get("estagio_max"), "encerrada": classe == "ENCERRADA"}, "parada": {"classe": classe, "parou_em": cotacao.get("estagio_atualizado_em"), "titulo": first["titulo"] if first else "Passou em todos os filtros gratuitos", "resumo": resumo}, "motivos": motivos, "acoes": actions, "consultas": _consultas(snapshots, statuses, stage, cotacao)}
 
 

@@ -1393,6 +1393,7 @@ export default function OperationDetailPage() {
   );
   const scoreRunning = operation?.components?.some((component) => component.component === "score_engine" && component.status === "running") ?? false;
   const isLive = Boolean(operation && (operation.status === "pending" || operation.status === "processing" || operation.status === "manual_review" || scoreRunning || Date.now() < recollectionUntil));
+  const shouldRenderProcessing = Boolean(operation && (operation.status === "pending" || operation.status === "processing" || scoreRunning || Date.now() < recollectionUntil));
   const isStoppedQuote = operation?.status === "reprovada_triagem" || operation?.status === "cotacao_encerrada" || operation?.status === "aguardando_relatorio";
 
   useEffect(() => {
@@ -1458,7 +1459,7 @@ export default function OperationDetailPage() {
   return (
     <div className="flex min-h-dvh flex-col bg-muted/40">
       <Topbar operation={operation} />
-      {isLive ? (
+      {shouldRenderProcessing ? (
         <ProcessingView
           operation={operation}
           pipeline={pipeline}
