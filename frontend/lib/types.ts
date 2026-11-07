@@ -8,7 +8,7 @@ export interface CotacaoResumo {
   trilha: { estagio_atual: FunilEstagio; estagio_max: FunilEstagio | null; encerrada: boolean };
   parada: { classe: CotacaoResumoClasse; parou_em: string | null; titulo: string; resumo: string };
   motivos: Array<{ codigo: string; codigo_origem: string; classe: CotacaoResumoClasse; chip: string; titulo: string; texto: string; evidencias: Array<{ rotulo: string; valor: string; tom: "bom" | "ruim" | "atencao" | "neutro" }>; fonte: string }>;
-  acoes: Array<{ id: string; rotulo: string; nota: string; habilitada: boolean; motivo_bloqueio: string | null; exige_justificativa: boolean }>;
+  acoes: Array<{ id: string; rotulo: string; nota: string; habilitada: boolean; motivo_bloqueio: string | null; exige_justificativa: boolean; mensagem?: string }>;
   consultas: { titulo: string; itens: Array<{ nome: string; coleta: string; resultado: string; tom: "bom" | "ruim" | "atencao" | "neutro" }>; nao_executados: string };
 }
 

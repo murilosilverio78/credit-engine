@@ -147,3 +147,8 @@ def test_audit_log_actions_are_declared_in_action_type_migrations():
         f"{action} ({', '.join(usages[action])})" for action in sorted(undeclared)
     )
     assert not undeclared, f"audit.log actions missing from action_type: {details}"
+
+
+def test_quote_action_types_are_declared_by_migration_076():
+    declared = _declared_action_types()
+    assert {"quote_reframed", "quote_free_checks_requested", "quote_full_analysis_requested", "quote_archived"} <= declared

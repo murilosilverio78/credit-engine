@@ -196,6 +196,11 @@ export function getCotacaoResumo(cotacaoId: string) {
   return request<CotacaoResumo>(`/api/v1/cotacoes/${encodeURIComponent(cotacaoId)}/resumo`);
 }
 
+export function reframeQuote(cotacaoId: string) { return request(`/api/v1/cotacoes/${encodeURIComponent(cotacaoId)}/reenquadrar`, { method: "POST" }); }
+export function requestQuoteFreeChecks(cotacaoId: string) { return request(`/api/v1/cotacoes/${encodeURIComponent(cotacaoId)}/consultas-gratuitas`, { method: "POST" }); }
+export function requestQuoteFullAnalysis(cotacaoId: string, justificativa?: string) { return request(`/api/v1/cotacoes/${encodeURIComponent(cotacaoId)}/analise-completa`, { method: "POST", body: JSON.stringify({ justificativa }) }); }
+export function archiveQuote(cotacaoId: string, justificativa?: string) { return request(`/api/v1/cotacoes/${encodeURIComponent(cotacaoId)}/arquivar`, { method: "POST", body: JSON.stringify({ justificativa }) }); }
+
 export function recollectOperation(operationId: string) {
   return request(`/api/v1/operations/${encodeURIComponent(operationId)}/recoletar`, {
     method: "POST",

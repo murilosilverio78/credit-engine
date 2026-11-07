@@ -50,6 +50,7 @@ def test_jjx_no_documents_summary():
     assert summary["selo"]["classe"] == "CLIENTE"
     assert len(summary["motivos"][0]["evidencias"]) == 6
     assert {action["id"] for action in summary["acoes"]} == {"pedir_documentos", "consultas_gratuitas"}
+    assert "Equipe AntecipaGov" in next(action for action in summary["acoes"] if action["id"] == "pedir_documentos")["mensagem"]
 
 
 def test_orbenk_veto_and_contract_divergence_summary():
@@ -72,6 +73,8 @@ def test_orbenk_veto_and_contract_divergence_summary():
     assert next(row for row in summary["consultas"]["itens"] if row["nome"] == "Contrato no Comprasnet")["tom"] == "atencao"
     full = next(action for action in summary["acoes"] if action["id"] == "enviar_analise_completa")
     assert full["habilitada"] is False and full["motivo_bloqueio"] == "Bloqueado: existe veto ativo"
+    refusal = next(action for action in summary["acoes"] if action["id"] == "copiar_mensagem_recusa")
+    assert "Prefeitura Municipal de Porto Alegre" in refusal["mensagem"] and "Equipe AntecipaGov" in refusal["mensagem"]
     assert summary["parada"]["resumo"] == "2 motivos; Sanção ativa no CEIS prevalece. Há um veto definitivo: nenhuma ação libera a operação antes de 05/05/2027."
 
 
