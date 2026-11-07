@@ -847,9 +847,8 @@ class BroadfactorClient:
         """
         Igual a cotacoes_elegiveis, mas devolve (aprovadas, descartadas).
 
-        Cada descarte vem com o motivo. Sem esse registro nao ha como calibrar
-        ticket_minimo e ticket_maximo depois — e como o teto descarta em
-        definitivo, a cotacao desaparece sem deixar rastro.
+        Cada descarte vem com o motivo. O teto não descarta a cotação: o
+        valor enquadrado é limitado ao ticket máximo na ingestão.
         """
         limite_data = date.today() + timedelta(days=dias_minimos_expiracao)
         aprovadas: list[Cotacao] = []
@@ -871,9 +870,6 @@ class BroadfactorClient:
             enquadrado = c.enquadrar(pct_max_contrato)
             if enquadrado < ticket_minimo:
                 descartadas.append((c, "abaixo_ticket_minimo"))
-                continue
-            if enquadrado > ticket_maximo:
-                descartadas.append((c, "acima_ticket_maximo"))
                 continue
             aprovadas.append(c)
 

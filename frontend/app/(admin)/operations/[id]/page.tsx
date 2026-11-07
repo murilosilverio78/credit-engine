@@ -372,6 +372,11 @@ function Topbar({
       >
         {manualReview ? "aguardando certidões" : operation.status}
       </span>
+      {operation.selo_excecao_ticket_maximo ? (
+        <span className="rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-900">
+          {operation.selo_excecao_ticket_maximo}
+        </span>
+      ) : null}
     </header>
   );
 }

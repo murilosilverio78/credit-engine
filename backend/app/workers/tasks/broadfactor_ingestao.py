@@ -182,8 +182,6 @@ def _triage_reason(
     enquadrado = cotacao.enquadrar(pct_max_contrato)
     if enquadrado < ticket_minimo:
         return "abaixo_ticket_minimo"
-    if enquadrado > ticket_maximo:
-        return "acima_ticket_maximo"
     return None
 
 
@@ -724,7 +722,7 @@ async def _run_broadfactor_ingestao(
                     _persist_quote(
                         supabase,
                         pending_quote,
-                        pending_quote.enquadrar(pct_max_contrato),
+                        min(pending_quote.enquadrar(pct_max_contrato), float(params["ticket_maximo"])),
                     )
                     _update_quote_status(
                         supabase,
@@ -747,7 +745,7 @@ async def _run_broadfactor_ingestao(
             )
             break
         try:
-            valor_enquadrado = cotacao.enquadrar(pct_max_contrato)
+            valor_enquadrado = min(cotacao.enquadrar(pct_max_contrato), float(params["ticket_maximo"]))
             _persist_quote(supabase, cotacao, valor_enquadrado)
             state = _load_quote_state(supabase, cotacao.id)
             estagio = state.get("estagio") or "LISTA_ESPERA"

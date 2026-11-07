@@ -75,6 +75,7 @@ class Supabase:
                     "cotacao_id": "C-1",
                     "operation_id": "op-1",
                     "estagio": stage,
+                    "saldo_vincendo": 2_000_000,
                 }]
                 if include_quote
                 else []
@@ -122,7 +123,9 @@ def test_qualified_quote_without_score_schedules_report_and_audits(monkeypatch):
     assert background.tasks[0].func.__name__ == "start_report_analysis"
     assert background.tasks[0].args == ("op-1",)
     assert audit_entries[0]["action"] == "relatorio_solicitado"
-    assert audit_entries[0]["payload"] == {"cotacao_id": "C-1", "valor_operacao": None, "valor_origem": None}
+    assert audit_entries[0]["payload"]["cotacao_id"] == "C-1"
+    assert audit_entries[0]["payload"]["valor_operacao"] is None
+    assert audit_entries[0]["payload"]["excecao_ticket_maximo"] is False
 
 
 def test_operation_detail_returns_report_operation_value(monkeypatch):
@@ -216,3 +219,40 @@ def test_generated_report_cannot_be_requested_again(
 
     assert exc.value.status_code == 409
     assert exc.value.detail["code"] == "REPORT_ALREADY_GENERATED"
+
+
+def test_report_ticket_exception_requires_director_and_records_complete_audit(monkeypatch):
+    audit_entries = []
+    monkeypatch.setattr(operations, "supabase", Supabase())
+    monkeypatch.setattr(operations, "_operation_snapshot", lambda _id: {"id": "op-1", "status": "aguardando_relatorio", "rating": None, "valor_enquadrado": 700_000})
+    monkeypatch.setattr(operations, "audit", SimpleNamespace(log=lambda **kwargs: audit_entries.append(kwargs)))
+    monkeypatch.setattr("app.services.eligibility_params_service.get_eligibility_config", lambda: {"ticket_minimo": 100_000, "ticket_maximo": 700_000, "pct_max_contrato": 0.5})
+
+    result = asyncio.run(operations.generate_operation_report(
+        "op-1", BackgroundTasks(), request(), {"id": "d-1", "role": "diretor"},
+        operations.ReportRequest(valor_operacao=800_000, acima_ticket_maximo=True, justificativa="Exceção aprovada pelo diretor"),
+    ))
+
+    assert result["status"] == "accepted"
+    assert audit_entries[0]["payload"] == {
+        "cotacao_id": "C-1", "valor_operacao": 800_000, "valor_origem": "valor_operacao_relatorio",
+        "excecao_ticket_maximo": True, "ticket_maximo": 700_000,
+        "enquadravel_contrato": 1_000_000.0, "justificativa": "Exceção aprovada pelo diretor",
+    }
+
+
+@pytest.mark.parametrize(
+    ("user", "payload", "status"),
+    [
+        ({"id": "g-1", "role": "gerente"}, operations.ReportRequest(valor_operacao=800_000, acima_ticket_maximo=True, justificativa="Exceção aprovada pelo diretor"), 403),
+        ({"id": "d-1", "role": "diretor"}, operations.ReportRequest(valor_operacao=800_000, acima_ticket_maximo=True, justificativa="curta"), 422),
+        ({"id": "d-1", "role": "diretor"}, operations.ReportRequest(valor_operacao=1_000_001, acima_ticket_maximo=True, justificativa="Exceção aprovada pelo diretor"), 422),
+    ],
+)
+def test_report_ticket_exception_rejects_invalid_request(monkeypatch, user, payload, status):
+    monkeypatch.setattr(operations, "supabase", Supabase())
+    monkeypatch.setattr(operations, "_operation_snapshot", lambda _id: {"id": "op-1", "status": "aguardando_relatorio", "rating": None, "valor_enquadrado": 700_000})
+    monkeypatch.setattr("app.services.eligibility_params_service.get_eligibility_config", lambda: {"ticket_minimo": 100_000, "ticket_maximo": 700_000, "pct_max_contrato": 0.5})
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(operations.generate_operation_report("op-1", BackgroundTasks(), request(), user, payload))
+    assert exc.value.status_code == status

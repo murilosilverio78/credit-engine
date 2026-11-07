@@ -421,6 +421,18 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
                 f"{money(operation.get('valor_operacao_relatorio'))} · cotação: {optional_money(operation.get('valor_solicitado'))}",
             ),
         )
+    exception_ticket_note = ""
+    try:
+        from app.services.eligibility_params_service import get_eligibility_config
+
+        ticket_maximo = float(get_eligibility_config()["ticket_maximo"])
+        if float(operation.get("valor_operacao_relatorio") or 0) > ticket_maximo:
+            exception_ticket_note = (
+                f'<p class="risk-callout"><strong>Acima do ticket máximo da política '
+                f'({money(ticket_maximo)}).</strong></p>'
+            )
+    except (KeyError, TypeError, ValueError):
+        pass
     conference = detail_grid(conference_rows, 3 if len(conference_rows) > 5 else 5)
     concentration_block = ""
     if concentration:
@@ -457,6 +469,7 @@ def cover_section(operation: dict[str, Any], snapshots: dict[str, dict[str, Any]
       <div class="metrics">{metrics}</div>
       <h2>Conferência da operação</h2>
       {conference}
+      {exception_ticket_note}
       {concentration_block}
       <div class="split">
         <div>

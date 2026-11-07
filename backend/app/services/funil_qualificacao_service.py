@@ -324,11 +324,11 @@ def _capacidade_do_contrato(
         )
     except ValueError:
         return None
-    base = _as_float(
+    base = min(_as_float(
         operation.get("valor_enquadrado_pre_capacidade")
         if operation.get("valor_enquadrado_pre_capacidade") not in (None, "")
         else operation.get("valor_enquadrado")
-    )
+    ), _as_float(params.get("ticket_maximo")) or float("inf"))
     capacity = _as_float(result["capacidade"])
     framed = floor(min(base, capacity) / 1000) * 1000
     valor_atual = _as_float(operation.get("valor_enquadrado"))

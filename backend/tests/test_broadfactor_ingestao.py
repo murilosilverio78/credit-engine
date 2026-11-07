@@ -215,6 +215,29 @@ async def test_every_quote_is_persisted_and_only_eligible_quote_reaches_stage_tw
 
 
 @pytest.mark.asyncio
+async def test_ticket_maximum_caps_the_framed_value_without_stopping_triage(monkeypatch):
+    """D4: a cotação acima do teto entra no funil com o valor limitado."""
+    original = PARAMS.copy()
+    PARAMS.update({"ticket_maximo": 700_000, "pct_max_contrato": 0.5})
+    try:
+        # 1.626.770,44 enquadráveis a 50% do saldo/margem usado pela cotação.
+        high = quote("C-capped", valor=1_626_770.44)
+        high.margem_disponivel = 3_253_540.88
+        database, _, _ = install_funnel(monkeypatch, [high])
+
+        await broadfactor_ingestao.run_broadfactor_ingestao()
+        await broadfactor_ingestao.run_broadfactor_ingestao()
+
+        row = database.quotes["C-capped"]
+        assert row["valor_enquadrado"] == 700_000
+        assert row["estagio"] == "ENQUADRADA"
+        assert row.get("estagio_motivo") != "acima_ticket_maximo"
+    finally:
+        PARAMS.clear()
+        PARAMS.update(original)
+
+
+@pytest.mark.asyncio
 async def test_stage_two_stays_enquadrada_without_document(monkeypatch):
     database, created, analyses = install_funnel(
         monkeypatch,

@@ -7,6 +7,12 @@ from app.api.v1.endpoints.cotacoes import montar_resumo
 from tests.fakes.postgrest import Postgrest
 
 
+@pytest.fixture(autouse=True)
+def _fixed_eligibility_parameters(monkeypatch):
+    """Mantém os fixtures unitários isolados de Supabase."""
+    monkeypatch.setattr(cotacoes, "_params", lambda: {"ticket_minimo": 50_000, "ticket_maximo": 700_000, "pct_max_contrato": 0.5})
+
+
 def _quote(cotacao_id, stage, motivo=None, **extra):
     return {
         "cotacao_id": cotacao_id, "cnpj": "00000000000100", "nome_fornecedor": "Fornecedor teste",
@@ -41,7 +47,7 @@ def test_apollo_ticket_maximo_summary():
     )
     assert summary["selo"]["classe"] == "COMERCIAL"
     assert summary["motivos"][0]["titulo"] == "Valor acima do ticket máximo"
-    assert {action["id"] for action in summary["acoes"]} == {"reenquadrar", "arquivar"}
+    assert {action["id"] for action in summary["acoes"]} == {"arquivar"}
     assert summary["consultas"]["titulo"] == "REGRAS APLICADAS (SEM CUSTO)"
 
 
@@ -108,13 +114,12 @@ def test_list_rules_use_real_type_and_minimum_ticket_reason():
     assert "Documentos Broadfactor" not in rows
 
 
-def test_reenquadrar_uses_the_proposal_evidence_and_enquadrada_shows_documents():
+def test_legacy_ticket_reason_only_offers_archive_and_enquadrada_shows_documents():
     summary = montar_resumo(
         _quote("C-apollo", "LISTA_ESPERA", "acima_ticket_maximo", tipo="CONTRATO", valor_enquadrado=1_626_770.44),
         None, {}, {}, parametros={"ticket_maximo": 700_000},
     )
-    assert summary["acoes"][0]["rotulo"] == "Reenquadrar em R$ 700.000,00"
-    assert summary["acoes"][0]["rotulo"].removeprefix("Reenquadrar em ") == next(e["valor"] for e in summary["motivos"][0]["evidencias"] if e["rotulo"] == "Proposta possível")
+    assert [action["id"] for action in summary["acoes"]] == ["arquivar"]
     enquadrada = montar_resumo(_quote("C-jjx", "ENQUADRADA", "sem_documentos_broadfactor", tipo="CONTRATO"), None, {}, {})
     assert any(row["nome"] == "Documentos Broadfactor" for row in enquadrada["consultas"]["itens"])
 

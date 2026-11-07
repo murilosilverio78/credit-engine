@@ -4,6 +4,7 @@ export type CotacaoResumoClasse = "EM_ANDAMENTO" | "COMERCIAL" | "CLIENTE" | "RE
 export interface CotacaoResumo {
   cotacao_id: string; operation_id: string | null; cnpj: string; razao_social: string | null; contrato: string | null; aba_origem: string;
   selo: { texto: string; classe: CotacaoResumoClasse };
+  selo_excecao_ticket_maximo?: string | null; enquadravel_contrato?: number;
   kpis: Array<{ rotulo: string; valor: number | string | null; formato: "BRL" | "DATA"; nota: string | null }>;
   trilha: { estagio_atual: FunilEstagio; estagio_max: FunilEstagio | null; encerrada: boolean };
   parada: { classe: CotacaoResumoClasse; parou_em: string | null; titulo: string; resumo: string };
@@ -96,6 +97,8 @@ export interface Operation {
   capacidade_explicacao?: CapacidadeExplicacao | null;
   flags_funil?: string[];
   valor_operacao_relatorio?: number | null;
+  selo_excecao_ticket_maximo?: string | null;
+  enquadravel_contrato?: number | null;
   saldo_vincendo?: number | null;
   prazo_dias?: number | null;
   prazo_final_meses?: number | null;

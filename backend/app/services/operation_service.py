@@ -254,6 +254,22 @@ class OperationService:
         operation["capacidade_explicacao"] = explicar_capacidade(
             operation.get("capacidade_memoria"), parametros_capacidade
         )
+        try:
+            ticket_maximo = float(parametros_capacidade["ticket_maximo"])
+            pct_max_contrato = float(parametros_capacidade["pct_max_contrato"])
+            valor_relatorio = float(operation.get("valor_operacao_relatorio") or 0)
+            operation["enquadravel_contrato"] = pct_max_contrato * float(
+                operation.get("saldo_vincendo") or operation.get("contrato_saldo") or 0
+            )
+            ticket_formatado = f"R$ {ticket_maximo:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            operation["selo_excecao_ticket_maximo"] = (
+                f"Acima do ticket máximo da política ({ticket_formatado})"
+                if valor_relatorio > ticket_maximo
+                else None
+            )
+        except (KeyError, TypeError, ValueError):
+            operation["selo_excecao_ticket_maximo"] = None
+            operation["enquadravel_contrato"] = None
 
         snapshots_query = supabase.table("component_snapshots")\
             .select("component, status, score_contrib, duration_ms, error_message, completed_at, parsed_result")\

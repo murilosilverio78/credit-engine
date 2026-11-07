@@ -21,10 +21,12 @@ audit = AuditService()
 
 class JustificativaInput(BaseModel):
     justificativa: str | None = None
+    valor_operacao: float | None = None
+    acima_ticket_maximo: bool = False
 
 
 class CotacaoAuditAction:
-    action: Literal["quote_reframed", "quote_free_checks_requested", "quote_full_analysis_requested", "quote_archived"]
+    action: Literal["quote_free_checks_requested", "quote_full_analysis_requested", "quote_archived"]
 
 
 def _quote(cotacao_id: str) -> dict[str, Any]:
@@ -50,8 +52,7 @@ def _audit(action: CotacaoAuditAction, quote: dict[str, Any], current_user: dict
         payload={"cotacao_id": quote["cotacao_id"], "alcada": current_user.get("alcada") or current_user.get("role"), **payload},
         previous_value=previous, new_value=new,
     )
-    if action == "quote_reframed": audit.log(action="quote_reframed", **data)
-    elif action == "quote_free_checks_requested": audit.log(action="quote_free_checks_requested", **data)
+    if action == "quote_free_checks_requested": audit.log(action="quote_free_checks_requested", **data)
     elif action == "quote_full_analysis_requested": audit.log(action="quote_full_analysis_requested", **data)
     else: audit.log(action="quote_archived", **data)
 
@@ -170,8 +171,7 @@ def montar_resumo(cotacao: dict[str, Any], operation: dict[str, Any] | None, sna
     ]
     actions: list[dict[str, Any]] = []
     if classe == "COMERCIAL":
-        proposal = next((e["valor"] for item in motivos for e in item["evidencias"] if e["rotulo"] == "Proposta possível"), "—")
-        actions = [{"id": "reenquadrar", "rotulo": f"Reenquadrar em {proposal}", "nota": "Leva para Enquadrada e registra na trilha de auditoria.", "habilitada": True, "motivo_bloqueio": None, "exige_justificativa": False}, {"id": "arquivar", "rotulo": "Arquivar", "nota": "Tira da fila sem contato com o cliente.", "habilitada": True, "motivo_bloqueio": None, "exige_justificativa": False}]
+        actions = [{"id": "arquivar", "rotulo": "Arquivar", "nota": "Tira da fila sem contato com o cliente.", "habilitada": True, "motivo_bloqueio": None, "exige_justificativa": False}]
     elif classe == "CLIENTE":
         actions = [{"id": "pedir_documentos", "rotulo": "Pedir documentos ao cliente", "nota": "Abre mensagem pronta para WhatsApp.", "habilitada": True, "motivo_bloqueio": None, "exige_justificativa": False, "mensagem": _missing_documents_message(cotacao, motivos)}, {"id": "consultas_gratuitas", "rotulo": "Rodar consultas gratuitas mesmo assim", "nota": "Libera seguir sem documentos.", "habilitada": True, "motivo_bloqueio": None, "exige_justificativa": False}]
     elif classe in {"CREDITO", "VETO", "REVISAR_DADO"}:
@@ -201,27 +201,11 @@ def montar_resumo(cotacao: dict[str, Any], operation: dict[str, Any] | None, sna
     resumo = summaries[classe]
     if len(motivos) > 1 and first:
         resumo = f"{len(motivos)} motivos; {first['titulo']} prevalece. {resumo}"
-    return {"cotacao_id": cotacao.get("cotacao_id"), "operation_id": cotacao.get("operation_id"), "cnpj": cotacao.get("cnpj"), "razao_social": cotacao.get("nome_fornecedor") or (operation or {}).get("razao_social"), "contrato": contract_label, "aba_origem": aba, "selo": {"texto": labels[classe], "classe": classe}, "kpis": kpis, "trilha": {"estagio_atual": stage, "estagio_max": cotacao.get("estagio_max"), "encerrada": classe == "ENCERRADA"}, "parada": {"classe": classe, "parou_em": cotacao.get("estagio_atualizado_em"), "titulo": first["titulo"] if first else "Passou em todos os filtros gratuitos", "resumo": resumo}, "motivos": motivos, "acoes": actions, "consultas": _consultas(snapshots, statuses, stage, cotacao)}
-
-
-@router.post("/{cotacao_id}/reenquadrar")
-async def reenquadrar_cotacao(cotacao_id: str, request: Request, current_user: dict = Depends(get_current_user)):
-    cotacao = _quote(cotacao_id)
-    motivo = cotacao.get("estagio_motivo") or ""
-    if "acima_ticket_maximo" not in motivo:
-        if cotacao.get("estagio") == "ENQUADRADA":
-            return {"cotacao_id": cotacao_id, "status": "already_reframed", "idempotent": True}
-        raise HTTPException(status_code=409, detail="Reenquadramento só é permitido para valor acima do ticket máximo")
-    maximum = _params().get("ticket_maximo")
-    if maximum is None:
-        raise HTTPException(status_code=409, detail="Ticket máximo indisponível")
-    before = cotacao.get("valor_enquadrado")
-    after = min(float(before or maximum), float(maximum))
-    from app.workers.tasks.broadfactor_ingestao import _update_quote_stage
-    _update_quote_stage(supabase, cotacao_id, "ENQUADRADA", motivo="sem_documentos_broadfactor", operation_id=cotacao.get("operation_id"), n_documentos=cotacao.get("n_documentos") or 0, estagio_max=cotacao.get("estagio_max"))
-    supabase.table("cotacoes_broadfactor").update({"valor_enquadrado": after}).eq("cotacao_id", cotacao_id).execute()
-    _audit("quote_reframed", cotacao, current_user, request, payload={"motivo": "acima_ticket_maximo"}, previous={"valor_enquadrado": before}, new={"valor_enquadrado": after})
-    return {"cotacao_id": cotacao_id, "valor_enquadrado": after, "status": "reframed"}
+    ticket_maximo = (parametros if parametros is not None else _params()).get("ticket_maximo")
+    enquadravel_contrato = float((parametros if parametros is not None else _params()).get("pct_max_contrato") or 0) * float(cotacao.get("saldo_vincendo") or 0)
+    valor_relatorio = (operation or {}).get("valor_operacao_relatorio")
+    excecao = ticket_maximo is not None and valor_relatorio is not None and float(valor_relatorio) > float(ticket_maximo)
+    return {"cotacao_id": cotacao.get("cotacao_id"), "operation_id": cotacao.get("operation_id"), "cnpj": cotacao.get("cnpj"), "razao_social": cotacao.get("nome_fornecedor") or (operation or {}).get("razao_social"), "contrato": contract_label, "aba_origem": aba, "selo": {"texto": labels[classe], "classe": classe}, "selo_excecao_ticket_maximo": f"Acima do ticket máximo da política ({_brl(ticket_maximo)})" if excecao else None, "enquadravel_contrato": enquadravel_contrato, "kpis": kpis, "trilha": {"estagio_atual": stage, "estagio_max": cotacao.get("estagio_max"), "encerrada": classe == "ENCERRADA"}, "parada": {"classe": classe, "parou_em": cotacao.get("estagio_atualizado_em"), "titulo": first["titulo"] if first else "Passou em todos os filtros gratuitos", "resumo": resumo}, "motivos": motivos, "acoes": actions, "consultas": _consultas(snapshots, statuses, stage, cotacao)}
 
 
 @router.post("/{cotacao_id}/consultas-gratuitas", status_code=202)
@@ -259,11 +243,21 @@ async def solicitar_analise_completa(cotacao_id: str, payload: JustificativaInpu
     classe = max((item["classe"] for item in motivos), key=lambda item: _SEVERITY[item], default="EM_ANDAMENTO")
     requires_reason = classe in {"CREDITO", "REVISAR_DADO"}
     justificativa = (payload.justificativa or "").strip()
-    if requires_reason and len(justificativa) < 10:
+    excecao_teto = payload.acima_ticket_maximo
+    if (requires_reason or excecao_teto) and len(justificativa) < 10:
         raise HTTPException(status_code=422, detail="Justificativa de pelo menos 10 caracteres é obrigatória")
+    config = _params()
+    valor_operacao = payload.valor_operacao
+    enquadravel_contrato = float(config.get("pct_max_contrato") or 0) * float(cotacao.get("saldo_vincendo") or 0)
+    if excecao_teto:
+        if current_user.get("role") != "diretor":
+            raise HTTPException(status_code=403, detail="Exceção ao ticket máximo exige alçada diretor")
+        if valor_operacao is None or not float(config.get("ticket_maximo") or 0) < float(valor_operacao) <= enquadravel_contrato:
+            raise HTTPException(status_code=422, detail={"code": "REPORT_TICKET_EXCEPTION_AMOUNT_OUT_OF_RANGE", "ticket_maximo": config.get("ticket_maximo"), "enquadravel_contrato": enquadravel_contrato})
+        supabase.table("operations").update({"valor_operacao_relatorio": valor_operacao}).eq("id", operation["id"]).execute()
     if operation.get("status") in {"processing", "pending"}:
         return {"cotacao_id": cotacao_id, "operation_id": operation["id"], "status": "accepted", "idempotent": True}
-    _audit("quote_full_analysis_requested", cotacao, current_user, request, payload={"justificativa": justificativa or None, "motivos": [item["codigo_origem"] for item in motivos]})
+    _audit("quote_full_analysis_requested", cotacao, current_user, request, payload={"justificativa": justificativa or None, "motivos": [item["codigo_origem"] for item in motivos], "excecao_ticket_maximo": excecao_teto, "ticket_maximo": config.get("ticket_maximo"), "enquadravel_contrato": enquadravel_contrato, "valor_operacao": valor_operacao})
     supabase.table("operations").update({"status": "processing"}).eq("id", operation["id"]).execute()
     from app.workers.tasks.orchestrator import start_report_analysis
     background_tasks.add_task(start_report_analysis, str(operation["id"]))

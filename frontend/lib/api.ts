@@ -196,9 +196,8 @@ export function getCotacaoResumo(cotacaoId: string) {
   return request<CotacaoResumo>(`/api/v1/cotacoes/${encodeURIComponent(cotacaoId)}/resumo`);
 }
 
-export function reframeQuote(cotacaoId: string) { return request(`/api/v1/cotacoes/${encodeURIComponent(cotacaoId)}/reenquadrar`, { method: "POST" }); }
 export function requestQuoteFreeChecks(cotacaoId: string) { return request(`/api/v1/cotacoes/${encodeURIComponent(cotacaoId)}/consultas-gratuitas`, { method: "POST" }); }
-export function requestQuoteFullAnalysis(cotacaoId: string, justificativa?: string) { return request(`/api/v1/cotacoes/${encodeURIComponent(cotacaoId)}/analise-completa`, { method: "POST", body: JSON.stringify({ justificativa }) }); }
+export function requestQuoteFullAnalysis(cotacaoId: string, justificativa?: string, valor_operacao?: number, acima_ticket_maximo = false) { return request(`/api/v1/cotacoes/${encodeURIComponent(cotacaoId)}/analise-completa`, { method: "POST", body: JSON.stringify({ justificativa, valor_operacao, acima_ticket_maximo }) }); }
 export function archiveQuote(cotacaoId: string, justificativa?: string) { return request(`/api/v1/cotacoes/${encodeURIComponent(cotacaoId)}/arquivar`, { method: "POST", body: JSON.stringify({ justificativa }) }); }
 
 export function recollectOperation(operationId: string) {
@@ -244,6 +243,8 @@ export function reprocessOperationScore(operationId: string, valorOperacao?: num
 export function generateOperationReport(
   operationId: string,
   valorOperacao?: number,
+  justificativa?: string,
+  acimaTicketMaximo = false,
 ) {
   return request<{
     message: string;
@@ -251,7 +252,7 @@ export function generateOperationReport(
     status: "accepted";
   }>(`/api/v1/operations/${encodeURIComponent(operationId)}/relatorio`, {
     method: "POST",
-    body: valorOperacao === undefined ? undefined : JSON.stringify({ valor_operacao: valorOperacao }),
+    body: valorOperacao === undefined ? undefined : JSON.stringify({ valor_operacao: valorOperacao, justificativa, acima_ticket_maximo: acimaTicketMaximo }),
   });
 }
 

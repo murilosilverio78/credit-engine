@@ -11,7 +11,7 @@ const base = (id: string, classe: string, motivo: string[] = [], acoes: Array<{ 
 });
 
 const cases = [
-  ["apollo", base("apollo", "COMERCIAL", ["Valor acima do ticket máximo"], [{ id: "reenquadrar", habilitada: true }, { id: "arquivar", habilitada: true }])],
+  ["apollo", base("apollo", "COMERCIAL", ["Valor acima do ticket máximo"], [{ id: "arquivar", habilitada: true }])],
   ["jjx", base("jjx", "CLIENTE", ["Nenhum documento na Broadfactor"], [{ id: "pedir_documentos", habilitada: true, mensagem: "Olá, envie os documentos.\n\nEquipe AntecipaGov" }, { id: "consultas_gratuitas", habilitada: true }])],
   ["orbenk", base("orbenk", "VETO", ["Sanção ativa no CEIS", "Capacidade do contrato zerada"], [{ id: "recoletar", habilitada: true }, { id: "enviar_analise_completa", habilitada: false, motivo_bloqueio: "Bloqueado: existe veto ativo" }])],
   ["proclima", base("proclima", "EM_ANDAMENTO", [], [{ id: "gerar_relatorio", habilitada: true }])],
@@ -44,9 +44,23 @@ test.describe("20 - cotação por estágio", () => {
       await expect(page.getByText("Síntese sem repetir o motivo")).toBeVisible();
       if (id === "orbenk") { await expect(page.getByTestId("evidencia-0-0")).toContainText("Prefeitura Municipal de Porto Alegre"); await expect(page.getByTestId("evidencia-0-1")).toContainText("05/05/2027"); await expect(page.getByText("Bloqueado: existe veto ativo")).toBeVisible(); }
       if (id === "jjx") { await page.getByTestId("acao-pedir_documentos").click(); await expect(page.getByText("Mensagem copiada")).toBeVisible(); await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("Equipe AntecipaGov"); }
+      if (id === "proclima") { await page.getByTestId("acao-gerar_relatorio").click(); await expect(page.getByLabel("Analisar acima do ticket máximo")).toBeVisible(); }
       await page.waitForTimeout(12_000);
       expect(calls).toBe(1);
       if (id === "green") { await expect(page.getByText("Expiraria em")).toBeVisible(); await expect(page.getByText("saiu antes do prazo")).toBeVisible(); }
     });
   }
+
+  test("checkbox de exceção não aparece para gerente", async ({ gerentePage }, testInfo) => {
+    skipIfNoCredentials(testInfo, "gerente");
+    const page = gerentePage;
+    const fixture = { ...base("proclima-gerente", "EM_ANDAMENTO", [], [{ id: "gerar_relatorio", habilitada: true }]), operation_id: "op-gerente" };
+    await page.route("**/api/v1/auth/me", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ user: { id: "gerente", email: "gerente@teste.local", name: "Gerente de teste", role: "gerente", alcada: "gerente" } }) }));
+    await page.route("**/api/v1/cotacoes/*/resumo", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(fixture) }));
+    await page.route("**/api/v1/pricing/parameters", async (route) => route.fulfill({ contentType: "application/json", body: "[]" }));
+    await page.route("**/api/v1/elegibilidade/parameters", async (route) => route.fulfill({ contentType: "application/json", body: "[]" }));
+    await page.goto("/cotacoes/proclima-gerente");
+    await page.getByTestId("acao-gerar_relatorio").click();
+    await expect(page.getByLabel("Analisar acima do ticket máximo")).toHaveCount(0);
+  });
 });

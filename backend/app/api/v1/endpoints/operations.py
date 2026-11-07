@@ -71,6 +71,8 @@ class ApprovalInput(BaseModel):
 
 class ReportRequest(BaseModel):
     valor_operacao: Optional[float] = None
+    acima_ticket_maximo: bool = False
+    justificativa: Optional[str] = None
 
 
 class ResolveEscalationInput(BaseModel):
@@ -689,7 +691,7 @@ async def generate_operation_report(
 
     quote = (
         supabase.table("cotacoes_broadfactor")
-        .select("cotacao_id,estagio")
+        .select("cotacao_id,estagio,saldo_vincendo")
         .eq("operation_id", operation_id)
         .maybe_single()
         .execute()
@@ -706,12 +708,31 @@ async def generate_operation_report(
         )
 
     valor_operacao = payload.valor_operacao if payload else None
-    if valor_operacao is not None:
+    excecao_teto = bool(payload and payload.acima_ticket_maximo)
+    justificativa = (payload.justificativa or "").strip() if payload else ""
+    config: dict[str, float] | None = None
+    if valor_operacao is not None or excecao_teto:
         from app.services.eligibility_params_service import get_eligibility_config
 
+        try:
+            config = get_eligibility_config()
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "INVALID_REPORT_OPERATION_AMOUNT", "message": "Parâmetros de elegibilidade indisponíveis."},
+            ) from exc
+    if excecao_teto:
+        if current_user.get("role") != "diretor":
+            raise HTTPException(status_code=403, detail="Exceção ao ticket máximo exige alçada diretor")
+        if len(justificativa) < 10:
+            raise HTTPException(status_code=422, detail="Justificativa de pelo menos 10 caracteres é obrigatória")
+        if valor_operacao is None:
+            raise HTTPException(status_code=422, detail={"code": "REPORT_TICKET_EXCEPTION_AMOUNT_OUT_OF_RANGE"})
+    if valor_operacao is not None:
+        assert config is not None
         valor_enquadrado = operation.get("valor_enquadrado")
         try:
-            ticket_minimo = float(get_eligibility_config()["ticket_minimo"])
+            ticket_minimo = float(config["ticket_minimo"])
             limite = float(valor_enquadrado)
             valor_operacao = float(valor_operacao)
         except (KeyError, TypeError, ValueError) as exc:
@@ -722,7 +743,12 @@ async def generate_operation_report(
                     "message": "Valor da operação indisponível para precificação.",
                 },
             ) from exc
-        if not ticket_minimo <= valor_operacao <= limite:
+        if excecao_teto:
+            ticket_maximo = float(config["ticket_maximo"])
+            limite = float(config["pct_max_contrato"]) * float(quote_data.get("saldo_vincendo") or 0)
+            if not ticket_maximo < valor_operacao <= limite:
+                raise HTTPException(status_code=422, detail={"code": "REPORT_TICKET_EXCEPTION_AMOUNT_OUT_OF_RANGE", "ticket_maximo": ticket_maximo, "enquadravel_contrato": limite})
+        elif not ticket_minimo <= valor_operacao <= limite:
             raise HTTPException(
                 status_code=422,
                 detail={
@@ -746,6 +772,10 @@ async def generate_operation_report(
             "cotacao_id": quote_data.get("cotacao_id"),
             "valor_operacao": valor_operacao,
             "valor_origem": "valor_operacao_relatorio" if valor_operacao is not None else None,
+            "excecao_ticket_maximo": excecao_teto,
+            "ticket_maximo": config.get("ticket_maximo") if config is not None else None,
+            "enquadravel_contrato": limite if excecao_teto else None,
+            "justificativa": justificativa or None,
         },
     )
 
