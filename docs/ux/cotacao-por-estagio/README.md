@@ -23,7 +23,8 @@ Caso real: ORBENK, cotação C-1793047365028, operação aa8d8ae1. Reprovada por
 | D1 | Uma tela única por **cotação**, com esqueleto fixo e conteúdo por estágio (não uma tela por aba) |
 | D2 | Reprovação de crédito que **não é veto** ganha o botão "Enviar para análise completa", liberado para **qualquer alçada** (analista, gerente, diretor), com justificativa obrigatória (mínimo 10 caracteres) e registro na trilha de auditoria. Com veto presente, o botão aparece desabilitado com o texto "Bloqueado: existe veto ativo" |
 | D3 | Cotação parada por falta de documentos ganha o botão "Rodar consultas gratuitas mesmo assim" |
-| D4 | Valor acima do ticket máximo ganha "Reenquadrar em R$ X", com X = min(valor enquadrável, ticket_maximo) |
+| D4 | (revisada em 07/11/2026) A triagem não reprova mais por valor acima do ticket máximo: limita o valor enquadrado ao ticket máximo e a cotação segue no funil. O botão "Reenquadrar" deixa de existir |
+| D6 | (07/11/2026) Exceção ao teto: no diálogo de relatório, só a alçada **diretor** pode analisar acima do ticket máximo, até o enquadrável pelo contrato (pct_max_contrato × saldo vincendo), com justificativa obrigatória, auditoria e selo "Acima do ticket máximo da política" no relatório e na proposta. Limite e taxa continuam determinísticos |
 | D5 | Sanção ativa continua veto sem distinção de esfera (decisão de 16/10/2026); a tela só mostra a abrangência como informação |
 
 ## 3. Esqueleto da tela (de cima para baixo)
@@ -63,7 +64,7 @@ Os códigos de hoje continuam válidos. O que muda é que cada motivo passa a se
 |---|---|---|---|---|
 | `tipo_nao_elegivel:<tipo>` | VETO | Tipo de recebível não elegível | tipo recebido | Arquivar |
 | `abaixo_ticket_minimo` | VETO | Valor abaixo do ticket mínimo | valor pedido, enquadrável, ticket mínimo | Arquivar |
-| `acima_ticket_maximo` | COMERCIAL | Valor acima do ticket máximo | pedido, saldo vincendo, enquadrável, ticket máximo, proposta possível | Reenquadrar em R$ X (D4), Arquivar |
+| `acima_ticket_maximo` (legado; deixa de ser produzido pela D4) | COMERCIAL | Valor acima do ticket máximo | pedido, saldo vincendo, enquadrável, ticket máximo, proposta possível | Arquivar |
 | `janela_expiracao_insuficiente` | VETO | Cotação expira antes do prazo mínimo | expiração, dias restantes, mínimo | nenhuma |
 | `sem_documentos_broadfactor` | CLIENTE | Nenhum documento na Broadfactor | checklist dos documentos esperados (recebido / não recebido) | Pedir documentos ao cliente (mensagem pronta), Rodar consultas gratuitas mesmo assim (D3) |
 | `Sancao ativa ...` (gate de sanções, CEIS/CNEP/CEPIM/CEAF/leniência) | VETO | Sanção ativa no <BASE> | órgão sancionador e esfera, tipo, fundamento, vigência com dias restantes, abrangência, processo e publicação | Copiar mensagem de recusa, Lembrar na data de fim da sanção |
